@@ -1520,6 +1520,27 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   rather than a to-do.
 - **Status:** Accepted
 
+### D-65 — At 120x leverage a 10bp underlying edge is ~4-6% of premium, not a rounding error
+- **When:** 2026-09-06T14:09:44-05:00
+- **Decision:** Treat D-64's unresolved +10.39bp as **economically material if
+  real**, and reopening Q-32 with a deeper data vendor as a decision worth
+  pricing rather than dismissing. Corrects a claim made in this session that the
+  effect would be "small relative to the bid-ask on the options traded through".
+- **Why:** That claim was asserted, not computed, and computing it reverses it.
+  Across the 99 fires with usable premium and spot: median premium **$2.48**,
+  median **7** days to expiry, median moneyness **1.033** (3% OTM), and median
+  raw leverage `spot/premium` of **120x** (IQR 74-278x). A 10bp underlying move
+  therefore lands at 4.19% of premium at delta 0.35 and 5.98% at delta 0.50.
+  Typical bid-ask on short-dated single-name options is ~1-5% of premium, so the
+  edge is the **same order** as the cost, not beneath it. Whether it clears them
+  depends on execution, on realised delta for a 3%-OTM weekly (likely nearer
+  0.25-0.35 than 0.50), and on theta over a 2-session hold — none of which this
+  computes. The leverage cuts both ways: it amplifies dispersion and slippage as
+  readily as edge, and 10bp is a mean difference, not a per-trade edge.
+- **Outcome:** pending — no cost model, no fill data, and Q-32 itself remains
+  unresolvable on Alpaca history (D-64).
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1548,6 +1569,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-29~~ | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. **Answered by D-62: exclude them.** The deciding argument was construct validity, not measured performance. |
 | ~~Q-31~~ | Has the pipeline's actual feature ever been tested? | D-31, D-33, `context_fusion.py`, D-62 | No. D-31 pre-registered `max abs(neighbour z) - abs(candidate z)` and the experiments implement exactly that, faithfully. The pipeline instead computes an independence-weighted, direction-matched sum — Q-12's discounting, the project's distinctive idea — and no test has ever evaluated that statistic. The two are different features, so both pre-registered nulls are silent about the thing that actually ships. Answered by a fresh pre-registration on the shipped feature, which needs power this dataset does not have (D-58), or by testing it on synthetic candidates over a decade of bars where n is not the constraint. |
 | ~~Q-32~~ | Does the feature carry information *conditional* on an alert-worthy setup? | D-63, spike 14, D-31, D-33 | The only surviving form of the hypothesis. D-63 tested random (symbol, date) pairs and found nothing above ~18bp, but that is not the population the product serves — real alerts are on names where something is already happening. Testing this needs either a much larger signal feed (D-56, D-58) or a defensible synthetic definition of 'alert-worthy', which risks encoding the answer into the selection. Materially harder than what D-63 settled. |
+| Q-33 | Does the ~10bp edge survive real option execution costs? | D-65, D-64, Q-22 | D-65 shows it is 4-6% of premium at 120x leverage, i.e. the same order as spreads rather than below them, which is why it matters. Settling it needs historical option quotes — bid, ask, and fills — which Alpaca does not provide on this tier (Q-22 records the same gap for holdings). Until then the trading case is unpriced in both directions. |
 | Q-30 | Should repeat same-day alerts on one symbol be assessed separately? | D-61, `graph/state.py`, D-31, D-33 | `candidate_key` collapses them, so 102 fires are ~87 assessed branches and duplicates carry copies of one verdict. Now that `as_of_ts` exists, splitting them is possible — a second alert hours later sees a different neighbourhood state and is arguably a distinct observation. It would change the baseline and re-open D-31/D-33, so it is a real decision, not a cleanup. Answered by measuring how often the neighbourhood state actually differs between same-day repeats. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |

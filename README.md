@@ -16,24 +16,45 @@ forecast.
 
 ## What it actually found
 
-Over 98 real signals across 24 tickers:
+Over 102 real signals across 24 tickers:
 
 | verdict | n |
 |---|---|
-| neutral | 74 |
-| contradicted | 12 |
-| corroborated | 9 |
+| neutral | 62 |
+| corroborated | 21 |
+| contradicted | 16 |
 | no_assessment | 3 |
 
-Two pre-registered tests of the core premise both came back **inconclusive** —
-D-31 at n=62, D-33 at n=67. Underpowered, not evidence of absence: at ~25 per
-bucket the minimum detectable effect was ~28pp, and both were run knowing that
-(D-30), because waiting two years for power is not a plan. The feed yields ~30
-signals/month, which puts a 15pp-detectable test around May 2027 and a
-10pp one in 2028.
+**The premise does not hold, and that is the main result.** The feature the
+pipeline actually computes — independence-weighted, direction-matched
+neighbourhood evidence — was tested on 19,867 synthetic candidate-dates across
+1,194 sessions, calling the production nodes rather than a reimplementation:
 
-That is the honest state of the hypothesis. `docs/spikes/overall.md` carries the
-working, including the design errors caught after the fact.
+| test | result |
+|---|---|
+| unconditional, 2-session horizon | **−4.6 bp**, z=−0.72, CI [−17.1, +7.9], **MDE 17.9 bp** |
+| intraday lead-lag | **null**, twice; neighbours move *with* the candidate, not before |
+| conditional on mega-cap | +10.4 bp, z=+1.28 — **underpowered**, CI [−5.5, +26.3] |
+
+The first is a *powered* null: it rules out any unconditional effect above
+~18 bp. The two earlier pre-registrations (D-31, D-33) had minimum detectable
+effects of 100.6 pp and 34.2 pp, too blunt to distinguish anything, and they
+tested a simpler proxy statistic rather than the shipped one — which is why the
+shipped feature went four months without a real test (Q-31).
+
+What survives is narrow: a possible ~10 bp effect on mega-caps, which cannot be
+confirmed here. Detecting it needs ~21 years of daily history; Alpaca's begins in
+2016. Even using all of it *and* halving residual variance leaves the minimum
+detectable effect at 10.5 bp against an estimate of 10.4 bp. That is a stopping
+condition, not a to-do.
+
+It is not negligible if real: at the median 120× leverage of the options actually
+traded (7 DTE, 3% OTM, $2.48 premium), 10 bp on the underlying is 4–6% of
+premium — the same order as the spread, not beneath it. Whether it clears
+execution costs is unpriced in both directions (Q-33).
+
+`docs/spikes/overall.md` carries the working, including a 400-sample run that
+reported +115 bp at z=+3.89 before the full sample reversed it.
 
 ## Graph topology
 

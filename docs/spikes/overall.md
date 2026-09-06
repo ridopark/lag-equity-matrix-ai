@@ -1221,6 +1221,25 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   they are falsifiable rather than merely green.
 - **Status:** Accepted
 
+### D-56 — Widen by targeting prolific alerters, not by adding channels
+- **When:** 2026-09-06T00:01:08-05:00
+- **Decision:** Treat Q-24's answer as: the mechanism is trivial (one sidecar per
+  channel, one env var, no author allowlist), but the *targeting* is the whole
+  problem. Prioritise finding channels containing a high-volume alerter over
+  adding channels generally. Spike 13 has the numbers.
+- **Why:** Spike 08 concluded "adding sources scales the dataset linearly" and
+  that is wrong — it assumed ten comparable authors without checking. One author,
+  TradingTheTrend, is 78 of 102 BTO fires (76%) and 186 of 238 STCs (78%); the
+  median contributing author produces ~2 fires per quarter, and three of the ten
+  "authors" are the system and its owner. So a new channel is a draw from a
+  distribution whose mass sits almost entirely in a rare prolific account. One
+  more TradingTheTrend-class source cuts the time to a 15pp-detectable test from
+  8.3 months to 4.5; ten median authors only get it to 5.3. The alternative
+  reading — keep waiting, since 30/month is steady — loses on both counts: it is
+  slower, and it accumulates more of the same author (Q-28).
+- **Outcome:** pending — no channel has been added yet; this records where to aim.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1244,7 +1263,8 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-16~~ | Do we have a history of past signal fires with outcomes? | evaluation | Answered: a few dozen — far too few (detects only ~40pp differences at 80% power). Superseded by D-20: manufacture the set by replaying the signal over history. |
 | ~~Q-20~~ | Do index-ETF candidates get excluded? | D-26 | Answered by spike 06: **no — kept**, with breadth/dispersion as their feature instead of diffusion. See D-28. The premise that an index has no neighbourhood was wrong; it has a different one. |
 | Q-25 | Is the ~1-trading-day holding horizon real, on more than 20 trades? | D-32, D-15, any future label | `hold_minutes` exists only on `trade_context`'s 31 rows (20 with a hold), covering 3 weeks. Reconstruct holding periods for all 98 fires from `EntryFilled` -> `PositionClosed` timestamps in `audit_log` to confirm. Gates the label horizon of every future test. |
-| Q-24 | Can the signal feed be widened beyond 10 authors / 2 channels? | D-30, dataset size | Spike 08: the dataset grows ~30 fires/month and that rate is the binding constraint on ever reaching statistical power. Adding sources scales it linearly — the only lever that shortens an 8-to-23-month timeline, and worth more than any modelling improvement. Owner question for oh-my-tradeagent. |
+| ~~Q-24~~ | Can the signal feed be widened beyond 10 authors / 2 channels? | D-30, dataset size | Spike 08: the dataset grows ~30 fires/month and that rate is the binding constraint on ever reaching statistical power. Adding sources scales it linearly — the only lever that shortens an 8-to-23-month timeline, and worth more than any modelling improvement. Owner question for oh-my-tradeagent. **Answered by spike 13 / D-56:** yes, and it is one env var per channel with no author filter to relax — but the linear-scaling premise was wrong. 76% of the feed is a single author, so the yield of a new channel depends entirely on whether a prolific alerter posts there. |
+| Q-28 | Is the evaluation set generalisable, or is it one trader's selection style? | D-31, D-33, spike 13 | TradingTheTrend is 76% of all BTO fires, so a result from either pre-registration describes that account rather than "options alerts". Waiting cannot fix this — it accumulates more of the same author. Answered by getting a second high-volume source and re-running the pre-registered test per-author, or by reporting every result as single-source and scoping the claim accordingly. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |
@@ -1266,8 +1286,9 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | 05 | [oh-my-tradeagent's audit_log as the upstream signal history](05-oh-my-tradeagent-signal-history.md) | closed Q-16, Q-17, Q-18; raised Q-20, Q-21 | done — read-only queries against live prod |
 | 06 | [ETFs as candidates: reversing Q-20](06-etfs-as-candidates.md) | closed Q-20 (reversed spike 05), raised Q-22 | done — literature + API research |
 | 07 | [Full sweep of the homelab Postgres, and a correction to spike 05](07-db-sweep.md) | **corrected spike 05 (284 fires -> 98)**, closed Q-21, raised Q-23 | done — read-only aggregate queries |
-| 08 | [Cluster-wide sweep: the second Postgres, and the accumulation rate](08-cluster-wide-data-sweep.md) | found `databases/pg-main-1`; established ~30 fires/month; raised Q-24 | done — read-only |
+| 08 | [Cluster-wide sweep: the second Postgres, and the accumulation rate](08-cluster-wide-data-sweep.md) | found `databases/pg-main-1`; established ~30 fires/month; raised Q-24. **Its linearity claim is corrected by spike 13** — the feed is one author, not ten | done — read-only |
 | 09 | [The pre-registered test: null, and why it is uninformative](09-first-test-result.md) | executed D-31 (null, n=2 fired); **corrected Q-17 via D-32**; raised Q-25 | done — pilot, not evidence |
 | 10 | [The second pre-registered test: directionally right, statistically silent](10-second-test-result.md) | executed D-33 (+7.2pp, z=0.60, MDD 34.2pp) | done — **inconclusive; stopping rule invoked** |
 | 11 | [LangGraph idioms: what the current build gets wrong](11-langgraph-idioms.md) | produced D-35 | done — docs research against langgraph 1.2.11 |
 | 12 | [LangGraph 1.2.11 behaviour, probed rather than read](12-langgraph-v1-behaviour.md) | evidence for D-44/D-46/D-47; records 8 failed claims | done — 14 probes, all re-probed during execution |
+| 13 | [Widening the signal feed: what the 30/month is actually made of](13-widening-the-signal-feed.md) | answered Q-24; corrected spike 08's linearity claim; raised Q-28 | done — read-only |

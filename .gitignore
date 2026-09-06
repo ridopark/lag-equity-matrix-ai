@@ -9,8 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
-# Local env
-.env
+# Local env. .env.example is the committed template; every other variant is local.
+.env*
+!.env.example
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -27,6 +28,14 @@ data/*
 # vendor price data or the tickers and dates the signal feed actually fired on.
 # scripts/build_fixture.py regenerates the fixtures from data/.
 tests/fixtures/
+
+# Data by kind, not only by location. Everything above is path-based, so a bar
+# pull, an extract or a checkpoint written anywhere else would not be caught.
+# Nothing of these types is meant to be tracked; add an explicit negation if
+# that ever changes, rather than loosening these.
+*.parquet
+*.sqlite
+*.sqlite3
 
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json

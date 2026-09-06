@@ -15,8 +15,11 @@ wheels/
 .ruff_cache/
 .mypy_cache/
 
-# experiment data (not committed)
-data/
+# experiment data (not committed) -- data/* not data/, so the negation below
+# is consulted; git never descends into an excluded *directory*.
+data/*
+# ...except the golden file scripts/check_baseline.py diffs against.
+!data/baseline-98.csv
 
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json

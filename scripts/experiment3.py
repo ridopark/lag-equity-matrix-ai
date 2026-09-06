@@ -75,6 +75,9 @@ def main() -> None:
     ap.add_argument("--sample", type=int, default=20000)
     ap.add_argument("--seed", type=int, default=20260906)
     ap.add_argument("--out", default="data/results3.csv")
+    ap.add_argument("--top-liquid", type=int, default=0,
+                    help="restrict CANDIDATES to the N most liquid non-fund names "
+                         "(D-64); neighbourhoods still use the full pool")
     args = ap.parse_args()
 
     bars = pd.read_parquet(args.bars)
@@ -93,6 +96,14 @@ def main() -> None:
 
     usable = range(TRAIL, len(sessions) - FWD)
     syms = list(closes.columns)
+    if args.top_liquid:
+        recent = pd.read_parquet("data/bars.parquet")
+        dv = recent.groupby("symbol").dollar_vol.median().sort_values(ascending=False)
+        ranked = [s for s in dv.index if s not in funds and s in closes.columns]
+        syms = ranked[: args.top_liquid]
+        print(f"  candidates restricted to top {len(syms)} by $volume "
+              f"(min ${dv[syms[-1]]/1e9:.2f}B); neighbourhoods still use all "
+              f"{closes.shape[1]} columns")
     rng = np.random.default_rng(args.seed)
     pairs = [(syms[rng.integers(len(syms))], int(rng.choice(list(usable))))
              for _ in range(args.sample)]

@@ -1477,6 +1477,35 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   explain it: by-year differences flip sign rather than decaying. See spike 14.
 - **Status:** Accepted
 
+### D-64 — Pre-registration: the same test, on the population the product serves
+- **When:** 2026-09-06T12:38:57-05:00
+- **Decision:** Re-run D-63 unchanged in every respect except the **candidate
+  universe**, which becomes the top 100 non-fund names by median dollar volume.
+  Neighbourhoods are still drawn from the full 2,183-name pool, as production
+  does. Same market-excess label, same date-clustered SEs, same 10bp threshold,
+  same 2-session horizon, same leakage probe. Answers Q-32.
+- **Why:** Profiling the 97 profilable real alerts against 4,000 random
+  (symbol, date) pairs on **own-name features only** — deliberately excluding
+  anything about the neighbourhood, which would be circular — found them
+  indistinguishable on every setup dimension: own 3-session |z| 0.504 vs 0.575,
+  60-session volatility 0.023 vs 0.024, already-moving (|z|>=2) 5.2% vs 4.5%.
+  The one difference is enormous: median dollar volume **$15.3B vs $61.8M**, the
+  100th percentile. So "alert-worthy" does not need inventing, which was the
+  whole risk in Q-32 — it means *mega-cap*, and nothing else measurable.
+  That exposes a real limitation in D-63 rather than a flaw in it: it sampled
+  uniformly from names with $62M median volume, so its powered null describes a
+  population the product never sees. Defining the cut as the smallest round
+  liquidity threshold covering **100%** of the 20 non-fund alert tickers gives
+  top-100 (min $0.92B); top-50 covers only 85%. The cut is fitted to the alert
+  population, never to an outcome.
+  Declared in advance: 100 mega-caps are far more cross-sectionally correlated
+  than 2,183 mixed names, so effective n will be materially below the row count
+  even after date-clustering, and the MDE should be expected to be worse than
+  D-63's 17.9bp despite an identical sample size. This is also the fifth
+  interrogation of related data, so it is exploratory regardless of outcome.
+- **Outcome:** pending.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

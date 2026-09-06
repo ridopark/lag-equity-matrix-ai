@@ -9,18 +9,35 @@ Usage:  uv run python scripts/check_baseline.py
 
 from __future__ import annotations
 
+import argparse
 import csv
 import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
-from capture_baseline import COLUMNS, rows  # noqa: E402
+from capture_baseline import (  # noqa: E402
+    COLUMNS,
+    FIXTURE_CLOSES,
+    FIXTURE_FIRES,
+    rows,
+)
 
 BASELINE = "data/baseline-98.csv"
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--fixture",
+        action="store_true",
+        help="regenerate from the committed tests/fixtures/ projections rather than "
+             "data/bars.parquet and data/fires.csv, which are not in the repo. "
+             "Off by default on purpose: a silent fallback would let this report "
+             "'unchanged' while the real inputs were missing or broken.",
+    )
+    args = ap.parse_args()
+
     try:
         with open(BASELINE) as fh:
             expected = list(csv.DictReader(fh))
@@ -28,7 +45,15 @@ def main() -> int:
         print(f"{BASELINE} not found — run scripts/capture_baseline.py first", file=sys.stderr)
         return 2
 
-    actual = rows()
+    try:
+        actual = rows(FIXTURE_CLOSES, FIXTURE_FIRES) if args.fixture else rows()
+    except FileNotFoundError as e:
+        print(f"{e.filename} not found.", file=sys.stderr)
+        if not args.fixture:
+            print("  This input is not committed (Q-27). Either fetch it with "
+                  "scripts/fetch_bars.py, or run with --fixture to use the "
+                  "committed projections.", file=sys.stderr)
+        return 2
     if len(actual) != len(expected):
         print(f"ROW COUNT CHANGED: baseline {len(expected)}, now {len(actual)}", file=sys.stderr)
         return 1

@@ -57,6 +57,7 @@ async def run(
     limit: int | None = None,
     thread_id: str | None = None,
     halt_on_contradicted: bool = False,
+    signals: ExternalSignals | None = None,
 ) -> tuple[list, str, dict | None]:
     """Assess the candidates for `as_of` (all of them when None).
 
@@ -65,16 +66,18 @@ async def run(
     not replayable (`scripts/replay.py`). `interrupt` is the `review` node's
     payload (D-19) when `halt_on_contradicted` paused the run on a
     contradicted verdict, `None` otherwise — the default path never
-    interrupts, so this is `None` unless the caller opted in.
+    interrupts, so this is `None` unless the caller opted in. `signals`
+    injects the candidate source, defaulting to `ExternalSignals()`.
     """
     thread_id = thread_id or f"{as_of or 'all'}-{uuid4().hex[:8]}"
-    candidates = ExternalSignals().candidates(as_of)
+    signals = signals or ExternalSignals()
+    candidates = signals.candidates(as_of)
     if limit:
         candidates = candidates[:limit]
     if not candidates:
         return [], thread_id, None
 
-    signal_universe = {c.symbol for c in ExternalSignals().candidates()}
+    signal_universe = {c.symbol for c in signals.candidates()}
 
     if closes is None:
         start = min(c.as_of for c in candidates) - timedelta(days=TRAIL_PAD)

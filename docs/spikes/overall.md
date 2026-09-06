@@ -1044,7 +1044,41 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the guard is now half-portable, which is what Q-27 is for. Note the mechanism:
   `data/` had to become `data/*`, because git never descends into an excluded
   *directory* and the negation would have been silently unread.
-- **Outcome:** pending — untested until someone actually clones this and tries.
+- **Outcome:** Half-right. The tracked files were the correct choice, but the
+  gap they left was wider than recorded: `run()` reached `data/fires.csv`
+  through a *second*, uninjected call site that Q-27 did not name. Closed by
+  D-50 — verified by materialising a tracked-files-only tree and reproducing
+  the 98 rows there, twice (before the fix it failed, after it passed).
+- **Status:** Accepted — extended by D-50
+
+### D-50 — Committed input projections plus an injected signal source, so the guard runs from a clone
+- **When:** 2026-09-06T01:40:00-05:00
+- **Decision:** `scripts/build_fixture.py` freezes two projections of the
+  uncommitted inputs — `tests/fixtures/closes.parquet` (close column only, all
+  3,210 symbols, all 158 sessions, float64) and `tests/fixtures/fires.csv`
+  (ticker/posted_at/direction only). `check_baseline.py --fixture` reads them.
+  `run()` gains a keyword-only `signals` parameter so the candidate source can be
+  injected rather than constructed from a hard-coded path.
+- **Why:** Projections, not samples. A slice down to the 98 candidates' own
+  symbols — which is what Q-27 originally proposed — lost on inspection:
+  `graph_retriever` ranks each candidate against the *whole* universe to choose
+  neighbours, so dropping symbols would silently change every neighbourhood and
+  the fixture would reproduce a different number than the one it claims to
+  guard. float32 lost too: it saves 8% (4.01 → 3.67 MB) at 2.3e-4 error on a
+  close, enough to reorder a correlation rank and flip a verdict, which defeats
+  a byte-exact guard. Trimming the 30 leading sessions lost for the same class
+  of reason — it changes how many rows the trailing windows see. The `signals`
+  injection beat threading a path argument down because `run()` read the default
+  twice (candidates *and* `signal_universe`), and a path argument invites fixing
+  one and missing the other, which is exactly what happened first.
+  `--fixture` is opt-in rather than an automatic fallback: a silent fallback lets
+  the guard report "unchanged" while the real inputs are missing.
+- **Outcome:** Working. Reproduces all 98 rows from a tree containing only
+  `git ls-files` output plus the fixtures — 40s, exit 0. Negative control: 5%
+  iid noise on every cell produces 80 field diffs and exit 1, so the guard is
+  reading the fixture, not short-circuiting. A single perturbed symbol (CBC,
+  +15% over 40 sessions) changed nothing — a real property, not a defect: one
+  symbol in 3,210 need not enter any top-20.
 - **Status:** Accepted
 
 ## Open Questions
@@ -1076,7 +1110,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |
 | Q-26 | Should `graph_retriever` exclude the candidate's own column from the correlation pool? | `graph_retriever.py`, D-23 | **Latent bug found by phase6-red.** `corrwith` does not drop the candidate itself, so it ranks as its own leader at ρ=1.0; `leader_state`'s `or sym == c.symbol` then always emits a self-shock, and `context_fusion` can never satisfy `abs(cand_z) < abs(z)` against an identical value — one guaranteed contradicting unit per candidate. Production is **unaffected** only because D-27 excludes the 24 alert tickers, which happen to include every candidate: verified NFLX 2026-06-02 has no self-edge in production and one in a `signal_universe=set()` fixture. That is accidental correctness. Under `MarketScan` (D-23), where candidates are discovered rather than drawn from the alert feed, every candidate would contradict itself. Fix is one line; out of PHASE-6's scope. |
 | Q-19 | Which model labels co-mention articles at volume — `claude-opus-5`, or something cheaper for bulk? | D-05, D-17, `adapters/llm.py` | D-17 made bulk relationship-labelling the LLM's primary job; ~11 years of Benzinga news is a different order of magnitude from one call per signal. Answered by estimating article count after the Q-14 breadth filter, then pricing both options. |
-| Q-27 | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py`, `scripts/capture_baseline.py` | Surfaced by the initial commit, not by design. `check_baseline.py` reads the committed expected side, then calls `capture_baseline.rows()`, which reads `data/bars.parquet` (ignored, 17 MB, vendor data) and `data/fires.csv` (ignored, the real alert feed) — so a clone fails generating the *actual* side, not the expected one. Narrowed by D-49's second half: `excluded-etfs.csv` now ships, so two of the three missing inputs are down to one vendor blob and one private feed. Answered by either: a `fetch_bars.py` run documented as a prerequisite with the exact symbol/date window pinned so the pull is deterministic, or a committed fixture slice covering only the 98 rows' symbols and their `trail=60` lookback. Second option is small enough to be worth pricing first. |
+| ~~Q-27~~ | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py` | Answered by D-50: committed projections plus an injected signal source. Q-27 named one missing input; there were two, and the second (`data/fires.csv`, reached through an uninjected second call site in `run()`) was found only by running from a tracked-files-only tree. The three local checks all passed while it was broken. |
 | ~~Q-17~~ | Does the upstream signal's horizon match the graph horizon? | D-15 | **Answered wrongly, then corrected.** Spike 05 used days-to-expiry (median 8); the right field is holding period. `hold_minutes` gives a median of ~22 hours. Superseded by D-32; reopened as Q-25. |
 
 ---

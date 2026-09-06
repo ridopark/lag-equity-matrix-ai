@@ -12,6 +12,7 @@ through. Absence has to be a value to be diffable (CLAUDE.md: unverifiable means
 badly designed).
 
 Usage:  uv run python scripts/capture_baseline.py [--out data/baseline-98.csv]
+        uv run python scripts/capture_baseline.py --fixture   (Q-27: clone-runnable)
 """
 
 from __future__ import annotations
@@ -33,15 +34,31 @@ COLUMNS = [
 ]
 
 
-def rows() -> list[dict]:
-    bars = pd.read_parquet("data/bars.parquet")
-    closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
+# Q-27: the real inputs are not committed (vendor bars, private alert feed).
+# scripts/build_fixture.py freezes the projections of them that are.
+BARS_PATH = "data/bars.parquet"
+FIRES_PATH = "data/fires.csv"
+FIXTURE_CLOSES = "tests/fixtures/closes.parquet"
+FIXTURE_FIRES = "tests/fixtures/fires.csv"
 
-    candidates = ExternalSignals().candidates()
+
+def rows(bars_path: str = BARS_PATH, fires_path: str = FIRES_PATH) -> list[dict]:
+    if bars_path.endswith("closes.parquet"):
+        closes = pd.read_parquet(bars_path)  # already pivoted by build_fixture
+    else:
+        bars = pd.read_parquet(bars_path)
+        closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
+
+    # One source, passed to run_sync too: run() would otherwise build its own
+    # from the default path and reach data/fires.csv, which a clone does not have.
+    signals = ExternalSignals(fires_path)
+    candidates = signals.candidates()
     # publisher prints per assessment; that noise makes the evidence output
     # unreadable, so swallow it here (the pipeline's own behaviour is unchanged)
     with contextlib.redirect_stdout(io.StringIO()):
-        assessments, _thread_id, _interrupt = run_sync(closes=closes, with_news=False, limit=None)
+        assessments, _thread_id, _interrupt = run_sync(
+            closes=closes, with_news=False, limit=None, signals=signals
+        )
 
     out = [
         {
@@ -91,8 +108,10 @@ def write(path: str, data: list[dict]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="data/baseline-98.csv")
+    ap.add_argument("--fixture", action="store_true",
+                    help="read the committed tests/fixtures/ projections instead of data/")
     args = ap.parse_args()
-    data = rows()
+    data = (rows(FIXTURE_CLOSES, FIXTURE_FIRES) if args.fixture else rows())
     write(args.out, data)
     print(f"wrote {args.out}: {len(data)} data rows")
 

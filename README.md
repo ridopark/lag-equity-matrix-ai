@@ -80,6 +80,27 @@ uv run pytest
 uv run ruff check
 ```
 
+### Reproducing the baseline
+
+`data/baseline-98.csv` holds the verdict this pipeline produced for all 98
+signals. `scripts/check_baseline.py` regenerates that table and diffs it — it is
+the regression guard the whole LangGraph refactor was checked against, and it is
+what caught the `--news` breakage in PHASE-2.
+
+Regenerating needs two inputs that are deliberately not in this repo:
+`data/bars.parquet` (Alpaca bars, vendor data) and `data/fires.csv` (the private
+alert feed). `tests/fixtures/` carries committed projections of both — closing
+prices only, and the three signal columns already public in the baseline — so the
+guard runs from a clean clone:
+
+```bash
+uv run python scripts/check_baseline.py --fixture   # ~40s, expects: 98 rows identical
+```
+
+Without `--fixture` it reads the real inputs and refuses if they are absent. That
+is on purpose: a silent fallback would let the guard report "unchanged" while the
+real data was missing. `scripts/build_fixture.py` rebuilds the projections.
+
 ## Research & decisions
 
 `docs/spikes/overall.md` is the running log — decision log, open questions, and an

@@ -1,0 +1,56 @@
+[project]
+name = "lag-equity-matrix-ai"
+version = "0.1.0"
+description = "Real-time multi-agent financial signal pipeline: detects leader-equity price shocks and predicts cascading moves in correlated laggers via LangGraph + GraphRAG."
+readme = "README.md"
+authors = [
+    { name = "JonBuhTrader", email = "ridopark@jonbuhtrader.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-anthropic>=0.3",
+    "python-arango>=8.1",
+    "qdrant-client>=1.12",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "alpaca-py>=0.44.0",
+    "pandas>=3.0.5",
+    "pyarrow>=25.0.1",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+]
+
+[project.scripts]
+lagmatrix = "lagmatrix.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "lagmatrix"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["lagmatrix"]
+strict = true

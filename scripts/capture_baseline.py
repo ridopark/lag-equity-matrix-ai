@@ -11,7 +11,7 @@ that drops a *different* candidate would leave the row count intact and slip
 through. Absence has to be a value to be diffable (CLAUDE.md: unverifiable means
 badly designed).
 
-Usage:  uv run python scripts/capture_baseline.py [--out data/baseline-98.csv]
+Usage:  uv run python scripts/capture_baseline.py [--out data/baseline.csv]
         uv run python scripts/capture_baseline.py --synthetic  (regenerates the
             committed synthetic golden file; clone-runnable, see D-52)
 """
@@ -110,13 +110,13 @@ def write(path: str, data: list[dict]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="data/baseline-98.csv")
+    ap.add_argument("--out", default="data/baseline.csv")
     ap.add_argument("--synthetic", action="store_true",
                     help="run against the committed synthetic universe instead of data/")
     args = ap.parse_args()
     if args.synthetic:
         data = rows(SYNTHETIC_CLOSES, SYNTHETIC_FIRES)
-        if args.out == "data/baseline-98.csv":
+        if args.out == "data/baseline.csv":
             args.out = SYNTHETIC_BASELINE
     else:
         data = rows()

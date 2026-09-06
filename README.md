@@ -200,7 +200,7 @@ uv run python scripts/check_baseline.py           # ~40s
 ```
 
 Reads `data/bars.parquet` and `data/fires.csv`, diffs against
-`data/baseline-98.csv`. Absent them it exits non-zero rather than falling back —
+`data/baseline.csv`. Absent them it exits non-zero rather than falling back —
 a silent fallback would let the guard report "unchanged" while the real inputs
 were missing.
 
@@ -210,7 +210,7 @@ were missing.
 |---|---|
 | `data/bars.parquet` | Alpaca bars — vendor data, not ours to redistribute |
 | `data/fires.csv` | the upstream signal feed |
-| `data/baseline-98.csv` | tickers, dates and directions actually traded |
+| `data/baseline.csv` | tickers, dates and directions actually traded |
 
 `data/excluded-etfs.csv` **is** committed: product names only, no prices and no
 signal content, and `pipeline/runner.py` loads it at startup. Reproducing the

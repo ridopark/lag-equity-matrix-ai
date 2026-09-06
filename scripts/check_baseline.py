@@ -1,7 +1,7 @@
 """Executable form of success criterion 4 (PLAN-2026-09-03, TASK-0.3).
 
 Regenerates the assessment baseline and diffs it against the committed
-data/baseline-98.csv. Exits non-zero on any difference. Run at every phase
+data/baseline.csv. Exits non-zero on any difference. Run at every phase
 boundary of the LangGraph refactor.
 
 Usage:  uv run python scripts/check_baseline.py
@@ -24,7 +24,7 @@ from capture_baseline import (  # noqa: E402
     rows,
 )
 
-BASELINE = "data/baseline-98.csv"
+BASELINE = "data/baseline.csv"
 
 
 def main() -> int:

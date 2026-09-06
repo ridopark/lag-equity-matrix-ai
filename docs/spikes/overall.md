@@ -1240,6 +1240,30 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — no channel has been added yet; this records where to aim.
 - **Status:** Accepted
 
+### D-57 — The baseline tracks the live feed, and its filename stops counting
+- **When:** 2026-09-06T05:46:21-05:00
+- **Decision:** Refresh `data/fires.csv` and `data/bars.parquet` from source, and
+  re-baseline at the new candidate count. `data/baseline-98.csv` becomes
+  `data/baseline.csv`; scripts and README follow.
+- **Why:** The count in the filename was a lie waiting to happen — the feed adds
+  ~30/month, so any name encoding a size rots on the next refresh. Freezing the
+  extract at 98 instead, to keep the guard's inputs constant, lost because the
+  guard's contract is "same inputs, same outputs", not "inputs never change":
+  pinning it would have meant the pipeline was never again exercised on the data
+  it exists to process.
+  Two things this refresh established that a straight re-run would have hidden.
+  **Zero drift:** refreshing the bars moved the liquidity-filtered universe from
+  3,210 to 3,205 symbols, and *not one field* of the original 98 rows changed —
+  so neighbourhood selection is not sensitive to small universe churn, which was
+  an open worry rather than a measured fact. And the four new fires
+  (2×INTC, 2×QQQ, all 2026-09-04, all `up`) came back `neutral` with 0.0
+  evidence, not `no_assessment` as predicted: `sessions > str(as_of)` compares a
+  tz-aware index against a date string, so the candidate's *own* session is
+  selected as `ti` and the window is `[ti-60, ti)`, ending strictly before the
+  alert date. Point-in-time holds; the prediction was wrong, not the code.
+- **Outcome:** Working. 102 rows, both guards green, suite 38, ruff clean.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

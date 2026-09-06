@@ -82,31 +82,42 @@ uv run ruff check
 
 ### The baseline guard
 
-`scripts/check_baseline.py` regenerates the pipeline's verdict for every signal
-in the feed and diffs it against a frozen table. It is the regression guard the
-whole LangGraph refactor was checked against, and it is what caught the `--news`
-breakage in PHASE-2.
+`scripts/check_baseline.py` regenerates the pipeline's verdict for every
+candidate and diffs it against a frozen table. It is the regression guard the
+LangGraph refactor was checked against, and it caught the `--news` breakage in
+PHASE-2. It runs in two modes.
 
-It does not run from a clone, by design. Three inputs stay out of this repo:
+**Synthetic — runs from a clone, and runs in the suite.**
 
-| | |
-|---|---|
-| `data/bars.parquet` | Alpaca daily bars — vendor data |
-| `data/fires.csv` | the upstream signal feed |
-| `data/baseline-98.csv` | the frozen verdict table |
+```bash
+uv run pytest tests/test_synthetic_baseline.py    # ~1s
+uv run python scripts/check_baseline.py --synthetic
+```
 
-Reproducing them needs your own Alpaca credentials and your own signal source:
-`scripts/fetch_bars.py`, then `scripts/capture_baseline.py`. With those in place,
-`scripts/build_fixture.py` writes the closes/signals projections that
-`check_baseline.py --fixture` reads, so the guard can run without re-pivoting the
-full bar set.
+`tests/fixtures/` holds a fabricated universe: 166 invented tickers, 100
+sessions, six candidates built to land on distinct branches — corroborated on an
+up signal and on a down one, contradicted, neutral by tie, neutral by
+insufficient evidence, and no_assessment. Nothing in it is a real price or a real
+signal. It guards *pipeline behaviour*, which is what the guard is for; a
+refactor that breaks any branch shows up as a diff. `scripts/make_synthetic.py`
+regenerates it.
 
-Without `--fixture` the script reads `data/` directly and exits non-zero if the
-inputs are absent, rather than falling back — a silent fallback would let it
-report "unchanged" while the real inputs were missing.
+**Real — needs data this repo does not carry.**
 
-What *is* here is the pipeline, its tests, and `docs/spikes/overall.md` — the
-decision log, which carries the measured results the data would otherwise show.
+```bash
+uv run python scripts/check_baseline.py           # ~40s
+```
+
+Reads `data/bars.parquet` (Alpaca bars) and `data/fires.csv` (the upstream
+signal feed), neither of which is committed, and diffs against
+`data/baseline-98.csv`. Reproducing those needs your own Alpaca credentials and
+your own signal source: `scripts/fetch_bars.py`, then
+`scripts/capture_baseline.py`. Absent them the script exits non-zero rather than
+falling back — a silent fallback would let it report "unchanged" while the real
+inputs were missing.
+
+The measured results the real data would otherwise show are in
+`docs/spikes/overall.md`.
 
 ## Research & decisions
 

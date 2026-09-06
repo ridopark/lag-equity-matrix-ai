@@ -1115,6 +1115,37 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   third-party scrapers are outside what we can inspect.
 - **Status:** Accepted
 
+### D-52 — A synthetic universe restores the guard that D-51 made unrunnable
+- **When:** 2026-09-05T22:50:39-05:00
+- **Decision:** `scripts/make_synthetic.py` fabricates a 166-symbol, 100-session
+  universe with six candidates, each constructed to land on a chosen verdict
+  branch. `check_baseline.py --synthetic` diffs against its golden file, and
+  `tests/test_synthetic_baseline.py` runs the same comparison inside the suite.
+  `--fixture` and `build_fixture.py` are removed; the real projections move to
+  `data/fixtures/` where the existing ignore rule covers them.
+- **Why:** D-51 withdrew the real inputs, which left the guard runnable only on
+  one machine. Publishing anonymised or shuffled real bars lost — the values
+  would still be Alpaca's, so it buys nothing on the disclosure question that
+  motivated D-51. Generating from a seed at run time, with no committed prices,
+  lost to committing a 237 KB fabricated parquet: a seeded generator makes the
+  golden file hostage to the RNG and to library versions, whereas a frozen file
+  moves the only remaining variance into floating-point reduction order.
+  Keeping three modes (real / real-projection / synthetic) lost to two: the
+  projection mode's sole benefit was skipping a pivot.
+  The honest cost: this guards pipeline behaviour, not market truth. It cannot
+  catch a change that alters real verdicts while leaving synthetic ones intact.
+  The offsetting gain is that the real data only ever exercised the branches the
+  market happened to produce — it never once produced a `w_pro == w_con` tie,
+  which the synthetic set now covers — and 1s in the suite is enforced where 40s
+  in a script is remembered.
+- **Outcome:** Working. Six rows, all four verdict values present, reproduced
+  from a tracked-files-only tree in 1.0s. Negative control: flipping one bloc's
+  shock moves SYNA from 16/0 to 6/10 and exits 1. Byte-identical across
+  OPENBLAS/OMP/MKL thread counts 1, 2 and 8, so reduction order does not move
+  it on this machine — cross-architecture stability is untested and is the
+  residual risk. Real-data guard unchanged (98 rows identical). Suite 35.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -1,0 +1,7 @@
+symbol,as_of,direction,verdict,effective_evidence,n_supporting,n_contradicting
+SYNA,2026-04-27,up,corroborated,2.000000,16,0
+SYNB,2026-04-27,up,contradicted,2.000000,0,20
+SYNC,2026-04-27,up,neutral,0.000000,0,0
+SYND,2026-04-27,up,neutral,2.000000,10,10
+SYNE,2026-04-27,down,corroborated,2.000000,20,0
+SYNF,2026-02-16,up,no_assessment,0.000000,0,0

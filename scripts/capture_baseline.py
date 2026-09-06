@@ -12,7 +12,8 @@ through. Absence has to be a value to be diffable (CLAUDE.md: unverifiable means
 badly designed).
 
 Usage:  uv run python scripts/capture_baseline.py [--out data/baseline-98.csv]
-        uv run python scripts/capture_baseline.py --fixture   (Q-27: clone-runnable)
+        uv run python scripts/capture_baseline.py --synthetic  (regenerates the
+            committed synthetic golden file; clone-runnable, see D-52)
 """
 
 from __future__ import annotations
@@ -34,17 +35,19 @@ COLUMNS = [
 ]
 
 
-# Q-27: the real inputs are not committed (vendor bars, private alert feed).
-# scripts/build_fixture.py freezes the projections of them that are.
+# The real inputs are not committed (vendor bars, private alert feed). The
+# synthetic universe in tests/fixtures/ is, and exercises the same code paths --
+# see scripts/make_synthetic.py and D-52.
 BARS_PATH = "data/bars.parquet"
 FIRES_PATH = "data/fires.csv"
-FIXTURE_CLOSES = "tests/fixtures/closes.parquet"
-FIXTURE_FIRES = "tests/fixtures/fires.csv"
+SYNTHETIC_CLOSES = "tests/fixtures/synthetic-closes.parquet"
+SYNTHETIC_FIRES = "tests/fixtures/synthetic-fires.csv"
+SYNTHETIC_BASELINE = "tests/fixtures/synthetic-baseline.csv"
 
 
 def rows(bars_path: str = BARS_PATH, fires_path: str = FIRES_PATH) -> list[dict]:
-    if bars_path.endswith("closes.parquet"):
-        closes = pd.read_parquet(bars_path)  # already pivoted by build_fixture
+    if bars_path.endswith(".parquet") and "closes" in bars_path:
+        closes = pd.read_parquet(bars_path)  # already pivoted
     else:
         bars = pd.read_parquet(bars_path)
         closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
@@ -108,10 +111,15 @@ def write(path: str, data: list[dict]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="data/baseline-98.csv")
-    ap.add_argument("--fixture", action="store_true",
-                    help="read the committed tests/fixtures/ projections instead of data/")
+    ap.add_argument("--synthetic", action="store_true",
+                    help="run against the committed synthetic universe instead of data/")
     args = ap.parse_args()
-    data = (rows(FIXTURE_CLOSES, FIXTURE_FIRES) if args.fixture else rows())
+    if args.synthetic:
+        data = rows(SYNTHETIC_CLOSES, SYNTHETIC_FIRES)
+        if args.out == "data/baseline-98.csv":
+            args.out = SYNTHETIC_BASELINE
+    else:
+        data = rows()
     write(args.out, data)
     print(f"wrote {args.out}: {len(data)} data rows")
 

@@ -1290,6 +1290,88 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the projection stands.
 - **Status:** Accepted
 
+### D-59 — Pre-registration: intraday lead-lag, with a liquidity-matched control
+- **When:** 2026-09-06T06:12:07-05:00
+- **Decision:** Test whether a candidate's neighbourhood leads it at 1-minute
+  resolution, on the 48 alert dates already in the extract. Design fixed **before
+  any minute bar is fetched**:
+  - **Neighbours are not re-selected.** Each candidate's top-20 comes from the
+    daily pipeline, chosen on data ending strictly before the alert date. No
+    intraday information enters neighbour selection.
+  - **Measure.** Per candidate-date: `r_c(t)` = candidate 1-min log return,
+    `r_n(t)` = equal-weighted mean of its neighbours' 1-min log returns.
+    Cross-correlation `rho(k) = corr(r_n(t-k), r_c(t))` for k in -30..+30
+    minutes, regular session only. Record `argmax_k rho(k)`.
+  - **Hypothesis.** If information diffuses neighbourhood→candidate, the median
+    `argmax` across candidate-dates is k > 0.
+  - **Mandatory negative control.** Repeat with 20 random symbols drawn from the
+    same universe, matched to that candidate's real neighbours on median dollar
+    volume. Nonsynchronous trading alone makes liquid names appear to lead
+    illiquid ones (Lo & MacKinlay), so an uncontrolled positive lag is
+    uninterpretable.
+  - **Symmetry check.** Also compute the reverse, `corr(r_c(t-k), r_n(t))`. A
+    real diffusion effect is asymmetric; noise is not.
+  - **Decision rule, pre-committed.** Claim intraday lead-lag only if the real
+    median argmax exceeds the control's by >= 1 minute *and* a sign test across
+    candidate-dates rejects at p < 0.05. Otherwise report null.
+- **Why:** The alternative — fetch the bars and look — loses because this is the
+  **third** interrogation of the same 102 signals (after D-31 and D-33), and the
+  per-comparison false-positive rate is no longer the nominal one. Writing the
+  rule down first is the only thing that keeps a positive result meaningful.
+  Exploratory by construction: whatever it returns is a hypothesis for fresh
+  data, not a confirmation on this data.
+- **Outcome:** Ran as written on 1,066,454 minute bars over 83 candidate-dates.
+  **Null**, by the pre-committed rule: real median argmax lag +0.0 min vs control
+  +0.0 (needed >= +1.0), paired sign test 11 up / 20 down, p = 1.000. The real
+  neighbourhood peaks at lag 0 on 95.2% of candidate-dates at median rho 0.674;
+  the control peaks at lag 0 only 62.7% of the time at rho 0.238, i.e. the
+  control's apparent lead-lag is noise wandering, exactly the microstructure
+  artifact the control existed to expose. **But the result is uninformative
+  about the hypothesis** — see D-60. 78.1% of neighbourhood slots are funds, many
+  holding the candidate, so lag 0 was mechanically guaranteed.
+- **Status:** Accepted — executed; superseded as evidence by D-60
+
+### D-60 — 78% of every neighbourhood is a fund, and some of them hold the candidate
+- **When:** 2026-09-06T06:16:52-05:00
+- **Decision:** Record this as a validity defect in the neighbourhood definition
+  itself, not merely in D-59's test. Re-run the intraday test with funds excluded
+  from neighbour selection, under the same pre-committed rule. Whether the *daily*
+  pipeline should also exclude funds is a separate decision and is **not** taken
+  here.
+- **Why:** Discovered while auditing D-59's null. Of 1,660 neighbour slots across
+  all candidate-dates, **1,297 (78.1%) are funds** by the same name-based test
+  D-43 already uses; 201 of the 388 distinct neighbours are funds. The most
+  frequently selected are broad large-cap growth vehicles — TOPT, IVW, MGK, VUG,
+  VOOG, SPYG, QQQM, IYW — every one of which holds the mega-cap candidates this
+  feed alerts on. Correlating NVDA against VUG is not finding an informational
+  neighbour, it is finding a mirror, and the worked AMZN example is worse: XLY
+  and VCR are consumer-discretionary funds whose largest single holding is AMZN.
+  So "seven neighbours moved down" is substantially "AMZN moved down, as
+  reflected in funds that own AMZN". D-27 excludes the signal's own tickers and
+  D-43 excludes leveraged/inverse products, but nothing excludes a plain index
+  fund containing the candidate — that case was never considered.
+  This is why D-59 returned a lag of exactly 0 on 95% of dates at rho 0.674: a
+  fund's minute returns are contemporaneous with its constituents by
+  construction. The test measured index arithmetic, not information diffusion.
+  Not silently amending D-59 and re-running: that would be choosing the analysis
+  after seeing the result. D-59 stands as executed and reported null; this is a
+  separate pre-registration with one stated change.
+- **Outcome:** Corrected test run on 1,174,267 minute bars, same 83
+  candidate-dates, funds excluded from neighbour selection. **The null holds and
+  now means something.** Real neighbourhood: 89.2% of candidate-dates peak at
+  lag 0 (was 95.2%), median rho 0.505 (was 0.674) — removing funds lowered the
+  contemporaneous correlation exactly as predicted, confirming they were
+  inflating it, without changing the conclusion. Control: 51.8% at lag 0, rho
+  0.226, mean lag +2.52 min, i.e. the uninformative pair keeps wandering.
+  Pre-committed rule: gap +0.0 min (needed >= +1.0), sign test 16 up / 25 down,
+  p = 1.000. **No intraday lead-lag.** Genuine non-fund peers move *with* the
+  candidate at minute resolution, not before it, so the condition the pipeline
+  looks for — neighbours moved while the candidate has not — barely occurs
+  intraday. This is D-15's reasoning confirmed empirically rather than by
+  citation, and it bears on the fact that the upstream trading is largely
+  intraday.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1315,6 +1397,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | Q-25 | Is the ~1-trading-day holding horizon real, on more than 20 trades? | D-32, D-15, any future label | `hold_minutes` exists only on `trade_context`'s 31 rows (20 with a hold), covering 3 weeks. Reconstruct holding periods for all 98 fires from `EntryFilled` -> `PositionClosed` timestamps in `audit_log` to confirm. Gates the label horizon of every future test. |
 | ~~Q-24~~ | Can the signal feed be widened beyond 10 authors / 2 channels? | D-30, dataset size | Spike 08: the dataset grows ~30 fires/month and that rate is the binding constraint on ever reaching statistical power. Adding sources scales it linearly — the only lever that shortens an 8-to-23-month timeline, and worth more than any modelling improvement. Owner question for oh-my-tradeagent. **Answered by spike 13 / D-56:** yes, and it is one env var per channel with no author filter to relax — but the linear-scaling premise was wrong. 76% of the feed is a single author, so the yield of a new channel depends entirely on whether a prolific alerter posts there. |
 | Q-28 | Is the evaluation set generalisable, or is it one trader's selection style? | D-31, D-33, spike 13 | TradingTheTrend is 76% of all BTO fires, so a result from either pre-registration describes that account rather than "options alerts". Waiting cannot fix this — it accumulates more of the same author. Answered by getting a second high-volume source and re-running the pre-registered test per-author, or by reporting every result as single-source and scoping the claim accordingly. |
+| Q-29 | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |

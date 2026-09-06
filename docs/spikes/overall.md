@@ -1049,7 +1049,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   through a *second*, uninjected call site that Q-27 did not name. Closed by
   D-50 — verified by materialising a tracked-files-only tree and reproducing
   the 98 rows there, twice (before the fix it failed, after it passed).
-- **Status:** Accepted — extended by D-50
+- **Status:** Superseded by D-51 — the data it tracked is no longer published
 
 ### D-50 — Committed input projections plus an injected signal source, so the guard runs from a clone
 - **When:** 2026-09-06T01:40:00-05:00
@@ -1078,7 +1078,37 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   iid noise on every cell produces 80 field diffs and exit 1, so the guard is
   reading the fixture, not short-circuiting. A single perturbed symbol (CBC,
   +15% over 40 sessions) changed nothing — a real property, not a defect: one
-  symbol in 3,210 need not enter any top-20.
+  symbol in 3,210 need not enter any top-20. The portability it bought was then
+  given up by D-51; the `signals` injection it introduced was kept, and is the
+  part that had standalone value.
+- **Status:** Superseded in part by D-51 — the fixtures are no longer published;
+  the injection seam stands
+
+### D-51 — Publish the code, not the data; the baseline guard stays local
+- **When:** 2026-09-06T02:45:00-05:00
+- **Decision:** `data/baseline-98.csv`, `tests/fixtures/closes.parquet` and
+  `tests/fixtures/fires.csv` are removed from the repository and from its
+  history, and re-ignored. `data/excluded-etfs.csv` stays tracked. The
+  `signals` injection (D-50), `scripts/build_fixture.py` and
+  `check_baseline.py --fixture` all stay — the tooling works, it just runs
+  against locally held inputs. The guard is therefore not runnable from a clone,
+  and the README says so plainly instead of implying otherwise.
+- **Why:** Reverses the publication half of D-49 and D-50 on the owner's
+  instruction after the repo had been public for roughly four minutes (zero
+  forks, zero stars, then set private). What the fixtures bought — a reviewer
+  reproducing the 98 verdicts unaided — lost against what they disclosed: 3.9 MB
+  of Alpaca-derived closes, and the tickers, dates and directions the real signal
+  feed fired on. `excluded-etfs.csv` survives the cut because it carries product
+  *names* only, no prices and no signal content, and `runner.py` loads it at
+  startup, so keeping it is the difference between the pipeline running on a
+  clone and not. Deleting and recreating the GitHub repository beat a force-push:
+  force-pushed blobs stay reachable by SHA until GitHub garbage-collects, on no
+  schedule we control. Two commit messages were reworded in the rewrite because
+  they described committing files that no longer exist — a rewrite that leaves
+  the log lying about its own contents is worse than no rewrite.
+- **Outcome:** pending — history verified clean locally (0 commits touch the
+  three paths); the remote is deleted and recreated only once the `delete_repo`
+  scope is granted.
 - **Status:** Accepted
 
 ## Open Questions
@@ -1110,7 +1140,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |
 | Q-26 | Should `graph_retriever` exclude the candidate's own column from the correlation pool? | `graph_retriever.py`, D-23 | **Latent bug found by phase6-red.** `corrwith` does not drop the candidate itself, so it ranks as its own leader at ρ=1.0; `leader_state`'s `or sym == c.symbol` then always emits a self-shock, and `context_fusion` can never satisfy `abs(cand_z) < abs(z)` against an identical value — one guaranteed contradicting unit per candidate. Production is **unaffected** only because D-27 excludes the 24 alert tickers, which happen to include every candidate: verified NFLX 2026-06-02 has no self-edge in production and one in a `signal_universe=set()` fixture. That is accidental correctness. Under `MarketScan` (D-23), where candidates are discovered rather than drawn from the alert feed, every candidate would contradict itself. Fix is one line; out of PHASE-6's scope. |
 | Q-19 | Which model labels co-mention articles at volume — `claude-opus-5`, or something cheaper for bulk? | D-05, D-17, `adapters/llm.py` | D-17 made bulk relationship-labelling the LLM's primary job; ~11 years of Benzinga news is a different order of magnitude from one call per signal. Answered by estimating article count after the Q-14 breadth filter, then pricing both options. |
-| ~~Q-27~~ | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py` | Answered by D-50: committed projections plus an injected signal source. Q-27 named one missing input; there were two, and the second (`data/fires.csv`, reached through an uninjected second call site in `run()`) was found only by running from a tracked-files-only tree. The three local checks all passed while it was broken. |
+| ~~Q-27~~ | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py` | Answered by D-50, then unanswered by D-51: the projections were withdrawn from the repo, so the honest answer is that a reader cannot reproduce it — they read the decision log instead. Kept struck because the *question* is settled; the resolution is deliberate, not pending. Original finding stands: Q-27 named one missing input; there were two, and the second (`data/fires.csv`, reached through an uninjected second call site in `run()`) was found only by running from a tracked-files-only tree. The three local checks all passed while it was broken. |
 | ~~Q-17~~ | Does the upstream signal's horizon match the graph horizon? | D-15 | **Answered wrongly, then corrected.** Spike 05 used days-to-expiry (median 8); the right field is holding period. `hold_minutes` gives a median of ~22 hours. Superseded by D-32; reopened as Q-25. |
 
 ---

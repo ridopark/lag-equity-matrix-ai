@@ -80,26 +80,33 @@ uv run pytest
 uv run ruff check
 ```
 
-### Reproducing the baseline
+### The baseline guard
 
-`data/baseline-98.csv` holds the verdict this pipeline produced for all 98
-signals. `scripts/check_baseline.py` regenerates that table and diffs it — it is
-the regression guard the whole LangGraph refactor was checked against, and it is
-what caught the `--news` breakage in PHASE-2.
+`scripts/check_baseline.py` regenerates the pipeline's verdict for every signal
+in the feed and diffs it against a frozen table. It is the regression guard the
+whole LangGraph refactor was checked against, and it is what caught the `--news`
+breakage in PHASE-2.
 
-Regenerating needs two inputs that are deliberately not in this repo:
-`data/bars.parquet` (Alpaca bars, vendor data) and `data/fires.csv` (the private
-alert feed). `tests/fixtures/` carries committed projections of both — closing
-prices only, and the three signal columns already public in the baseline — so the
-guard runs from a clean clone:
+It does not run from a clone, by design. Three inputs stay out of this repo:
 
-```bash
-uv run python scripts/check_baseline.py --fixture   # ~40s, expects: 98 rows identical
-```
+| | |
+|---|---|
+| `data/bars.parquet` | Alpaca daily bars — vendor data |
+| `data/fires.csv` | the upstream signal feed |
+| `data/baseline-98.csv` | the frozen verdict table |
 
-Without `--fixture` it reads the real inputs and refuses if they are absent. That
-is on purpose: a silent fallback would let the guard report "unchanged" while the
-real data was missing. `scripts/build_fixture.py` rebuilds the projections.
+Reproducing them needs your own Alpaca credentials and your own signal source:
+`scripts/fetch_bars.py`, then `scripts/capture_baseline.py`. With those in place,
+`scripts/build_fixture.py` writes the closes/signals projections that
+`check_baseline.py --fixture` reads, so the guard can run without re-pivoting the
+full bar set.
+
+Without `--fixture` the script reads `data/` directly and exits non-zero if the
+inputs are absent, rather than falling back — a silent fallback would let it
+report "unchanged" while the real inputs were missing.
+
+What *is* here is the pipeline, its tests, and `docs/spikes/overall.md` — the
+decision log, which carries the measured results the data would otherwise show.
 
 ## Research & decisions
 

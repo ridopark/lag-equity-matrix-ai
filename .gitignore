@@ -18,11 +18,15 @@ wheels/
 # experiment data (not committed) -- data/* not data/, so the negation below
 # is consulted; git never descends into an excluded *directory*.
 data/*
-# ...except the golden file scripts/check_baseline.py diffs against, and the
-# exclusion list runner.py loads at startup (a point-in-time Alpaca snapshot,
-# so re-running build_exclusions.py does not reproduce it).
-!data/baseline-98.csv
+# ...except the exclusion list runner.py loads at startup: a point-in-time
+# Alpaca snapshot of leveraged/inverse product *names*, carrying no signal or
+# price content, which re-running build_exclusions.py does not reproduce.
 !data/excluded-etfs.csv
+
+# Baseline inputs and their fixture projections stay local. They carry either
+# vendor price data or the tickers and dates the signal feed actually fired on.
+# scripts/build_fixture.py regenerates the fixtures from data/.
+tests/fixtures/
 
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json

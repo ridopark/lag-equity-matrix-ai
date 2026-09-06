@@ -1142,8 +1142,32 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   from a tracked-files-only tree in 1.0s. Negative control: flipping one bloc's
   shock moves SYNA from 16/0 to 6/10 and exits 1. Byte-identical across
   OPENBLAS/OMP/MKL thread counts 1, 2 and 8, so reduction order does not move
-  it on this machine — cross-architecture stability is untested and is the
-  residual risk. Real-data guard unchanged (98 rows identical). Suite 35.
+  it on this machine. Cross-architecture stability, recorded here as the
+  residual risk, was then closed by D-53: byte-identical on a real aarch64
+  runner. Real-data guard unchanged (98 rows identical). Suite 35.
+- **Status:** Accepted
+
+### D-53 — Two-architecture CI, because the golden file encodes floating-point order
+- **When:** 2026-09-06T04:02:00-05:00
+- **Decision:** `.github/workflows/ci.yml` runs ruff, the suite, the synthetic
+  guard and a byte-for-byte regeneration of the golden file on both
+  `ubuntu-latest` (x86_64) and `ubuntu-24.04-arm` (aarch64). Each job asserts
+  `uname -m` before doing anything else.
+- **Why:** D-52 froze verdicts that depend on floating-point reduction order in
+  the correlation and rolling-std maths, and left cross-architecture stability
+  untested. Local emulation lost because it was not available — no docker daemon
+  in this WSL distro, no qemu binfmt handler — and because emulated FP would not
+  have answered the question anyway: QEMU does not reproduce a native BLAS
+  kernel's reduction order, so a green emulated run would have proved nothing.
+  GitHub's arm64 runners are free for public repos, run on real hardware, and
+  re-check on every push instead of once. The `uname -m` assertion exists
+  because a matrix entry that silently fell back to x86 would report a green
+  aarch64 job — the failure mode that would make this whole exercise worthless.
+- **Outcome:** Passed first run, both architectures. On aarch64: ruff clean,
+  35 passed, guard `6 rows identical`, and the regenerated golden file diffed
+  `identical on aarch64`. So the topk boundary visible in SYNA (16 of 20
+  neighbours selected, not a clean sweep) does not resolve differently under a
+  different BLAS kernel and SIMD width. Closes D-52's residual risk.
 - **Status:** Accepted
 
 ## Open Questions

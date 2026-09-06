@@ -8,7 +8,8 @@ captured run rather than driving one. The timings are real: `t_ms` is measured
 wall-clock from the start of the invocation.
 
 Usage:  uv run python scripts/capture_trace.py [--news] [--limit N]
-Output: data/trace.json
+        uv run python scripts/capture_trace.py --synthetic --out docs/trace-synthetic.json
+Output: data/trace.json (real inputs) or wherever --out points
 """
 
 from __future__ import annotations
@@ -58,13 +59,20 @@ async def main() -> None:
     ap.add_argument("--news", action="store_true")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", default="data/trace.json")
+    ap.add_argument("--synthetic", action="store_true",
+                    help="trace the committed synthetic universe instead of data/")
     args = ap.parse_args()
 
-    bars = pd.read_parquet("data/bars.parquet")
-    closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
-    all_c = ExternalSignals().candidates()
+    if args.synthetic:
+        closes = pd.read_parquet("tests/fixtures/synthetic-closes.parquet")
+        all_c = ExternalSignals("tests/fixtures/synthetic-fires.csv").candidates()
+    else:
+        bars = pd.read_parquet("data/bars.parquet")
+        closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
+        all_c = ExternalSignals().candidates()
     cands = all_c[: args.limit] if args.limit else all_c
     ctx = LagMatrixContext(closes=closes, signal_universe={c.symbol for c in all_c})
+    trace_meta_source = "synthetic" if args.synthetic else "real"
 
     graph = build_graph(with_news=args.news)
     events: list[dict] = []
@@ -97,6 +105,7 @@ async def main() -> None:
     trace = {
         "meta": {
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "source": trace_meta_source,
             "candidates": len(cands),
             "with_news": args.news,
             "universe_symbols": int(closes.shape[1]),

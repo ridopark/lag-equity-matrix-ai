@@ -1,0 +1,55 @@
+name: ci
+
+# The synthetic baseline guard (D-52) freezes verdicts that depend on
+# floating-point reduction order in correlation and rolling-std maths. That was
+# verified stable across BLAS thread counts on x86_64, but a different
+# architecture pairs a different BLAS kernel with different SIMD widths, and a
+# near-tie in the topk neighbour ranking could resolve the other way. Running
+# the suite on both architectures is what turns that from an assumption into an
+# observation.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: Confirm the runner really is ${{ matrix.arch }}
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}" \
+            || { echo "expected ${{ matrix.arch }}, got $(uname -m)"; exit 1; }
+          uv run python -c "import numpy; numpy.show_config()"
+
+      - run: uv run ruff check
+
+      - run: uv run pytest -q
+
+      - name: Baseline guard, synthetic universe
+        run: uv run python scripts/check_baseline.py --synthetic
+
+      - name: Golden file is byte-reproducible on this architecture
+        run: |
+          uv run python scripts/capture_baseline.py --synthetic --out /tmp/regen.csv
+          diff -u tests/fixtures/synthetic-baseline.csv /tmp/regen.csv \
+            && echo "identical on $(uname -m)"

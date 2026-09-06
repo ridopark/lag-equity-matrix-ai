@@ -1396,6 +1396,36 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   before the change (102 real, 6 synthetic); suite 42, ruff clean.
 - **Status:** Accepted
 
+### D-62 — Exclude every fund from neighbour selection, not just leveraged ones
+- **When:** 2026-09-06T06:50:59-05:00
+- **Decision:** `data/excluded-etfs.csv` now carries all 1,022 name-classified
+  funds rather than the 185 leveraged/inverse products of D-43, which it strictly
+  contains. `build_exclusions.py` defaults to the wide list;
+  `--leveraged-only` restores the old behaviour. No code changed — the
+  `excluded_symbols` path already existed and is already tested — so this is a
+  configuration change, and `tests/test_exclusions_policy.py` pins the policy
+  because a data file cannot otherwise fail a build. Answers Q-29.
+- **Why:** D-60 measured 78.1% of neighbour slots as funds, dominated by broad
+  large-cap vehicles holding the very mega-caps this feed alerts on. Correlating
+  AMZN against XLY, whose largest holding is AMZN, is not evidence about AMZN.
+  Keeping them lost on construct validity: the independence weighting (Q-12) can
+  discount a correlated bloc, but it cannot repair evidence that is partly the
+  candidate itself, and funds were crowding real names out of the top-20.
+  **Measured effect:** 19 of 102 verdicts flip, neutral 78 → 62, corroborated
+  9 → 21, contradicted 12 → 16, total effective evidence 37.5 → 64.3, rows with
+  any evidence 21 → 38. Evidence *rises* because funds are mutually correlated
+  and were being discounted to ~1/6 each; single names form smaller blocs. The
+  worked AMZN 2026-07-24 case goes from six funds and GOOG at 1.543 effective, to
+  GOOG, LYFT, ZG and Z at 3.000 — with Zillow's two share classes correctly
+  weighted 0.5 each. Synthetic baseline unchanged, as it must be: no `SYN*`
+  ticker is a fund, which makes it a clean control on the change.
+  **What this is not:** evidence that the pipeline predicts better. D-31/D-33
+  cannot judge it — see Q-31 — and modifying them to exclude funds would violate
+  their pre-registration. The case for this change is construct validity alone.
+- **Outcome:** Working, in the sense that the neighbourhoods are now defensible;
+  predictive value untested and, at this n, untestable.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1421,7 +1451,8 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | Q-25 | Is the ~1-trading-day holding horizon real, on more than 20 trades? | D-32, D-15, any future label | `hold_minutes` exists only on `trade_context`'s 31 rows (20 with a hold), covering 3 weeks. Reconstruct holding periods for all 98 fires from `EntryFilled` -> `PositionClosed` timestamps in `audit_log` to confirm. Gates the label horizon of every future test. |
 | ~~Q-24~~ | Can the signal feed be widened beyond 10 authors / 2 channels? | D-30, dataset size | Spike 08: the dataset grows ~30 fires/month and that rate is the binding constraint on ever reaching statistical power. Adding sources scales it linearly — the only lever that shortens an 8-to-23-month timeline, and worth more than any modelling improvement. Owner question for oh-my-tradeagent. **Answered by spike 13 / D-56:** yes, and it is one env var per channel with no author filter to relax — but the linear-scaling premise was wrong. 76% of the feed is a single author, so the yield of a new channel depends entirely on whether a prolific alerter posts there. |
 | Q-28 | Is the evaluation set generalisable, or is it one trader's selection style? | D-31, D-33, spike 13 | TradingTheTrend is 76% of all BTO fires, so a result from either pre-registration describes that account rather than "options alerts". Waiting cannot fix this — it accumulates more of the same author. Answered by getting a second high-volume source and re-running the pre-registered test per-author, or by reporting every result as single-source and scoping the claim accordingly. |
-| Q-29 | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. |
+| ~~Q-29~~ | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. **Answered by D-62: exclude them.** The deciding argument was construct validity, not measured performance. |
+| Q-31 | Has the pipeline's actual feature ever been tested? | D-31, D-33, `context_fusion.py`, D-62 | No. D-31 pre-registered `max abs(neighbour z) - abs(candidate z)` and the experiments implement exactly that, faithfully. The pipeline instead computes an independence-weighted, direction-matched sum — Q-12's discounting, the project's distinctive idea — and no test has ever evaluated that statistic. The two are different features, so both pre-registered nulls are silent about the thing that actually ships. Answered by a fresh pre-registration on the shipped feature, which needs power this dataset does not have (D-58), or by testing it on synthetic candidates over a decade of bars where n is not the constraint. |
 | Q-30 | Should repeat same-day alerts on one symbol be assessed separately? | D-61, `graph/state.py`, D-31, D-33 | `candidate_key` collapses them, so 102 fires are ~87 assessed branches and duplicates carry copies of one verdict. Now that `as_of_ts` exists, splitting them is possible — a second alert hours later sees a different neighbourhood state and is arguably a distinct observation. It would change the baseline and re-open D-31/D-33, so it is a real decision, not a cleanup. Answered by measuring how often the neighbourhood state actually differs between same-day repeats. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |

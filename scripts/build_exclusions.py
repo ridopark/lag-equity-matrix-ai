@@ -45,8 +45,8 @@ def is_leveraged_or_inverse(name: str | None) -> bool:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="data/excluded-etfs.csv")
-    ap.add_argument("--all-funds", action="store_true",
-                    help="emit every fund, not just leveraged/inverse (D-60)")
+    ap.add_argument("--leveraged-only", action="store_true",
+                    help="emit only leveraged/inverse products (pre-D-62 behaviour)")
     ap.add_argument("--universe", default="data/universe.csv")
     args = ap.parse_args()
 
@@ -69,8 +69,8 @@ def main() -> None:
     rows = [
         {"symbol": s, "name": assets[s].name}
         for s in universe
-        if s in assets and (FUND.search(assets[s].name or "") if args.all_funds
-                            else is_leveraged_or_inverse(assets[s].name))
+        if s in assets and (is_leveraged_or_inverse(assets[s].name) if args.leveraged_only
+                            else FUND.search(assets[s].name or ""))
     ]
     with open(args.out, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=["symbol", "name"])

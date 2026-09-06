@@ -1,186 +1,1023 @@
 symbol,name
 AAPD,Direxion Shares ETF Trust Direxion Daily AAPL Bear 1X ETF
 AAPU,Direxion Shares ETF Trust Direxion Daily AAPL Bull 2X ETF
+AAXJ,iShares MSCI All Country Asia ex Japan ETF
+ABCL,AbCellera Biologics Inc. Common Shares
+ABR,"Arbor Realty Trust, Inc."
+ABVX,Abivax SA American Depositary Shares
+ACWI,iShares MSCI ACWI ETF
+ACWX,iShares MSCI ACWI ex US ETF
+ACYN,FT Vest Laddered Autocallable Barrier & Income ETF
 ADBG,Themes ETF Trust Leverage Shares 2X Long ADBE Daily ETF
+ADNT,Adient plc Ordinary Shares
+AGG,iShares Core U.S. Aggregate Bond ETF
+AGI,Alamos Gold Inc. Class A Common Shares
 AGQ,ProShares Ultra Silver
+AIA,iShares Asia 50 ETF
+AIPO,Tidal Trust II Defiance AI & Power Infrastructure ETF
+AIQ,Global X Funds Global X Artificial Intelligence & Technology ETF
+AIRR,First Trust Exchange-Traded Fund VI First Trust RBA American Industrial Renaissance ETF
+AIS,VistaShares Artificial Intelligence Supercycle ETF
+AKR,Acadia Realty Trust
+AKRE,Akre Focus ETF
+ALC,Alcon Inc. Ordinary Shares
+ALKS,Alkermes plc Ordinary Shares
+ALLW,SSGA Active Trust State Street Bridgewater All Weather ETF
+ALM,Almonty Industries Inc. Common Shares
+AMBA,"Ambarella, Inc. Ordinary Shares"
+AMCR,Amcor plc Ordinary Shares
 AMDD,Direxion Shares ETF Trust Direxion Daily AMD Bear 1X ETF
 AMDL,GraniteShares ETF Trust GraniteShares 2x Long AMD Daily ETF
+AMDY,YieldMax AMD Option Income Strategy ETF
+AMLP,Alerian MLP ETF
 AMUU,Direxion Shares ETF Trust Direxion Daily AMD Bull 2X ETF
+AMX,America Movil S.A.B de C.V American Depositary Shares (each representing the right to receive twenty (20) Series B Shares)
 AMZD,Direxion Shares ETF Trust Direxion Daily AMZN Bear 1X ETF
 AMZU,Direxion Shares ETF Trust Direxion Daily AMZN Bull 2X ETF
+ANGL,VanEck Fallen Angel High Yield Bond ETF
+AOA,iShares Core 80/20 Aggressive Allocation ETF
+AOR,iShares Core 60/40 Balanced Allocation ETF
+AOSL,Alpha and Omega Semiconductor Limited Common Shares
 APPX,Investment Managers Series Trust II Tradr 2X Long APP Daily ETF
+ARGT,Global X MSCI Argentina ETF
+ARGX,argenx SE American Depositary Shares
+ARM,Arm Holdings plc American Depositary Shares
 ARMG,Themes ETF Trust Leverage Shares 2X Long ARM Daily ETF
+ARTY,iShares Future AI & Tech ETF
+ASHR,Xtrackers Harvest CSI 300 China A-Shares ETF
+ASML,ASML Holding N.V. New York Registry Shares
+ASND,Ascendis Pharma A/S Ordinary Share
+ASR,"Grupo Aeroportuario del Sureste, S.A. de C.V. American Depositary Shares"
+ATAT,Atour Lifestyle Holdings Limited American Depositary Shares
+ATHM,"Autohome Inc. American Depositary Shares, each representing four Class A Ordinary Shares"
+AUGO,Aura Minerals Inc. Common Shares
+AUPH,Aurinia Pharmaceuticals Inc Ordinary Shares
+AVDE,Avantis International Equity ETF
+AVDV,Avantis International Small Cap Value ETF
+AVEM,Avantis Emerging Markets Equity ETF
 AVGX,Tidal Trust II Defiance Daily Target 2X Long AVGO ETF
 AVL,Direxion Shares ETF Trust Direxion Daily AVGO Bull 2X ETF
+AVLV,Avantis U.S. Large Cap Value ETF
 AVS,Direxion Shares ETF Trust Direxion Daily AVGO Bear 1X ETF
+AVUS,Avantis U.S. Equity ETF
+AVUV,Avantis U.S. Small Cap Value ETF
+BABA,"Alibaba Group Holding Limited American Depositary Shares, each represents eight Ordinary Shares"
 BABX,GraniteShares ETF Trust GraniteShares 2x Long BABA Daily ETF
+BAI,iShares A.I. Innovation and Tech Active ETF
+BAR,GraniteShares Gold Shares
+BBD,Banco Bradesco S.A. American Depositary Shares (Each representing one Preferred Shares)
+BCH,Banco de ChileAmerican Depositary Shares (Each representing 200 shares of Common Stock)
+BCI,abrdn Bloomberg All Commodity Strategy K-1 Free ETF
+BEKE,KE Holdings Inc. American Depositary Shares (each representing three Class A Ordinary Shares)
+BEPC,Brookfield Renewable Corporation Class A Exchangeable Subordinate Voting Shares
+BHP,BHP Group Limited American Depositary Shares (Each representing two Ordinary Shares)
+BHYP,Bitwise Hyperliquid ETF
+BIL,State Street SPDR Bloomberg 1-3 Month T-Bill ETF
+BILI,Bilibili Inc. American Depositary Shares
+BILS,State Street SPDR Bloomberg 3-12 Month T-Bill ETF
 BILZ,PIMCO Ultra Short Government Active ETF
+BINC,iShares Flexible Income Active ETF
+BIPC,Brookfield Infrastructure Corporation Class A Exchangeable Subordinate Voting Shares
+BITB,Bitwise Bitcoin ETF
 BITI,ProShares Short Bitcoin ETF
+BITO,ProShares Bitcoin ETF
 BITU,ProShares Ultra Bitcoin ETF
+BIV,Vanguard Intermediate-Term Bond ETF
+BIZD,VanEck BDC Income ETF
+BKDV,BNY Mellon Dynamic Value ETF
+BKLC,BNY Mellon US Large Cap Core Equity ETF
+BKLN,Invesco Senior Loan ETF
+BLCR,BlackRock ETF Trust iShares Large Cap Core Active ETF
+BLDP,"Ballard Power Systems, Inc. Common Shares"
+BLOK,Amplify Blockchain Technology ETF
+BLTE,"Belite Bio, Inc American Depositary Shares"
+BLV,Vanguard Long-Term Bond ETF
 BMNG,Themes ETF Trust Leverage Shares 2X Long BMNR Daily ETF
 BMNZ,Defiance Daily Target 2X Short BMNR ETF
+BND,Vanguard Total Bond Market ETF
+BNDX,Vanguard Charlotte Funds Vanguard Total International Bond ETF
+BNO,"United States Brent Oil Fund, LP"
+BNTX,BioNTech SE American Depositary Share
 BOIL,ProShares Ultra Bloomberg Natural Gas
+BOND,PIMCO Active Bond Exchange-Traded Fund
+BOTZ,Global X Funds Global X Robotics & Artificial Intelligence ETF
+BSCQ,Invesco BulletShares 2026 Corporate Bond ETF
+BSCR,Invesco BulletShares 2027 Corporate Bond ETF
+BSCS,Invesco BulletShares 2028 Corporate Bond ETF
+BSCU,Invesco Exchange-Traded Self-Indexed Fund Trust Invesco BulletShares 2030 Corporate Bond ETF
+BSOL,Bitwise Solana Staking ETF
+BSP,Bending Spoons S.p.A. Ordinary Shares
 BSV,Vanguard Short-Term Bond ETF
+BTBT,"Bit Digital, Inc. Ordinary Shares"
+BTC,Grayscale Bitcoin Mini Trust ETF
+BTDR,Bitdeer Technologies Group Class A Ordinary Shares
+BTI,"British American Tobacco p.l.c. American Depositary Shares, American Depositary Shares, each representing one Ordinary Share"
+BUG,Global X Funds Global X Cybersecurity ETF
+BULL,Webull Corporation Class A Ordinary Shares
 BULZ,MicroSectors FANG & Innovation 3x Leveraged ETN
+BWET,Breakwave Tanker Shipping ETF
+BXDC,Blackstone Digital Infrastructure Trust Inc.
+BXMT,"Blackstone Mortgage Trust, Inc. (NEW)"
+BXSL,Blackstone Secured Lending Fund
+BZ,KANZHUN LIMITED American Depository Shares
+CAE,CAE Inc. Common Shares
+CAIE,Calamos Autocallable Income ETF
+CAMT,Camtek Ltd. Ordinary Shares
+CCEP,Coca-Cola Europacific Partners plc Ordinary Shares
+CEF,Sprott Physical Gold and Silver Trust
+CGBL,Capital Group Core Balanced ETF
+CGCB,Capital Group Core Bond ETF
+CGCP,Capital Group Core Plus Income ETF
+CGDG,Capital Group Dividend Growers ETF
+CGDV,Capital Group Dividend Value ETF
+CGGE,Capital Group Global Equity ETF
+CGGO,Capital Group Global Growth Equity ETF
+CGGR,Capital Group Growth ETF
+CGIC,Capital Group International Core Equity ETF
+CGIE,Capital Group International Equity ETF
+CGMM,Capital Group U.S. Small and Mid Cap ETF
+CGMS,Capital Group U.S. Multi-Sector Income ETF
+CGMU,Capital Group Municipal Income ETF
+CGNG,Capital Group New Geography Equity ETF
 CGSD,Capital Group Short Duration Income ETF
+CGUS,Capital Group Core Equity ETF
+CGXU,Capital Group International Focus Equity ETF
+CHAT,Roundhill Generative AI & Technology ETF
+CHKP,Check Point Software Technologies Ltd. Ordinary Shares
+CHPY,YieldMax Semiconductor Portfolio Option Income ETF
+CIB,Grupo Cibest S.A. American Depositary Shares (each representing four (4) Preferred Shares)
+CIBR,First Trust Exchange-Traded Fund II First Trust NASDAQ Cybersecurity ETF
+CIGI,Colliers International Group Inc. Subordinate Voting Shares
+CLBT,Cellebrite DI Ltd. Ordinary Shares
+CLIP,Global X 1-3 Month T-Bill ETF
+CLOA,BlackRock ETF Trust II iShares AAA CLO Active ETF
+CMF,iShares California Muni Bond ETF
+CMPR,Cimpress PLC Ordinary Shares (Ireland)
+CMPS,COMPASS Pathways Plc American Depository Shares
+COLD,"Americold Realty Trust, Inc."
 CONL,GraniteShares ETF Trust GraniteShares 2x Long COIN Daily ETF
+COPX,Global X Copper Miners ETF (NEW)
+CORO,BlackRock ETF Trust iShares International Country Rotation Active ETF
+COWG,Pacer Funds Trust Pacer US Large Cap Cash Cows Growth Leaders ETF
+CPER,United States Copper Index Fund
+CPT,Camden Property Trust
+CQQQ,Invesco China Technology ETF
 CRCA,ProShares Ultra CRCL
 CRCG,Themes ETF Trust Leverage Shares 2X Long CRCL Daily ETF
+CRDO,Credo Technology Group Holding Ltd Ordinary Shares
 CRMG,Themes ETF Trust Leverage Shares 2X Long CRM Daily ETF
+CRML,Critical Metals Corp. Ordinary Shares
+CRSP,CRISPR Therapeutics AG Common Shares
 CRWG,Themes ETF Trust Leverage Shares 2X Long CRWV Daily ETF
+CSHI,NEOS Enhanced Income 1-3 Month T-Bill ETF
+CSIQ,Canadian Solar Inc. Common Shares (ON)
+CSTM,Constellium SE Class A Ordinary shares
+CTA,Simplify Managed Futures Strategy ETF
+CWB,State Street SPDR Bloomberg Convertible Securities ETF
 CWEB,Direxion Daily CSI China Internet Index Bull 2X ETF
 DAMD,Defiance Daily Target 2X Short AMD ETF
+DBA,Invesco DB Agriculture Fund
+DBC,Invesco DB Commodity Index Tracking Fund
+DBEF,Xtrackers MSCI EAFE Hedged Equity ETF
+DBMF,iMGP DBi Managed Futures Strategy ETF
+DBO,Invesco DB Oil Fund
 DDM,ProShares Ultra Dow30
+DEM,WisdomTree Emerging Markets High Dividend Fund
+DFAC,Dimensional U.S. Core Equity 2 ETF
+DFAE,Dimensional Emerging Core Equity Market ETF
+DFAI,Dimensional International Core Equity Market ETF
+DFAR,Dimensional US Real Estate ETF
+DFAS,Dimensional U.S. Small Cap ETF
+DFAT,Dimensional U.S. Targeted Value ETF
+DFAU,Dimensional US Core Equity Market ETF
+DFAX,Dimensional World ex U.S. Core Equity 2 ETF
+DFCF,Dimensional Core Fixed Income ETF
+DFEM,Dimensional Emerging Markets Core Equity 2 ETF
 DFEN,Direxion Daily Aerospace & Defense Bull 3X ETF
+DFGR,Dimensional Global Real Estate ETF
+DFIV,Dimensional International Value ETF
+DFLV,Dimensional US Large Cap Value ETF
 DFSD,Dimensional Short-Duration Fixed Income ETF
+DFSV,Dimensional US Small Cap Value ETF
+DFTX,"Definium Therapeutics, Inc. Common Shares"
+DFUS,Dimensional U.S. Equity Market ETF
+DFUV,Dimensional US Marketwide Value ETF
+DGP,"DB Gold Double Long ETN due February 15, 2038"
+DGRO,iShares Core Dividend Growth ETF
+DGRW,WisdomTree Trust WisdomTree U.S. Quality Dividend Growth Fund
+DHC,Diversified Healthcare Trust Common Shares of Beneficial Interest
+DIA,State Street SPDR Dow Jones Industrial Average ETF Trust
+DISK,Tema Memory ETF
+DIVO,Amplify CWP Enhanced Dividend Income ETF
 DLLL,GraniteShares ETF Trust GraniteShares 2x Long DELL Daily ETF
+DLN,WisdomTree U.S. LargeCap Dividend Fund
+DLO,DLocal Limited Class A Common Shares
+DLR,"Digital Realty Trust, Inc."
 DOG,ProShares Short Dow30
+DOO,BRP Inc. Common Subordinate Voting Shares
+DOX,Amdocs Limited Ordinary Shares
 DPST,Direxion Daily Regional Banks Bull 3X ETF
+DQ,Daqo New Energy Corp. American Depositary Shares (each representing 5 Ordinary Shares)
+DRAM,Roundhill Memory ETF
 DRIP,Direxion Daily S&P Oil & Gas Exp. & Prod. Bear 2X ETF
+DSI,iShares ESG MSCI KLD 400 ETF
+DTCR,Global X Funds Global X Data Center & Digital Infrastructure ETF
+DUHP,Dimensional US High Profitability ETF
 DUSB,Dimensional Ultrashort Fixed Income ETF
 DUST,Direxion Daily Gold Miners Index Bear 2X ETF
+DVY,iShares Select Dividend ETF
 DXD,ProShares UltraShort Dow 30
+DXJ,WisdomTree Japan Hedged Equity Fund
+DYNF,iShares U.S. Equity Factor Rotation Active ETF
+EAGG,iShares ESG Aware U.S. Aggregate Bond ETF
 EDC,Direxion Daily MSCI Emerging Markets Bull 3X ETF
+EDU,"New Oriental Education and Technology Group, Inc. American Depositary Shares (each representing ten (10) Common Shares)"
+EDV,Vanguard World Funds Extended Duration ETF
+EEM,iShares MSCI Emerging Markets ETF
+EFA,iShares MSCI EAFE ETF
+EIDO,iShares MSCI Indonesia ETF
+EIS,iShares MSCI Israel ETF
+EMB,"iShares J,P. Morgan USD Emerging Markets Bond ETF"
+EMBJ,Embraer S.A. American Depositary Shares (Each representing Four Common Shares)
+EMLC,VanEck J. P. Morgan EM Local Currency Bond ETF
+EMXC,"iShares, Inc. iShares MSCI Emerging Markets ex China ETF"
+ENLT,Enlight Renewable Energy Ltd. Ordinary Shares
+EPI,WisdomTree India Earnings Fund ETF
+EPOL,iShares MSCI Poland ETF
+EPP,iShares MSCI Pacific ex Japan ETF
+EPRT,"Essential Properties Realty Trust, Inc."
+EQNR,"Equinor ASA American Depositary Shares (Each Representing One Ordinary Share, nominal value NOK 2.50 per share)"
+EQWL,Invesco S&P 100 Equal Weight ETF
+ERIC,Ericsson American Depositary Shares
 ERX,Direxion Daily Energy Bull 2X ETF
 ERY,Direxion Daily Energy Bear 2X ETF
+ESGD,iShares Trust iShares ESG Aware MSCI EAFE ETF
+ESGE,"iShares, Inc. iShares ESG Aware MSCI EM ETF"
+ESGU,iShares Trust iShares ESG Aware MSCI USA ETF
+ESLT,Elbit Systems Ltd. Ordinary Shares
+ESS,"Essex Property Trust, Inc"
+ESTA,Establishment Labs Holdings Inc. Common Shares
+ETH,Grayscale Ethereum Staking Mini ETF Shares
+ETHA,iShares Ethereum Trust ETF Shares
 ETHD,ProShares UltraShort Ether ETF
+ETHE,Grayscale Ethereum Staking ETF Shares
 ETHT,ProShares Ultra Ether ETF
+ETHW,Bitwise Ethereum ETF
+ETN,"Eaton Corporation, plc Ordinary Shares"
+ETOR,eToro Group Ltd. Class A Common Shares
+EUFN,iShares MSCI Europe Financials ETF
+EVTR,Eaton Vance Total Return Bond ETF
+EWA,iShares MSCI Australia ETF
+EWC,iShares MSCI Canada ETF
+EWG,iShares MSCI Germany ETF
+EWH,iShares MSCI Hong Kong ETF
+EWI,iShares MSCI Italy ETF
+EWJ,iShares MSCI Japan ETF
+EWL,iShares MSCI Switzerland ETF
+EWP,iShares MSCI Spain ETF
+EWQ,iShares MSCI France ETF
+EWS,iShares MSCI Singapore ETF
+EWT,iShares MSCI Taiwan ETF
+EWU,iShares MSCI United Kingdom ETF
+EWW,iShares MSCI Mexico ETF
+EWY,iShares MSCI South Korea ETF
+EWZ,iShares MSCI Brazil ETF
+EZA,iShares MSCI South Africa ETF
+FALN,iShares Trust iShares Fallen Angels USD Bond ETF
 FAS,Direxion Daily Financial Bull 3x ETF
 FAZ,Direxion Daily Financial Bear 3x ETF
 FBL,GraniteShares ETF Trust GraniteShares 2x Long META Daily ETF
+FBND,Fidelity Total Bond ETF
+FCG,First Trust Natural Gas ETF
+FCPT,"Four Corners Property Trust, Inc."
+FDL,First Trust Morningstar Dividend Leaders Index Fund
+FDN,First Trust Dow Jones Internet Index Fund ETF
+FDT,First Trust Developed Markets ex-US AlphaDEX Fund
+FDVV,Fidelity High Dividend ETF
+FEGE,First Eagle Global Equity ETF
+FELC,Fidelity Enhanced Large Cap Core ETF
+FELG,Fidelity Enhanced Large Cap Growth ETF
+FENI,Fidelity Enhanced International ETF
+FENY,Fidelity MSCI Energy Index ETF
+FEOE,First Eagle Overseas Equity ETF
+FER,Ferrovial N.V. Ordinary Shares
+FESM,Fidelity Enhanced Small Cap Core ETF
+FEZ,State Street SPDR EURO STOXX 50 ETF
+FHLC,Fidelity MSCI Health Care Index ETF
+FIXD,First Trust Exchange-Traded Fund VIII First Trust Smith Opportunistic Fixed Income ETF
+FLEX,Flex Ltd. Ordinary Shares
+FLIN,Franklin FTSE India ETF
+FLJP,Franklin FTSE Japan ETF
+FLKR,Franklin FTSE South Korea ETF
+FLMI,Franklin Dynamic Municipal Bond ETF
+FLNG,FLEX LNG Ltd. Ordinary Shares
+FLRN,State Street SPDR Bloomberg Investment Grade Floating Rate ETF
+FLTR,VanEck IG Floating Rate ETF
+FLTW,Franklin FTSE Taiwan ETF
+FLXR,TCW Flexible Income ETF
+FMDE,Fidelity Enhanced Mid Cap Core ETF
+FNDA,Schwab Fundamental U.S. Small Company ETF
+FNDE,Schwab Fundamental Emerging Markets Equity ETF
+FNDF,Schwab Fundamental International Equity ETF
+FNDX,Schwab Fundamental U.S. Large Company ETF
 FNGD,"MicroSectors FANG+ Index -3X Inverse Leveraged ETNs due January 8, 2038"
 FNGU,"MicroSectors FANG+ 3x Leveraged ETNs due February 17, 2045"
+FPE,First Trust Preferred Securities and Income ETF
+FR,"First Industrial Realty Trust, Inc."
+FROG,JFrog Ltd. Ordinary Shares
+FRT,Federal Realty Investment Trust
+FSV,FirstService Corporation Common Shares
+FTCB,First Trust Core Investment Grade ETF
+FTCS,First Trust Capital Strength ETF
+FTEC,Fidelity MSCI Information Technology Index ETF
+FTGC,First Trust Exchange-Traded Fund VII First Trust Global Tactical Commodity Strategy Fund
+FTHI,First Trust Exchange-Traded Fund VI First Trust BuyWrite Income ETF
+FTI,TechnipFMC plc Ordinary Share
+FTS,Fortis Inc. Common Shares
+FTSL,First Trust Exchange-Traded Fund IV First Trust Senior Loan Fund ETF
 FTSM,First Trust Exchange-Traded Fund IV First Trust Enhanced Short Maturity ETF
+FTXL,First Trust Exchange-Traded Fund VI First Trust Nasdaq Semiconductor ETF
+FUTU,Futu Holdings Limited American Depositary Shares
+FUTY,Fidelity MSCI Utilities Index ETF
+FVD,First Trust Value Line Dividend Fund
+FWD,AB Disruptors ETF
+FXE,Invesco CurrencyShares Euro Currency Trust
+FXI,iShares China Large-Cap ETF
+FXN,First Trust Energy AlphaDEX Fund
+FXU,First Trust Utilities AlphaDEX Fund
+GBIL,Goldman Sachs Access Treasury 0-1 Year ETF
+GBTC,Grayscale Bitcoin Trust ETF
+GCT,GigaCloud Technology Inc Class A Ordinary Shares
+GDX,VanEck Gold Miners ETF
 GDXD,MicroSectors Gold Miners -3x Inverse Leveraged ETN
+GDXJ,VanEck Junior Gold Miners ETF
 GDXU,MicroSectors Gold Miners 3x Leveraged ETN
+GFL,GFL Environmental Inc. Subordinate Voting Shares
+GFS,GlobalFoundries Inc. Ordinary Shares
+GGAL,Grupo Financiero Galicia S.A. American Depositary Shares
 GGLL,Direxion Shares ETF Trust Direxion Daily GOOGL Bull 2X ETF
 GGLS,Direxion Shares ETF Trust Direxion Daily GOOGL Bear 1X ETF
+GILT,Gilat Satellite Networks Ltd. Ordinary Shares
+GLBE,Global-E Online Ltd. Ordinary Shares
+GLD,"SPDR Gold Trust, SPDR Gold Shares"
 GLL,ProShares UltraShort Gold
+GLTR,abrdn Physical Precious Metals Basket Shares ETF
 GLWG,Themes ETF Trust Leverage Shares 2X Long GLW Daily ETF
+GNR,State Street SPDR S&P Global Natural Resources ETF
+GOF,Guggenheim Strategic Opportunities Fund
+GOOGM,Alphabet Inc. Depositary Shares representing a 1/20th Interest in a Share of Series A Mandatory Convertible Preferred Stock
+GOOGN,Alphabet Inc. Depositary Shares representing a 1/20th Interest in a Share of Series B Mandatory Convertible Preferred Stock
+GPCR,Structure Therapeutics Inc. American Depositary Shares
+GPIQ,Goldman Sachs ETF Trust Goldman Sachs Nasdaq-100 Premium Income ETF
+GPIX,Goldman Sachs ETF Trust Goldman Sachs S&P 500 Premium Income ETF
+GRAB,Grab Holdings Limited Class A Ordinary Shares
+GRC,The Gorman-Rupp Company Common Shares
+GRID,First Trust NASDAQ Clean Edge Smart Grid Infrastructure Index Fund
+GRNY,FundStrat Granny Shots US Large Cap ETF
+GRRR,Gorilla Technology Group Inc. Ordinary shares
+GSG,iShares S&P  GSCI Commodity-Indexed Trust
+GSIE,Goldman Sachs ActiveBeta International Equity ETF
+GSK,GSK plc American Depositary Shares (Each representing two Ordinary Shares)
+GSLC,Goldman Sachs ActiveBeta U.S. Large Cap Equity ETF
+GSOL,Grayscale Solana Staking ETF Shares
 GSY,Invesco Ultra Short Duration ETF
+GUNR,Northern Trust Morningstar Global Upstream Natural Resources ETF
 GUSH,Direxion Daily S&P Oil & Gas Exp. & Prod. Bull 2X ETF
+HACK,Amplify Cybersecurity ETF
+HDV,iShares Core High Dividend ETF
+HELO,JPMorgan Hedged Equity Laddered Overlay ETF
+HESM,Hess Midstream LP Class A Share representing a limited partner Interest
+HG,"Hamilton Insurance Group, Ltd. Class B Common Shares"
+HGER,Harbor Commodity All-Weather Strategy ETF
+HIMX,"Himax Technologies, Inc. American Depositary Shares"
 HIMZ,Tidal Trust II Defiance Daily Target 2X Long HIMS ETF
+HIVE,HIVE Digital Technologies Ltd. Common Shares
+HLN,Haleon plc American Depositary Shares (Each representing two Ordinary Shares)
+HMC,"Honda Motor Co., Ltd. American Depositary Share, each representing three (3) shares of Common Stock"
 HOOG,Themes ETF Trust Leverage Shares 2X Long HOOD Daily ETF
+HR,Healthcare Realty Trust Incorporated
+HSAI,Hesai Group American Depositary Share
+HTHT,H World Group Limited American Depositary Shares
+HYG,iShares iBoxx $ High Yield Corporate Bond ETF
+HYLB,Xtrackers USD High Yield Corporate Bond ETF
+HYMB,State Street SPDR Nuveen ICE High Yield Municipal Bond ETF
 HYNX,T-REX 2X Long SKHY Daily Target ETF
+IAI,iShares U.S. Broker-Dealers & Securities Exchanges ETF
+IALT,BlackRock ETF Trust iShares Systematic Alternatives Active ETF
+IAT,iShares U.S. Regional Banks ETF
+IAU,iShares Gold Trust
+IAUM,iShares Gold Trust Micro
+IBB,iShares Biotechnology ETF
+IBDR,iShares iBonds Dec 2026 Term Corporate ETF
+IBDS,iShares iBonds Dec 2027 Term Corporate ETF
+IBDT,iShares iBonds Dec 2028 Term Corporate ETF
+IBDU,iShares iBonds Dec 2029 Term Corporate ETF
+IBDV,iShares iBonds Dec 2030 Term Corporate ETF
+IBDW,iShares iBonds Dec 2031 Term Corporate ETF
+IBIT,iShares Bitcoin Trust ETF Shares
+ICHR,Ichor Holdings Ordinary Shares
+ICLN,iShares Global Clean Energy ETF
+ICLR,ICON plc Ordinary Shares
+IDEF,BlackRock ETF Trust iShares Defense Industrials and Tech Active ETF
+IDEV,iShares Core MSCI International Developed Markets ETF
+IDMO,Invesco S&P International Developed Momentum ETF
+IDVO,Amplify CWP International Enhanced Dividend Income ETF
+IEF,iShares 7-10 Year Treasury Bond ETF
+IEI,iShares 3-7 Year Treasury Bond ETF
+IEMG,iShares Core MSCI Emerging Markets ETF
+IEUR,iShares Core MSCI Europe ETF
+IGF,iShares Global Infrastructure ETF
+IGIB,iShares Trust iShares 5-10 Year Investment Grade Corporate Bond ETF
+IGLB,iShares 10+ Year Investment Grade Corporate Bond ETF
+IGM,iShares Expanded Tech Sector ETF
+IGSB,iShares Trust iShares 1-5 Year Investment Grade Corporate Bond ETF
+IHF,iShares U.S. Healthcare Providers ETF
+IHI,iShares U.S. Medical Devices ETF
+IJH,iShares Core S&P Mid-Cap ETF
+IJJ,iShares S&P Mid-Cap 400 Value ETF
+IJK,iShares S&P Mid-Cap 400 Growth ETF
+IJR,iShares Core S&P Small-Cap ETF
+IJS,iShares S&P Small-Cap 600 Value ETF
+IJT,iShares S&P SmallCap 600 Growth ETF
+ILF,iShares Latin America 40 ETF
+IMCR,Immunocore Holdings plc American Depositary Shares
+IMTM,iShares MSCI Intl Momentum Factor ETF
+INCM,Franklin Income Focus ETF
+INFY,Infosys Limited American Depositary Shares
+ING,ING Groep N.V. American Depositary Shares
+INIO,INNIO N.V. Ordinary Shares
+INTR,Inter & Co. Inc. Class A Common Shares
 INTW,GraniteShares ETF Trust GraniteShares 2x Long INTC Daily ETF
 IONL,GraniteShares ETF Trust GraniteShares 2x Long IONQ Daily ETF
 IONX,Tidal Trust II Defiance Daily Target 2X Long IONQ ETF
 IONZ,Tidal Trust II Defiance Daily Target 2x Short IONQ ETF
+IOO,iShares Global 100 ETF
+IQLT,iShares MSCI Intl Quality Factor ETF
+IQMM,ProShares GENIUS Money Market ETF
+IQQ,iShares Trust iShares Nasdaq 100 ETF
 IRE,Defiance Daily Target 2X Long IREN ETF
+IREN,IREN Limited Ordinary Shares
+IRT,Independence Realty Trust Inc.
+ISTB,iShares Core 1-5 Year USD Bond ETF
+ITOT,iShares Core S&P Total U.S. Stock Market ETF
+ITUB,Itau Unibanco Holding S.A. American Depositary Shares
+IUSB,iShares Trust iShares Core Universal USD Bond ETF
+IUSG,iShares Core S&P U.S. Growth ETF
+IUSV,iShares Core S&P U.S. Value ETF
+IVE,iShares S&P 500 Value ETF
+IVES,Dan IVES Wedbush AI Revolution ETF
+IVLU,iShares MSCI Intl Value Factor ETF
+IVV,iShares Core S&P 500 ETF
+IVW,iShares S&P 500 Growth ETF
+IWB,iShares Russell 1000 ETF
+IWC,iShares Micro-Cap ETF
+IWD,iShares Russell 1000 Value ETF
+IWF,iShares Russell 1000 Growth ETF
+IWM,iShares Russell 2000 ETF
+IWN,iShares Russell 2000 Value ETF
+IWO,iShares Russell 2000 Growth ETF
+IWP,iShares Russell Mid-Cap Growth ETF
+IWR,iShares Russell Mid-Cap ETF
+IWS,iShares Russell Mid-Cap Value ETF
+IWV,iShares Russell 3000 ETF
+IWX,iShares Russell Top 200 Value ETF
+IWY,iShares Russell Top 200 Growth ETF
+IXC,iShares Global Energy ETF
+IXJ,iShares Global Healthcare ETF
+IXN,iShares Global Tech ETF
+IXUS,iShares Core MSCI Total International Stock ETF
+IYE,iShares U.S. Energy ETF
+IYF,iShares U.S. Financials ETF
+IYH,iShares U.S. Healthcare ETF
+IYK,iShares U.S. Consumer Staples ETF
+IYM,iShares U.S. Basic Materials ETF
+IYR,iShares U.S. Real Estate ETF
+IYW,iShares U.S. Technology ETF
+JAAA,Janus Henderson AAA CLO ETF
+JAVA,JPMorgan Active Value ETF
+JBND,JPMorgan Active Bond ETF
+JCPB,JPMorgan Core Plus Bond ETF
+JD,"JD.com, Inc. American Depositary Shares"
 JDST,Direxion Daily Junior Gold Miners Index Bear 2X ETF
+JEPI,JPMorgan Equity Premium Income ETF
+JEPQ,J.P. Morgan Exchange-Traded Fund Trust JPMorgan Nasdaq Equity Premium Income ETF
+JETS,U.S. Global Jets ETF
+JGRO,JPMorgan Active Growth ETF
+JHMM,John Hancock Multifactor Mid Cap ETF
+JIRE,JPMorgan International Research Enhanced Equity ETF
+JIVE,J.P. Morgan Exchange-Traded Fund Trust JPMorgan International Value ETF
+JMBS,Janus Henderson Mortgage-Backed Securities ETF
 JMST,JPMorgan Ultra-Short Municipal Income ETF
+JMTG,JPMorgan Mortgage-Backed Securities ETF
+JMUB,JPMorgan Municipal ETF
+JNK,State Street SPDR Bloomberg High Yield Bond ETF
 JNUG,Direxion Daily Junior Gold Miners Index Bull 2X ETF
+JOYY,JOYY Inc. American Depositary Shares
+JPIE,JPMorgan Income ETF
+JPLD,JPMorgan Limited Duration Bond ETF
 JPST,JPMorgan Ultra-Short Income ETF
+JQUA,JPMorgan U.S. Quality Factor ETF
+JTEK,J.P. Morgan Exchange-Traded Fund Trust JPMorgan U.S. Tech Leaders ETF
+KBE,State Street SPDR S&P Bank ETF
+KBWB,Invesco Exchange-Traded Fund Trust II Invesco KBW Bank ETF
+KC,Kingsoft Cloud Holdings Limited American Depositary Shares
+KIE,State Street SPDR S&P Insurance ETF
+KNSA,"Kiniksa Pharmaceuticals International, plc Class A Ordinary Shares"
 KOLD,ProShares UltraShort Bloomberg Natural Gas
 KORU,Direxion Daily MSCI South Korea Bull 3X ETF
+KRE,State Street SPDR S&P Regional Banking ETF
+KRG,Kite Realty Group Trust
+KSA,iShares MSCI Saudi Arabia ETF
+KSPI,Joint Stock Company Kaspi.kz American Depository Shares
+KWEB,KraneShares CSI China Internet ETF
 LABD,Direxion Daily S&P Biotech Bear 3X ETF
 LABU,Direxion Daily S&P Biotech Bull 3X ETF
+LAES,SEALSQ Corp Ordinary Shares
+LBTYA,Liberty Global Ltd. Class A Common Shares
+LBTYK,Liberty Global Ltd. Class C Common Shares
+LECO,"Lincoln Electric Holdings, Inc. Common Shares"
+LEGN,Legend Biotech Corporation American Depositary Shares
+LI,Li Auto Inc. American Depositary Shares
+LIN,Linde plc Ordinary Shares
 LINT,Direxion Shares ETF Trust Direxion Daily INTC Bull 2X ETF
+LIT,Global X Lithium & Battery Tech ETF
+LIVN,LivaNova PLC Ordinary Shares
+LMBS,First Trust Exchange-Traded Fund IV First Trust Low Duration Opportunities ETF
 LOFF,Direxion Daily SpaceX Bull 2X ETF
+LOGI,Logitech International S.A. Ordinary Shares
+LQD,iShares iBoxx $ Investment Grade Corporate Bond ETF
+LRGF,iShares U.S. Equity Factor ETF
+LTM,"LATAM Airlines Group S.A. American Depositary Shares (each representing two thousand (2,000) shares of Common Stock)"
+LXP,LXP Industrial Trust
+MBB,iShares MBS ETF
+MCB,"Metropolitan Bank Holding Corp. Common Stock, $0.01 par value per share"
+MCHI,iShares MSCI China ETF
+MDY,State Street SPDR S&P MIDCAP 400 ETF Trust
 METU,Direxion Shares ETF Trust Direxion Daily META Bull 2X ETF
+MFG,"Mizuho Financial Group, Inc. American Depositary Shares (Each representing one-fifth of an Ordinary Share)"
+MGC,Vanguard Morningstar Mega Cap ETF
+MGK,Vanguard Morningstar Mega Cap Growth ETF
+MGV,Vanguard Morningstar Mega Cap Value ETF
 MINT,PIMCO Enhanced Short Maturity Active Exchange-Traded Fund
+MLCO,Melco Resorts & Entertainment Limited American Depositary Shares
+MLPA,Global X MLP ETF
+MLPX,Global X MLP & Energy Infrastructure ETF
+MLTX,MoonLake Immunotherapeutics Class A Ordinary Shares
+MMYT,MakeMyTrip Limited Ordinary Shares
+MNDY,monday.com Ltd. Ordinary Shares
+MOO,VanEck Agribusiness ETF
+MORT,VanEck Mortgage REIT Income ETF
+MPT,"Medical Properties Trust, Inc."
 MRVU,Direxion Shares ETF Trust Direxion Daily MRVL Bull 2X ETF
+MRX,Marex Group Limited Ordinary Shares
+MSBT,Morgan Stanley Bitcoin Trust
 MSFD,Direxion Shares ETF Trust Direxion Daily MSFT Bear 1X ETF
 MSFL,GraniteShares ETF Trust GraniteShares 2x Long MSFT Daily ETF
 MSFU,Direxion Shares ETF Trust Direxion Daily MSFT Bull 2X ETF
+MSOS,AdvisorShares Pure US Cannabis ETF
 MSTX,Tidal Trust II Defiance Daily Target 2x Long MSTR ETF
+MSTY,YieldMax MSTR Option Income Strategy ETF
+MUB,iShares National Muni Bond ETF
 MUD,Direxion Shares ETF Trust Direxion Daily MU Bear 1X ETF
 MULL,GraniteShares ETF Trust GraniteShares 2x Long MU Daily ETF
+MUNI,PIMCO Intermediate Municipal Bond Active Exchange-Traded Fund
 MUU,Direxion Shares ETF Trust Direxion Daily MU Bull 2X ETF
 MUZ,Defiance Daily Target 2X Short MU ETF
 MVLL,GraniteShares ETF Trust GraniteShares 2x Long MRVL Daily ETF
 NAIL,Direxion Daily Homebuilders & Supplies Bull 3X ETF
+NAMS,NewAmsterdam Pharma Company N.V. Ordinary Shares
+NASA,Tema Space Innovators ETF
 NBIG,Themes ETF Trust Leverage Shares 2X Long NBIS Daily ETF
 NBIL,GraniteShares ETF Trust GraniteShares 2x Long NBIS Daily ETF
+NBIS,Nebius Group N.V. Class A Ordinary Shares
+NCLD,Roundhill ETF Trust Roundhill Neocloud ETF
+NCLH,Norwegian Cruise Line Holdings Ltd. Ordinary Shares
+NESR,National Energy Services Reunited Corp Ordinary Shares
+NET,"Cloudflare, Inc. Class A common stock, par value $0.001 per share"
 NFXL,Direxion Shares ETF Trust Direxion Daily NFLX Bull 2X ETF
+NICE,NICE Ltd American Depositary Shares
+NIO,"NIO Inc. American depositary shares, each representing one Class A ordinary share"
+NLR,VanEck Uranium and Nuclear ETF
 NOWL,GraniteShares ETF Trust GraniteShares 2x Long NOW Daily ETF
+NTES,"NetEase, Inc. American Depositary Shares"
+NTR,Nutrien Ltd. Common Shares
+NTRS,Northern Trust Corporation Common Stock
 NUGT,Direxion Daily Gold Miners Index Bull 2X ETF
+NVCR,NovoCure Limited Ordinary Shares
 NVD,GraniteShares ETF Trust GraniteShares 2x Short NVDA Daily ETF
 NVDL,GraniteShares ETF Trust GraniteShares 2x Long NVDA Daily ETF
 NVDU,Direxion Shares ETF Trust Direxion Daily NVDA Bull 2X ETF
+NVDY,YieldMax NVDA Option Income Strategy ETF
+NVMI,Nova Ltd. Ordinary Shares
+NVST,"Envista Holdings Corporation Common stock, $0.01 par value per share"
+NVT,nVent Electric plc Ordinary Shares
+NWG,"NatWest Group plc American Depositary Shares, (each representing two (2) Ordinary Shares)"
+OCTV,Octave Intelligence plc Class B Ordinary Shares
+ODD,ODDITY Tech Ltd. Class A Ordinary Shares
+OEF,iShares S&P 100 ETF
+OIH,VanEck Oil Services ETF
 OKLL,Tidal Trust II Defiance Daily Target 2x Long OKLO ETF
+OMAH,VistaShares Target 15 Berkshire Select Income ETF
+ONC,BeOne Medicines Ltd. American Depositary Shares
+ONEQ,Fidelity Nasdaq Composite Index ETF
 ORCU,Direxion Shares ETF Trust Direxion Daily ORCL Bull 2X ETF
 ORCX,Tidal Trust II Defiance Daily Target 2X Long ORCL ETF
+OSW,OneSpaWorld Holdings Limited Common Shares
+OTEX,Open Text Corporation Common Shares
+OUNZ,VanEck Merk Gold ETF
+PAAA,PGIM AAA CLO ETF
+PAC,"Grupo Aeroportuario del Pacifico, S.A.B. de C.V. Amer. Dep. Shares (each rep. 10 Ser. B shares)"
+PALL,abrdn Physical Palladium Shares ETF
+PAX,Patria Investments Limited Class A Common Shares
+PAYP,PayPay Corporation American Depository Shares
+PBR,PETROLEO BRASILEIRO S.A.-PETROBRAS ADS (REP 1 COMMON SHARE)
+PBW,Invesco WilderHill Clean Energy ETF
+PDBC,Invesco Actively Managed Exch-Traded Commodity Fd Tr Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF
+PDD,PDD Holdings Inc. American Depositary Shares
+PDI,PIMCO Dynamic Income Fund
+PEB,Pebblebrook Hotel Trust
+PFF,iShares Trust iShares Preferred and Income Securities ETF
+PFFA,Virtus InfraCap U.S. Preferred Stock ETF
+PFFD,Global X U.S. Preferred ETF
+PFIX,Simplify Interest Rate Hedge ETF
+PFXF,VanEck Preferred Securities ex Financials ETF
+PGX,Invesco Preferred ETF
+PGY,Pagaya Technologies Ltd. Class A Ordinary Shares
+PHYS,Sprott Physical Gold Trust
+PKX,POSCO Holdings Inc. American Depositary Shares (Each representing 1/4th of a share of Common Stock)
 PLTD,Direxion Shares ETF Trust Direxion Daily PLTR Bear 1X ETF
 PLTU,Direxion Shares ETF Trust Direxion Daily PLTR Bull 2X ETF
 PLTZ,Tidal Trust II Defiance Daily Target 2x Short PLTR ETF
+PMMF,iShares Prime Money Market ETF
+PMT,PennyMac Mortgage Investment Trust
+POET,POET Technologies Inc. Common Shares
+PONY,Pony AI Inc. American Depositary Shares
+PPA,Invesco Aerospace & Defense ETF
+PPH,VanEck Pharmaceutical ETF
+PPLT,abrdn Physical Platinum Shares ETF
+PPTA,Perpetua Resources Corp. Common Shares
+PRF,Invesco RAFI US 1000 ETF
+PSI,Invesco Semiconductors ETF
+PSLV,Sprott Physical Silver Trust
 PSQ,ProShares Short QQQ
 PTIR,GraniteShares ETF Trust GraniteShares 2x Long PLTR Daily ETF
+PTY,PIMCO Corporate & Income Opportunity Fund
+PUK,PRUDENTIAL PLC ADS (REP 2 ORD SHARES)
 PULS,PGIM Ultra Short Bond ETF
+PVAL,Putnam Focused Large Cap Value ETF
+PWB,Invesco Large Cap Growth ETF
+PYLD,PIMCO Multi Sector Bond Active ETF
+PZA,Invesco National AMT-Free Municipal Bond ETF
 QBTZ,Tidal Trust II Defiance Daily Target 2x Short QBTS ETF
+QFIN,"Qfin Holdings, Inc. American Depositary Shares"
+QGRO,American Century U.S. Quality Growth ETF
+QGRW,WisdomTree U.S. Quality Growth Fund
 QID,ProShares UltraShort QQQ
 QLD,ProShares Ultra QQQ
+QLTY,GMO U.S. Quality ETF
+QQQ,"Invesco QQQ Trust, Series 1"
+QQQE,Direxion Shares ETF Trust Direxion NASDAQ-100 Equal Weighted Index ETF
+QQQI,NEOS ETF Trust NEOS Nasdaq 100 High Income ETF
+QQQM,Invesco Exchange-Traded Fund Trust II Invesco NASDAQ 100 ETF
+QTEC,First Trust NASDAQ-100-Technology Sector Index Fund
+QTUM,Defiance Quantum ETF
+QURE,uniQure N.V. Ordinary Shares
+QYLD,Global X Funds Global X NASDAQ-100 Covered Call ETF
+RDVY,First Trust Rising Dividend Achievers ETF
+RDY,Dr. Reddy's Laboratories Limited American Depositary Shares
+RECS,Columbia Research Enhanced Core ETF
+REET,iShares Global REIT ETF
+REMX,VanEck Rare Earth and Strategic Metals ETF
 RFIX,Simplify Bond Bull ETF
 RGTX,Tidal Trust II Defiance Daily Target 2X Long RGTI ETF
 RGTZ,Tidal Trust II Defiance Daily Target 2x Short RGTI ETF
+RING,iShares MSCI Global Gold Miners Fund
 RKLX,Tidal Trust II Defiance Daily Target 2X Long RKLB ETF
 RKLZ,Tidal Trust II Defiance Daily Target 2x Short RKLB ETF
+RLJ,RLJ Lodging Trust
+ROBO,ROBO Global Robotics & Automation Index ETF
+ROIV,Roivant Sciences Ltd. Common Shares
+RPG,Invesco S&P 500 Pure Growth ETF
+RPRX,Royalty Pharma plc Class A Ordinary Shares
+RPV,Invesco S&P 500 Pure Value ETF
+RSP,Invesco S&P 500 Equal Weight ETF
+RSPG,Invesco S&P 500 Equal Weight Energy ETF
+RSPT,Invesco S&P 500 Equal Weight Technology ETF
+RTO,Rentokil Initial plc American Depositary Shares (each representing five (5) Ordinary Shares)
+RVI,Robinhood Ventures Fund I
+RWL,Invesco S&P 500 Revenue ETF
 RWM,ProShares Short Russell2000
+RWR,State Street SPDR Dow Jones REIT ETF
+RYAAY,Ryanair Holdings plc American Depositary Shares
+RZLV,Rezolve AI PLC Ordinary Shares
+SBIL,Simplify Government Money Market ETF
 SBIT,ProShares UltraShort Bitcoin ETF
+SBLK,Star Bulk Carriers Corp. Common Shares
+SBSW,"Sibanye-Stillwater American Depositary Shares, each representing four ordinary shares"
+SCHA,Schwab U.S Small- Cap ETF
+SCHB,Schwab U.S. Broad Market ETF
+SCHC,Schwab International Small-Cap Equity ETF
+SCHD,Schwab US Dividend Equity ETF
+SCHE,Schwab Emerging Markets Equity ETF
+SCHF,Schwab International Equity ETF
+SCHG,Schwab U.S. Large-Cap Growth ETF
+SCHH,Schwab U.S. REIT ETF
+SCHI,Schwab 5-10 Year Corporate Bond ETF
+SCHK,Schwab 1000 Index ETF
+SCHM,Schwab U.S. Mid-Cap ETF
 SCHO,Schwab Short-Term U.S. Treasury ETF
+SCHP,Schwab U.S. TIPS ETF
+SCHQ,Schwab Long-Term U.S. Treasury ETF
+SCHR,Schwab Intermediately-Term U.S. Treasury ETF
+SCHV,Schwab U.S. Large-Cap Value ETF
+SCHX,Schwab U.S. Large- Cap ETF
+SCHY,Schwab International Dividend Equity ETF
+SCHZ,Schwab US Aggregate Bond ETF
+SCMB,Schwab Municipal Bond ETF
 SCO,ProShares UltraShort Bloomberg Crude Oil
+SCYB,Schwab High Yield Bond ETF
+SCZ,iShares MSCI EAFE Small-Cap ETF
+SDIV,Global X SuperDividend ETF
 SDOW,ProShares UltraPro Short Dow 30
 SDS,ProShares UltraShort S&P500
+SDVY,First Trust Exchange-Traded Fund VI First Trust SMID Cap Rising Dividend Achievers ETF
+SDY,State Street SPDR S&P Dividend ETF
+SE,"Sea Limited American Depositary Shares, each representing one Class A Ordinary Share"
+SGLD,Scorpio Gold Corporation American Depositary Shares
+SGML,Sigma Lithium Corporation Common Shares
+SGOL,abrdn Physical Gold Shares ETF
+SGOV,iShares 0-3 Month Treasury Bond ETF
+SGVT,Schwab Government Money Market ETF
 SH,ProShares Short S&P500
+SHEL,Shell plc American Depositary Shares (Each represents two Ordinary shares)
+SHLD,Global X Defense Tech ETF
 SHNY,MicroSectors Gold 3x Leveraged ETN
+SHOP,Shopify Inc. Class A subordinate voting shares
+SHV,iShares Trust iShares 0-1 Year Treasury Bond ETF
+SHY,iShares 1-3 Year Treasury Bond ETF
+SHYG,iShares 0-5 Year High Yield Corporate Bond ETF
+SIL,Global X Silver Miners ETF (NEW)
+SILJ,Amplify Junior Silver Miners ETF
+SIMO,Silicon Motion Technology Corporation American Depositary Shares
+SIVR,abrdn Physical Silver Shares ETF
 SJNK,State Street SPDR Bloomberg Short Term High Yield Bond ETF
 SKDD,GraniteShares ETF Trust GraniteShares 2x Short SK Hynix Daily ETF
 SKHL,Direxion Daily SK Hynix Bull 2X ETF
 SKHU,ProShares Ultra SK hynix
+SKHY,SK hynix Inc. American Depositary Shares
+SKM,"SK Telecom Co., Ltd. American Depositary Shares (Each representing 5/9th of a Ordinary Share of SK Telecom Co., LTD.)"
 SKUU,GraniteShares ETF Trust GraniteShares 2x Long SK Hynix Daily ETF
+SKYY,First Trust Cloud Computing ETF
+SLV,iShares Silver Trust
+SLVR,Sprott Funds Trust Sprott Silver Miners & Physical Silver ETF
+SLYG,State Street SPDR S&P 600 Small Cap Growth ETF
+SLYV,State Street SPDR S&P 600 Small Cap Value ETF
+SMBS,Schwab Mortgage-Backed Securities ETF
+SMCIP,"Super Micro Computer, Inc. Depositary Shares representing a 1/20th Interest in a Share of 7% Series A Mandatory Convertible Preferred Stock"
 SMCL,GraniteShares ETF Trust GraniteShares 2x Long SMCI Daily ETF
 SMCX,Tidal Trust II Defiance Daily Target 2X Long SMCI ETF
+SMFG,"Sumitomo Mitsui Financial Group, Inc American Depositary Shares (each representing 3/5th of a share of common stock)"
+SMH,VanEck Semiconductor ETF
+SMLF,iShares U.S. Small Cap Equity Factor ETF
 SMST,Tidal Trust II Defiance Daily Target 2x Short MSTR ETF
+SNPE,Xtrackers S&P 500 Scored & Screened ETF
 SOFX,Tidal Trust II Defiance Daily Target 2X Long SOFI ETF
 SOLT,Volatility Shares Trust 2x Solana ETF
+SOLZ,Volatility Shares Trust Solana ETF
+SONY,Sony Group Corporation American Depositary Shares (Each Representing One Share of Dollar Validated Common Stock)
 SOXL,Direxion Daily Semiconductor Bull 3X ETF
+SOXQ,Invesco Exchange-Traded Fund Trust II Invesco PHLX Semiconductor ETF
 SOXS,Direxion Daily Semiconductor Bear 3X ETF
+SOXX,iShares Semiconductor ETF
+SPAB,State Street SPDR Portfolio Aggregate Bond ETF
 SPAX,T-REX 2X Long SPCX Daily Target ETF
+SPBO,State Street SPDR Portfolio Corporate Bond ETF
 SPCF,ProShares Ultra SpaceX
 SPDN,Direxion Daily S&P 500 Bear 1X ETF
+SPDW,State Street SPDR Portfolio Developed World ex-US ETF
+SPEM,State Street SPDR Portfolio Emerging Markets ETF
+SPHB,Invesco S&P 500 High Beta ETF
+SPHD,Invesco S&P 500 High Dividend Low Volatility ETF
+SPHQ,Invesco S&P 500 Quality ETF
+SPHY,State Street SPDR Portfolio High Yield Bond ETF
+SPIB,State Street SPDR Portfolio Intermediate Term Corporate Bond ETF
+SPLB,State Street SPDR Portfolio Long Term Corporate Bond ETF
+SPLV,Invesco S&P 500 Low Volatility ETF
+SPMB,State Street SPDR Portfolio Mortgage Backed Bond ETF
+SPMD,State Street SPDR Portfolio S&P 400 Mid Cap ETF
+SPMO,Invesco S&P 500 Momentum ETF
 SPSB,State Street SPDR Portfolio Short Term Corporate Bond ETF
+SPSM,State Street SPDR Portfolio S&P 600 Small Cap ETF
+SPTI,State Street SPDR Portfolio Intermediate Term Treasury ETF
+SPTL,State Street SPDR Portfolio Long Term Treasury ETF
+SPTM,State Street SPDR Portfolio S&P 1500 Composite Stock Market ETF
 SPTS,State Street SPDR Portfolio Short Term Treasury ETF
+SPUS,SP Funds S&P 500 Sharia ETF
 SPXL,Direxion Daily S&P 500 Bull 3x ETF
 SPXS,Direxion Daily S&P 500 Bear 3x ETF
 SPXU,ProShares UltraPro Short S&P 500
+SPY,State Street SPDR S&P 500 ETF Trust
+SPYD,State Street SPDR Portfolio S&P 500 High Dividend ETF
+SPYG,State Street SPDR Portfolio S&P 500 Growth ETF
+SPYM,State Street SPDR Portfolio S&P 500 ETF
 SPYU,MAX S&P 500 4x Leveraged ETN
+SPYV,State Street SPDR Portfolio S&P 500 Value ETF
 SQQQ,ProShares UltraPro Short QQQ
+SRAD,Sportradar Group AG Class A Ordinary Shares
+SRLN,State Street Blackstone Senior Loan ETF
 SRTY,ProShares UltraPro Short Russell2000
 SSO,ProShares Ultra S&P500
+STIP,iShares 0-5 Year TIPS Bond ETF
+STNE,StoneCo Ltd. Class A Common Shares
+STWD,"STARWOOD PROPERTY TRUST, INC."
+STX,Seagate Technology Holdings PLC Ordinary Shares (Ireland)
 SUB,iShares Short-Term National Muni Bond ETF
+SUZ,Suzano S.A. American Depositary Shares (each representing one Ordinary Share ) representing one Ordinary Share)
+SVC,Service Properties Trust Common Shares of Beneficial Interest
+TAK,Takeda Pharmaceutical Company Limited American Depositary Shares (each representing 1/2 of a share of Common Stock)
+TAN,Invesco Solar ETF
+TBIL,"The RBB Fund, Inc. F/m US Treasury 3 Month Bill Fund"
 TBLL,Invesco Short Term Treasury ETF
 TBT,ProShares Trust UltraShort Lehman 20+ Year Treasury
+TCAF,T. Rowe Price Capital Appreciation Equity ETF
+TCOM,Trip.com Group Limited American Depositary Shares
+TDIV,First Trust Exchange-Traded Fund VI First Trust NASDAQ Technology Dividend Index Fund
 TECL,Direxion Daily Technology Bull 3x ETF
 TECS,Direxion Daily Technology Bear 3x ETF
+TEVA,Teva Pharmaceutical Industries Limited American Depositary Shares
+TFI,State Street SPDR Nuveen ICE Municipal Bond ETF
+TFLO,iShares Treasury Floating Rate Bond ETF
+THRO,iShares U.S. Thematic Rotation Active ETF
+TIGR,UP Fintech Holding Ltd American Depositary Share representing fifteen Class A Ordinary Shares
+TIP,iShares TIPS Bond ETF
+TLH,iShares 10-20 Year Treasury Bond ETF
+TLT,iShares 20 Year Treasury Bond ETF
+TM,Toyota Motor Corporation American Depositary Shares (Each representing ten Ordinary Shares)
+TME,"Tencent Music Entertainment Group American Depositary Shares, each representing two Class A Ordinary Shares"
 TMF,Direxion Daily 20+ Year Treasury Bull 3X ETF
+TMSL,T. Rowe Price Small-Mid Cap ETF
 TMV,Direxion Daily 20+ Year Treasury Bear 3X ETF
 TNA,Direxion Daily Small Cap Bull 3x ETF
+TOPT,iShares Top 20 U.S. Stocks ETF
+TOTL,State Street DoubleLine Total Return Tactical ETF
 TQQQ,ProShares UltraPro QQQ
+TRAX,"First Tracks Biotherapeutics, Inc. Ordinary Shares"
+TRFK,Pacer Data and Digital Revolution ETF
+TRI,Thomson Reuters Corporation Common Shares
+TROX,TRONOX LIMITED CL A ORDINARY SHARES
 TSDD,GraniteShares ETF Trust GraniteShares 2x Short TSLA Daily ETF
+TSEM,Tower Semiconductor Ltd. Ordinary Shares
 TSL,GraniteShares ETF Trust GraniteShares 1.25x Long TSLA Daily ETF
 TSLG,Themes ETF Trust Leverage Shares 2X Long TSLA Daily ETF
 TSLL,Direxion Shares ETF Trust Direxion Daily TSLA Bull 2X ETF
 TSLQ,Investment Managers Series Trust II Tradr 2X Short TSLA Daily ETF
 TSLR,GraniteShares ETF Trust GraniteShares 2x Long TSLA Daily ETF
 TSLS,Direxion Shares ETF Trust Direxion Daily TSLA Bear 1X ETF
+TSLY,YieldMax TSLA Option Income Strategy ETF
 TSMX,Direxion Shares ETF Trust Direxion Daily TSM Bull 2X ETF
 TWM,ProShares UltraShort Russell2000
+TX,Ternium S.A. American Depositary Shares
 TZA,Direxion Daily Small Cap Bear 3x ETF
 UCO,ProShares Ultra Bloomberg Crude Oil
+UCON,First Trust Smith Unconstrained Bond ETF
 UDOW,ProShares UltraPro Dow 30
+UFO,Procure ETF Trust II Procure Space ETF
 UGL,ProShares Ultra Gold
 ULTY,YieldMax Ultra Option Income Strategy ETF
+UNG,"United States Natural Gas Fund, LP Unit"
 UNHG,Themes ETF Trust Leverage Shares 2X Long UNH Daily ETF
 UPRO,ProShares UltraPro S&P 500
+URA,Global X Uranium ETF
+URGN,UroGen Pharma Ltd. Ordinary Shares
+URNM,Sprott Uranium Miners ETF
+URTH,iShares MSCI World ETF
 URTY,ProShares UltraPro Russell2000
 USD,ProShares Ultra Semiconductors
+USFR,WisdomTree Floating Rate Treasury Fund
+USIG,iShares Broad USD Investment Grade Corporate Bond ETF
+USO,"United States Oil Fund, LP"
+USRT,iShares Core U.S. REIT ETF
+UTES,Virtus Reaves Utilities ETF
+UUP,Invesco DB US Dollar Index Bullish Fund
 UWM,ProShares Ultra Russell2000
+VAW,Vanguard Materials ETF
+VB,Vanguard Morningstar Small-Cap ETF
+VBIL,Vanguard Institutional Index Funds Vanguard 0-3 Month Treasury Bill ETF
+VBK,Vanguard Morningstar Small-Cap Growth ETF
+VBR,Vanguard Morningstar Small-Cap Value ETF
+VCIT,Vanguard Intermediate-Term Corporate Bond ETF
+VCLT,Vanguard Long-Term Corporate Bond ETF
+VCR,Vanguard Consumer Discretionary ETF
+VCRB,Vanguard Malvern Funds Vanguard Core Bond ETF
 VCSH,Vanguard Short-Term Corporate Bond ETF
+VCX,"Fundrise Innovation Fund, LLC"
+VDC,Vanguard Consumer Staples ETF
+VDE,Vanguard Energy ETF
+VEA,Vanguard FTSE Developed Markets ETF
+VEU,Vanguard FTSE All-World Ex-US ETF
+VFH,Vanguard Financials ETF
+VFLO,Victory Portfolios II VictoryShares Free Cash Flow ETF
+VGIT,Vanguard Intermediate-Term Treasury ETF
+VGK,Vanguard FTSE Europe ETF
+VGLT,Vanguard Long-Term Treasury ETF
 VGSH,Vanguard Short-Term Treasury ETF
+VGT,Vanguard Information Technology ETF
 VGUS,Vanguard Institutional Index Funds Vanguard Ultra-Short Treasury ETF
+VHT,Vanguard Health Care ETF
+VIG,Vanguard Dividend Appreciation ETF
+VIGI,Vanguard Whitehall Funds Vanguard International Dividend Appreciation ETF
+VIOO,Vanguard S&P Small-Cap 600 ETF
+VIS,Vanguard Industrials ETF
+VIV,"Telefonica Brasil, S.A. American Depositary Shares (each representing two (2) Common Shares)"
+VMBS,Vanguard Mortgage-Backed Securities ETF
+VNET,"VNET Group, Inc. American Depositary Shares"
 VNLA,Janus Henderson Short Duration Income ETF
+VNO,Vornado Realty Trust
+VNQ,Vanguard Real Estate ETF
+VNQI,Vanguard International Equity Index Funds Vanguard Global ex-U.S. Real Estate ETF
+VO,Vanguard Morningstar Mid-Cap ETF
+VOD,Vodafone Group Plc American Depositary Shares
+VOE,Vanguard Morningstar Mid-Cap Value ETF
+VOLT,Tema ETF Trust Tema Electrification ETF
+VONE,Vanguard Scottsdale Funds Vanguard Russell 1000 ETF
+VONG,Vanguard Scottsdale Funds Vanguard Russell 1000 Growth ETF
+VONV,Vanguard Scottsdale Funds Vanguard Russell 1000 Value ETF
+VOO,Vanguard S&P 500 ETF
+VOOG,Vanguard S&P 500 Growth ETF
+VOOV,Vanguard S&P 500 Value ETF
+VOT,Vanguard Morningstar Mid-Cap Growth ETF
+VOX,Vanguard Communication Services ETF
+VPL,Vanguard FTSE Pacific ETF
+VPLS,Vanguard Malvern Funds Vanguard Core Plus Bond ETF
+VPU,Vanguard Utilities ETF
+VSS,Vanguard FTSE All-World EX-US Small-Cap Index Fund
+VT,Vanguard Total World Stock ETF
+VTEB,Vanguard Tax-Exempt Bond Index Fund
 VTES,Vanguard Short-Term Tax-Exempt Bond ETF
+VTI,Vanguard Morningstar Total Stock Market ETF
 VTIP,Vanguard Malvern Funds Vanguard Short-Term Inflation-Protected Securities Index Fund ETF Shares
+VTV,Vanguard Morningstar Value ETF
+VTWO,Vanguard Scottsdale Funds Vanguard Russell 2000 ETF
+VUG,Vanguard Morningstar Growth ETF
+VV,Vanguard Morningstar Large-Cap ETF
+VWO,Vanguard FTSE Emerging Markets ETF
+VWOB,Vanguard Whitehall Funds Vanguard Emerging Markets Government Bond ETF
+VXF,Vanguard Extended Market ETF
+VXUS,Vanguard STAR Funds Vanguard Total International Stock ETF
+VYM,Vanguard High Dividend Yield ETF
+VYMI,Vanguard Whitehall Funds Vanguard International High Dividend Yield ETF
+WCLD,WisdomTree Trust WisdomTree Cloud Computing Fund
+WCMI,First Trust WCM International Equity ETF
+WDS,"Woodside Energy Group Limited American Depositary Shares, each representing one Ordinary Share"
+WEAT,Teucrium Wheat Fund
+WFRD,Weatherford International plc Ordinary Shares
+WGMI,CoinShares ETF Trust CoinShares Bitcoin Mining and Digital Power ETF
+WIX,Wix.com Ltd. Ordinary Shares
+WRD,WeRide Inc. American Depositary Shares
+WSE,Wise Group plc Class A Ordinary Shares
+WTV,WisdomTree U.S. Value Fund
+WTW,Willis Towers Watson Public Limited Company Ordinary Shares
+WYFI,"WhiteFiber, Inc. Ordinary Shares"
+XAR,State Street SPDR S&P Aerospace & Defense ETF
+XBI,State Street SPDR S&P Biotech ETF
+XENE,Xenon Pharmaceuticals Inc. Common Shares
+XES,State Street SPDR S&P Oil & Gas Equipment & Services ETF
+XHB,State Street SPDR S&P Homebuilders ETF
+XHLF,BondBloxx Bloomberg Six Month Target Duration US Treasury ETF
+XLB,State Street Materials Select Sector SPDR ETF
+XLC,State Street Communication Services Select Sector SPDR ETF
+XLE,State Street Energy Select Sector SPDR ETF
+XLF,State Street Financial Select Sector SPDR ETF
+XLG,Invesco S&P 500 Top 50 ETF
+XLI,State Street Industrial Select Sector SPDR ETF
+XLK,State Street Technology Select Sector SPDR ETF
+XLP,State Street Consumer Staples Select Sector SPDR ETF
+XLRE,State Street Real Estate Select Sector SPDR ETF
+XLU,State Street Utilities Select Sector SPDR ETF
+XLV,State Street Health Care Select Sector SPDR ETF
+XLY,State Street Consumer Discretionary Select Sector SPDR ETF
+XME,State Street SPDR S&P Metals & Mining ETF
+XMHQ,Invesco S&P MidCap Quality ETF
+XMMO,Invesco S&P MidCap Momentum ETF
+XNDU,Xanadu Quantum Technologies Limited Class B Subordinate Voting Shares
+XNTK,State Street SPDR NYSE Technology ETF
+XOP,State Street SPDR S&P Oil & Gas Exploration & Production ETF
+XOVR,EntrepreneurShares Series Trust ERShares Private-Public Crossover ETF
+XPEV,"XPeng Inc. American depositary shares, each representing two Class A ordinary shares"
+XRT,State Street SPDR S&P Retail ETF
+XSD,State Street SPDR S&P Semiconductor ETF
+XSMO,Invesco S&P SmallCap Momentum ETF
+XSW,State Street SPDR S&P Software & Services ETF
+XTL,State Street SPDR S&P Telecom ETF
+XYLD,Global X S&P 500 Covered Call ETF
 YANG,Direxion Daily FTSE China Bear 3X ETF
 YINN,Direxion Daily FTSE China Bull 3X ETF
+YMAG,YieldMax Magnificent 7 Fund of Option Income ETFs
+YMAX,YieldMax Universe Fund of Option Income ETFs
+YMM,Full Truck Alliance Co. Ltd. American Depositary Shares (each representing 20 Class A Ordinary Shares)
+YPF,YPF Sociedad Anonima American Depositary Shares (Each representing ten (10) Class D shares of Capital Stock)
+ZCSH,The Zcash ETF
+ZLAB,Zai Lab Limited American Depositary Shares
+ZROZ,PIMCO 25+ Year Zero Coupon U.S. Treasury Index Exchange-Traded Fund
 ZSL,ProShares UltraShort Silver
+ZTO,"ZTO Express (Cayman) Inc. American Depositary Shares, each representing one Class A ordinary share"

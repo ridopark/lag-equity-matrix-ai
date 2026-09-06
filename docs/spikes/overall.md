@@ -1170,6 +1170,57 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   different BLAS kernel and SIMD width. Closes D-52's residual risk.
 - **Status:** Accepted
 
+### D-54 — Drop the candidate's own column from its correlation pool
+- **When:** 2026-09-05T23:46:40-05:00
+- **Decision:** `graph_retriever` unions `{c.symbol}` into `drop_cols`, so a
+  candidate is excluded from its own correlation pool unconditionally rather
+  than only when it happens to appear in `signal_universe`. Closes Q-26.
+- **Why:** The alternative was leaving it, on the argument that D-27 already
+  excludes every alert ticker and production is therefore correct. That lost
+  because the correctness was accidental — it depended on candidates being drawn
+  from the signal feed, which `MarketScan` (D-23) would stop being true, and
+  nothing in the code said so. Fixing it now costs one line and cannot regress
+  production: both baselines are byte-identical after the change (98 real rows,
+  6 synthetic), which is the proof rather than the hope.
+- **Outcome:** Working, and it cost more than one line to land honestly. Both
+  guards byte-identical (98 real, 6 synthetic), so production is provably
+  unaffected. Two things the question had not recorded: the self-edge also
+  *displaced* a real neighbour from the top-k, and two existing tests were
+  passing **because of** it — see D-55.
+- **Status:** Accepted
+
+### D-55 — Rebuild the two fixtures that were green only because of the Q-26 bug
+- **When:** 2026-09-05T23:52:00-05:00
+- **Decision:** `test_fuse_evidence_effective_evidence_never_exceeds_raw_count`
+  and `test_two_candidates_do_not_cross_attribute` get bespoke local universes
+  containing a genuine ≥2σ shock in the leader blocs, and each gains a direct
+  assertion that the candidate's own symbol is absent from its evidence.
+  `tests/conftest.py`'s shared `closes` fixture is left untouched.
+- **Why:** Applying D-54 turned both tests red. The cause was not the fix: in the
+  shared fixture at those tests' `as_of`, **no** real leader crosses σ=2.0
+  (LEAD1 −0.64, LEAD2 −0.86, LEAD3 −0.34, INDEP −0.00). The only shock was the
+  candidate's own −1.02, which `leader_state` emits unconditionally for
+  `sym == c.symbol`. So the self-edge was the sole evidence unit those fixtures
+  ever produced, and both tests were asserting against the bug's artefact.
+  `test_two_candidates_do_not_cross_attribute` is the guard for PHASE-2's
+  cross-attribution fix, so the regression test protecting one bug was itself
+  standing on another. Editing the shared fixture lost to bespoke local ones:
+  `closes` backs `test_review`'s empirically-pinned verdicts, and injecting a
+  shock anywhere in its 120 sessions moves some other test's rolling baseline.
+  Two findings worth keeping. First, overlapping shock windows leak: a
+  simultaneous move in both blocs dominates Pearson correlation over the 60-day
+  window enough that one bloc's leader enters the *other* candidate's top-k —
+  reproduced across ~15 seeds. Temporally disjoint windows with the inactive
+  bloc held flat make cross-bloc correlation NaN by construction rather than
+  small by luck. Second, `effective_evidence ≤ raw count` is close to
+  unfalsifiable: weight is `1/bloc` and never exceeds 1, so the inequality holds
+  whatever the code does. It survived the revert test and needed the explicit
+  self-symbol assertion added before it could fail at all.
+- **Outcome:** 38 passed, ruff clean, both baselines unchanged. Verified by
+  reverting the D-54 fix: all four tests fail without it and pass with it, so
+  they are falsifiable rather than merely green.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1197,7 +1248,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |
-| Q-26 | Should `graph_retriever` exclude the candidate's own column from the correlation pool? | `graph_retriever.py`, D-23 | **Latent bug found by phase6-red.** `corrwith` does not drop the candidate itself, so it ranks as its own leader at ρ=1.0; `leader_state`'s `or sym == c.symbol` then always emits a self-shock, and `context_fusion` can never satisfy `abs(cand_z) < abs(z)` against an identical value — one guaranteed contradicting unit per candidate. Production is **unaffected** only because D-27 excludes the 24 alert tickers, which happen to include every candidate: verified NFLX 2026-06-02 has no self-edge in production and one in a `signal_universe=set()` fixture. That is accidental correctness. Under `MarketScan` (D-23), where candidates are discovered rather than drawn from the alert feed, every candidate would contradict itself. Fix is one line; out of PHASE-6's scope. |
+| ~~Q-26~~ | Should `graph_retriever` exclude the candidate's own column from the correlation pool? | `graph_retriever.py`, D-23 | **Latent bug found by phase6-red.** `corrwith` does not drop the candidate itself, so it ranks as its own leader at ρ=1.0; `leader_state`'s `or sym == c.symbol` then always emits a self-shock, and `context_fusion` can never satisfy `abs(cand_z) < abs(z)` against an identical value — one guaranteed contradicting unit per candidate. Production is **unaffected** only because D-27 excludes the 24 alert tickers, which happen to include every candidate: verified NFLX 2026-06-02 has no self-edge in production and one in a `signal_universe=set()` fixture. That is accidental correctness. Under `MarketScan` (D-23), where candidates are discovered rather than drawn from the alert feed, every candidate would contradict itself. Fix is one line; out of PHASE-6's scope. **Answered by D-54.** The bug was worse than recorded here: the self-edge also *displaced* a genuine neighbour from the top-k, so every candidate silently lost its lowest-ranked real neighbour, and two tests turned out to be passing because of it. |
 | Q-19 | Which model labels co-mention articles at volume — `claude-opus-5`, or something cheaper for bulk? | D-05, D-17, `adapters/llm.py` | D-17 made bulk relationship-labelling the LLM's primary job; ~11 years of Benzinga news is a different order of magnitude from one call per signal. Answered by estimating article count after the Q-14 breadth filter, then pricing both options. |
 | ~~Q-27~~ | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py` | Answered by D-50, then unanswered by D-51: the projections were withdrawn from the repo, so the honest answer is that a reader cannot reproduce it — they read the decision log instead. Kept struck because the *question* is settled; the resolution is deliberate, not pending. Original finding stands: Q-27 named one missing input; there were two, and the second (`data/fires.csv`, reached through an uninjected second call site in `run()`) was found only by running from a tracked-files-only tree. The three local checks all passed while it was broken. |
 | ~~Q-17~~ | Does the upstream signal's horizon match the graph horizon? | D-15 | **Answered wrongly, then corrected.** Spike 05 used days-to-expiry (median 8); the right field is holding period. `hold_minutes` gives a median of ~22 hours. Superseded by D-32; reopened as Q-25. |

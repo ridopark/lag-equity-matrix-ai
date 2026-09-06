@@ -45,7 +45,10 @@ def retrieve_neighbourhood(state: LagMatrixState, runtime: Runtime[LagMatrixCont
 
         win = returns.iloc[ti - trail : ti]
         cand = win[c.symbol]
-        drop_cols = [s for s in signal_universe | excluded_symbols if s in win.columns]
+        # Q-26: the candidate always correlates with itself at rho=1.0, so its own
+        # column must be dropped unconditionally — not only when it happens to be
+        # in `signal_universe` — or it wins its own top-k as a guaranteed self-edge.
+        drop_cols = [s for s in signal_universe | excluded_symbols | {c.symbol} if s in win.columns]
         pool = win.drop(columns=drop_cols)
         pool = pool.loc[:, pool.notna().sum() >= trail * 0.8]
         corr = pool.corrwith(cand).dropna()

@@ -18,8 +18,11 @@ wheels/
 # experiment data (not committed) -- data/* not data/, so the negation below
 # is consulted; git never descends into an excluded *directory*.
 data/*
-# ...except the golden file scripts/check_baseline.py diffs against.
+# ...except the golden file scripts/check_baseline.py diffs against, and the
+# exclusion list runner.py loads at startup (a point-in-time Alpaca snapshot,
+# so re-running build_exclusions.py does not reproduce it).
 !data/baseline-98.csv
+!data/excluded-etfs.csv
 
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json

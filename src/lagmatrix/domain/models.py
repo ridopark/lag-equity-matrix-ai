@@ -52,7 +52,10 @@ class Candidate(BaseModel):
 
     symbol: str
     direction: str  # "up" | "down" — the thesis being assessed
-    as_of: date
+    as_of: date  # the daily anchor every node uses
+    # the upstream alert instant, previously discarded at ingestion; needed for
+    # intraday work but not yet read by any node (D-59/D-60)
+    as_of_ts: datetime | None = None
     origin: str  # "external" | "scan" — provenance, kept so evaluation can slice on it
 
 

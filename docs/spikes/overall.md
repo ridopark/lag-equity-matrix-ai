@@ -1372,6 +1372,30 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   intraday.
 - **Status:** Accepted
 
+### D-61 — Keep the alert instant; `as_of` stays the anchor
+- **When:** 2026-09-06T06:40:55-05:00
+- **Decision:** `Candidate` gains `as_of_ts: datetime | None`, populated by
+  `ExternalSignals` from the full `posted_at` value. `as_of: date` is unchanged
+  and remains what every node reads. No node reads the new field yet.
+- **Why:** The feed records alert times to the millisecond
+  (`2026-05-29 14:34:10.936+00`) and ingestion threw them away at
+  `posted_at[:10]`. That is unrecoverable data loss on a live feed — every day it
+  stayed truncated was a day of intraday timing that could not be reconstructed
+  later — and D-59/D-60 showed the pipeline cannot be pointed at minute bars
+  without it, since a date anchors the graph at the first minute of the session
+  and fails the trailing-window check.
+  Widening `as_of` to a `datetime` instead lost decisively: `candidate_key` is
+  `f"{symbol}|{as_of}"` with no time and no direction, so same-symbol
+  same-day alerts deliberately collapse into one branch — 15 symbol/date pairs in
+  the current baseline do, AMZN 2026-07-09 three times over. A timestamped key
+  would split them and move every affected verdict, turning a data-preservation
+  change into a silent behaviour change. Additive was the only option that keeps
+  the guards meaningful.
+- **Outcome:** Working. 102/102 candidates carry the instant; `candidate_key`
+  still emits `TSLA|2026-05-29`; both baselines byte-identical to snapshots taken
+  before the change (102 real, 6 synthetic); suite 42, ruff clean.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1398,6 +1422,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-24~~ | Can the signal feed be widened beyond 10 authors / 2 channels? | D-30, dataset size | Spike 08: the dataset grows ~30 fires/month and that rate is the binding constraint on ever reaching statistical power. Adding sources scales it linearly — the only lever that shortens an 8-to-23-month timeline, and worth more than any modelling improvement. Owner question for oh-my-tradeagent. **Answered by spike 13 / D-56:** yes, and it is one env var per channel with no author filter to relax — but the linear-scaling premise was wrong. 76% of the feed is a single author, so the yield of a new channel depends entirely on whether a prolific alerter posts there. |
 | Q-28 | Is the evaluation set generalisable, or is it one trader's selection style? | D-31, D-33, spike 13 | TradingTheTrend is 76% of all BTO fires, so a result from either pre-registration describes that account rather than "options alerts". Waiting cannot fix this — it accumulates more of the same author. Answered by getting a second high-volume source and re-running the pre-registered test per-author, or by reporting every result as single-source and scoping the claim accordingly. |
 | Q-29 | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. |
+| Q-30 | Should repeat same-day alerts on one symbol be assessed separately? | D-61, `graph/state.py`, D-31, D-33 | `candidate_key` collapses them, so 102 fires are ~87 assessed branches and duplicates carry copies of one verdict. Now that `as_of_ts` exists, splitting them is possible — a second alert hours later sees a different neighbourhood state and is arguably a distinct observation. It would change the baseline and re-open D-31/D-33, so it is a real decision, not a cleanup. Answered by measuring how often the neighbourhood state actually differs between same-day repeats. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |

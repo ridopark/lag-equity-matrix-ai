@@ -7,7 +7,7 @@ needs a second implementation.
 from __future__ import annotations
 
 import csv
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -38,11 +38,20 @@ class ExternalSignals:
                 d = date.fromisoformat(row["posted_at"][:10])
                 if as_of is not None and d != as_of:
                     continue
+                try:
+                    ts = (
+                        datetime.fromisoformat(row["posted_at"])
+                        if len(row["posted_at"]) > 10
+                        else None
+                    )
+                except ValueError:
+                    ts = None
                 out.append(
                     Candidate(
                         symbol=row["ticker"],
                         direction=row["direction"],
                         as_of=d,
+                        as_of_ts=ts,
                         origin="external",
                     )
                 )

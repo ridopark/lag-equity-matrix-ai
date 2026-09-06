@@ -1,0 +1,5 @@
+[      35ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'bluetooth'. @ :0
+[      35ms] [WARNING] Error with Permissions-Policy header: Unrecognized feature: 'web-share'. @ :0
+[     110ms] [ERROR] Failed to load resource: the server responded with a status of 403 () @ https://claude.ai/api/account:0
+[     111ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://claude.ai/api/frame/9a4467b7-5bb8-407c-82cf-8659317a516c?via=user_open&bk=initial:0
+[    2420ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://claude.ai/api/frame/9a4467b7-5bb8-407c-82cf-8659317a516c?via=user_open&bk=initial:0

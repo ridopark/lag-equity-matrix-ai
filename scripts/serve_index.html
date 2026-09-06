@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LagMatrix — live</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%95%B8%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --paper:#F7F6F3; --raised:#fff; --ink:#16202B; --ink-2:#4A5765; --ink-3:#7C8592;
+  --rule:#DEDBD3; --rule-2:#EDEBE5; --accent:#3D4E8C; --accent-soft:#E7E9F4;
+  --pro:#1B7A5A; --pro-soft:#E2F0EA; --con:#A8443A; --con-soft:#F6E7E4;
+  --flat:#7C8592; --flat-soft:#ECEDEF;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0E141B; --raised:#161F29; --ink:#E9E7E2; --ink-2:#A9B3BF; --ink-3:#7C8592;
+  --rule:#27333F; --rule-2:#1D2731; --accent:#9AAAE8; --accent-soft:#1E2740;
+  --pro:#5FC9A3; --pro-soft:#122A23; --con:#E08A7E; --con-soft:#2E1B18;
+  --flat:#8A93A0; --flat-soft:#1C242E;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem 4rem}
+h1{font-size:1.35rem;margin:0;letter-spacing:-.01em}
+.sub{color:var(--ink-3);font-size:.85rem;margin:.3rem 0 0}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;
+  flex-wrap:wrap;border-bottom:1px solid var(--rule);padding-bottom:1.1rem}
+
+.bar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:1.25rem 0}
+button,select,input{font:inherit;font-size:.86rem}
+button{cursor:pointer;border:1px solid var(--ink);background:var(--ink);
+  color:var(--paper);padding:.45rem 1.1rem;border-radius:3px}
+button[disabled]{opacity:.45;cursor:default}
+select,input{background:var(--raised);color:var(--ink);border:1px solid var(--rule);
+  border-radius:3px;padding:.4rem .55rem}
+label{font-size:.78rem;color:var(--ink-3)}
+.status{font-family:var(--mono);font-size:.82rem;color:var(--ink-2);margin-left:auto}
+
+.topo{display:flex;gap:.4rem;overflow-x:auto;padding:.5rem 0 1rem;align-items:center}
+.node{border:1px solid var(--rule);background:var(--raised);border-radius:4px;
+  padding:.55rem .75rem;min-width:8.5rem;transition:.15s}
+.node .n{font-family:var(--mono);font-size:.75rem;font-weight:600}
+.node .c{font-size:.68rem;color:var(--ink-3);min-height:1em;margin-top:.1rem}
+.node.hot{border-color:var(--accent);background:var(--accent-soft)}
+.node.seen{border-color:var(--rule)}
+.arw{color:var(--ink-3);font-family:var(--mono);font-size:.8rem}
+.par{border-left:2px solid var(--rule);padding-left:.5rem;display:grid;gap:.35rem}
+
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:.5rem}
+@media(max-width:820px){.cols{grid-template-columns:1fr}}
+h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);
+  font-weight:600;margin:0 0 .6rem;font-family:var(--mono)}
+.log{font-family:var(--mono);font-size:.78rem;border-top:1px solid var(--rule-2);
+  max-height:22rem;overflow-y:auto}
+.row{display:grid;grid-template-columns:4.4rem 8.6rem 1fr;gap:.6rem;padding:.32rem .2rem;
+  border-bottom:1px solid var(--rule-2)}
+.row .t{color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
+.row .d{color:var(--ink-2);text-align:right}
+.row.new{background:var(--accent-soft)}
+
+table{border-collapse:collapse;width:100%;font-size:.82rem}
+th{text-align:left;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);padding:0 .6rem .45rem 0;
+  border-bottom:1px solid var(--rule)}
+td{padding:.45rem .6rem .45rem 0;border-bottom:1px solid var(--rule-2)}
+td.s{font-family:var(--mono);font-weight:600}
+.pill{font-family:var(--mono);font-size:.68rem;padding:.15rem .5rem;border-radius:2px;
+  white-space:nowrap}
+.corroborated{background:var(--pro-soft);color:var(--pro)}
+.contradicted{background:var(--con-soft);color:var(--con)}
+.neutral,.no_assessment{background:var(--flat-soft);color:var(--flat)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.empty{color:var(--ink-3);font-size:.82rem;padding:.8rem 0}
+.err{background:var(--con-soft);color:var(--con);padding:.6rem .8rem;border-radius:3px;
+  font-family:var(--mono);font-size:.78rem;margin-top:1rem}
+.note{color:var(--ink-3);font-size:.78rem;margin-top:1.5rem;border-top:1px solid var(--rule-2);
+  padding-top:1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>LagMatrix — live</h1>
+      <p class="sub">Each run streams from a real <code>graph.astream</code>. Timings are wall-clock.</p>
+    </div>
+  </header>
+
+  <div class="bar">
+    <label for="src">source</label>
+    <select id="src"><option value="synthetic">synthetic universe</option></select>
+    <label for="lim">limit</label>
+    <input id="lim" type="number" min="1" placeholder="all" style="width:5.5rem">
+    <button id="go">Run</button>
+    <span class="status" id="status">idle</span>
+  </div>
+
+  <div class="topo" id="topo">
+    <div class="node" data-n="START"><div class="n">START</div><div class="c" data-c></div></div>
+    <div class="arw">Send→</div>
+    <div class="node" data-n="graph_retriever"><div class="n">graph_retriever</div><div class="c" data-c></div></div>
+    <div class="arw">→</div>
+    <div class="par">
+      <div class="node" data-n="leader_state"><div class="n">leader_state</div><div class="c" data-c></div></div>
+      <div class="node" data-n="vector_retriever"><div class="n">vector_retriever</div><div class="c" data-c>off (no news)</div></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="node" data-n="context_fusion"><div class="n">context_fusion</div><div class="c" data-c></div></div>
+    <div class="arw">→</div>
+    <div class="node" data-n="assessor"><div class="n">assessor</div><div class="c" data-c></div></div>
+    <div class="arw">→</div>
+    <div class="node" data-n="review"><div class="n">review</div><div class="c" data-c></div></div>
+    <div class="arw">→</div>
+    <div class="node" data-n="publisher"><div class="n">publisher</div><div class="c" data-c></div></div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <h2>Node events</h2>
+      <div class="log" id="log"><div class="empty">Press Run.</div></div>
+    </div>
+    <div>
+      <h2>Assessments</h2>
+      <div id="res"><div class="empty">Populated when the run completes.</div></div>
+    </div>
+  </div>
+
+  <div id="err"></div>
+  <p class="note">Synthetic tickers are invented and so are their prices; nothing here
+    is a real quote or position. With <code>--allow-real</code> the server also offers
+    the local Alpaca bars, which are not part of the repository.</p>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const nodes = [...document.querySelectorAll(".node")];
+let es = null;
+
+fetch("/config").then(r=>r.json()).then(c=>{
+  if (c.allow_real) {
+    const o = document.createElement("option");
+    o.value = "real"; o.textContent = "real data (local only)";
+    $("#src").appendChild(o);
+  }
+});
+
+// remember any caption authored in the markup (e.g. vector_retriever's "off"),
+// so a reset restores it instead of blanking it
+nodes.forEach(n=>{ n.dataset.init = n.querySelector("[data-c]").textContent; });
+
+function reset(){
+  nodes.forEach(n=>{
+    n.classList.remove("hot","seen");
+    n.querySelector("[data-c]").textContent = n.dataset.init;
+  });
+  $("#log").innerHTML = ""; $("#res").innerHTML = ""; $("#err").innerHTML = "";
+}
+function mark(name, txt){
+  nodes.forEach(n=>n.classList.remove("hot"));
+  const n = nodes.find(x=>x.dataset.n===name);
+  if(!n) return;
+  n.classList.add("hot","seen");
+  if (txt) n.querySelector("[data-c]").textContent = txt;
+}
+function logRow(e){
+  const d = document.createElement("div");
+  d.className = "row new";
+  d.innerHTML = `<div class="t">${e.t_ms.toFixed(1)}</div>
+                 <div>${e.node}</div>
+                 <div class="d">${e.key ? e.key.split("|")[0]+" · " : ""}${e.detail||""}</div>`;
+  $("#log").appendChild(d);
+  $("#log").scrollTop = $("#log").scrollHeight;
+  setTimeout(()=>d.classList.remove("new"), 400);
+}
+function table(rows){
+  if (!rows.length) { $("#res").innerHTML = '<div class="empty">No assessments.</div>'; return; }
+  $("#res").innerHTML = `<table><thead><tr>
+      <th>Signal</th><th>Dir</th><th>Verdict</th><th>Eff.</th><th>For/Against</th>
+    </tr></thead><tbody>` + rows.map(r=>`<tr>
+      <td class="s">${r.symbol}</td>
+      <td class="num">${r.direction}</td>
+      <td><span class="pill ${r.verdict}">${r.verdict}</span></td>
+      <td class="num">${r.effective_evidence.toFixed(3)}</td>
+      <td class="num">${r.n_supporting} / ${r.n_contradicting}</td>
+    </tr>`).join("") + `</tbody></table>`;
+}
+
+$("#go").addEventListener("click", ()=>{
+  if (es) es.close();
+  reset();
+  $("#go").disabled = true; $("#status").textContent = "connecting…";
+  const q = new URLSearchParams({source: $("#src").value});
+  if ($("#lim").value) q.set("limit", $("#lim").value);
+  es = new EventSource("/run?" + q);
+
+  es.addEventListener("start", ev=>{
+    const d = JSON.parse(ev.data);
+    $("#status").textContent =
+      `${d.candidates} candidates · ${d.symbols} symbols · ${d.sessions} sessions`;
+    mark("START", `${d.candidates} candidates`);
+  });
+  es.addEventListener("event", ev=>{
+    const d = JSON.parse(ev.data);
+    mark(d.node, d.detail); logRow(d);
+  });
+  es.addEventListener("done", ev=>{
+    const d = JSON.parse(ev.data);
+    nodes.forEach(n=>n.classList.remove("hot"));
+    $("#status").textContent = `done in ${d.total_ms.toFixed(0)} ms`;
+    table(d.assessments);
+    $("#go").disabled = false; es.close(); es = null;
+  });
+  es.addEventListener("error", ev=>{
+    let msg = "stream failed";
+    try { msg = JSON.parse(ev.data).message; } catch (_) {}
+    $("#err").innerHTML = `<div class="err">${msg}</div>`;
+    $("#status").textContent = "error";
+    $("#go").disabled = false;
+    if (es) { es.close(); es = null; }
+  });
+});
+</script>
+</body>
+</html>

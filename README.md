@@ -85,21 +85,31 @@ behaviour change that wants its own test, not because it helps.
    `no_assessment` when no neighbourhood was reachable. Deterministic; no LLM
    in this path.
 
-## The replay view
+## The live view
 
-There is a replay view of the graph executing over six fabricated signals at
-its measured timings — invented tickers over an invented 166-symbol universe,
-each candidate constructed to land on a different verdict branch, so all four
-outcomes appear in one run. It is not linked here yet.
+A small local web UI that streams the graph as it executes — not a recording.
+Each press of Run starts a real `graph.astream(...)` and pushes every node update
+over Server-Sent Events, so the topology lights up in the order the nodes
+actually fire and the timings are wall-clock.
 
-The trace behind it is checked in at `docs/trace-synthetic.json` and regenerated
-by `scripts/capture_trace.py --synthetic`, from the same committed universe the
-CI guard uses. The trace is real; the market is not.
+```bash
+uv run python scripts/serve.py            # http://127.0.0.1:8000
+uv run python scripts/serve.py --allow-real
+```
+
+Stdlib only — `ThreadingHTTPServer` plus SSE, no web framework and no new
+dependencies. It defaults to the committed synthetic universe, so it runs from a
+clone with no credentials and no market data. `--allow-real` additionally offers
+the local Alpaca bars; without that flag the real source is refused rather than
+silently unavailable.
 
 One detail it makes visible: `graph_retriever` fires six times but `leader_state`
 only five. SYNF has too little history for a 60-session window, so its branch
-routes straight to `END` — the conditional edge shows up in the timing data, not
+routes straight to `END` — the conditional edge shows up in the event stream, not
 just the source.
+
+`scripts/capture_trace.py --synthetic` writes the same run to
+`docs/trace-synthetic.json` if you want it as a static artefact instead.
 
 ## Layout
 
@@ -211,6 +221,7 @@ rest needs your own Alpaca credentials and your own signal source —
 
 | | |
 |---|---|
+| `serve.py` | local web UI streaming a live run over SSE (`--port`, `--allow-real`) |
 | `run_pipeline.py` | run the graph over cached bars (`--limit`, `--news`, `--thread-id`) |
 | `replay.py` | print a run's checkpoint history by `thread_id` |
 | `capture_trace.py` | stream a run to JSON for the web view (`--synthetic`) |

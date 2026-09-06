@@ -507,7 +507,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** **Executed, null, uninformative.** The feature fired on 2 of 64
   evaluable fires, so the minimum detectable difference was 100.6% — the test
   could not have detected anything. Base hit rate 32.8%, fired 50.0% (n=2), not
-  fired 32.3% (n=62), z=+0.49. Two design errors, both made before seeing data:
+  fired 32.3% (n=62), z=+0.49. Re-run unchanged on 102 fires (D-58): identical, z=+0.49 — the new fires had no elapsed horizon. Two design errors, both made before seeing data:
   the 2σ-and-under-0.5σ conjunction was far too narrow, and the 10-session label
   was wrong for a signal whose median hold is ~1 trading day (see D-32). Spike
   09. Treat as a pilot, not as evidence.
@@ -561,7 +561,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   observations. Its nominal significance is overstated and no p-value from it
   should be reported as if it were the first look. There will not be a third.
 - **Outcome:** **Executed, inconclusive — and this is the final read on this
-  dataset.** n=67 at the 2-session horizon. HIGH score 45.5% (n=33) vs LOW 38.2%
+  dataset.** n=67 at the 2-session horizon. Re-run unchanged on 102 fires (D-58): byte-identical, still n=67. HIGH score 45.5% (n=33) vs LOW 38.2%
   (n=34); difference +7.2pp, SE 12.0pp, z=+0.60 uncorrected on a second look;
   minimum detectable 34.2pp. The sign matches the hypothesis and nothing else
   does. Both design fixes worked — the base rate rose from 32.8% (10-session) to
@@ -1262,6 +1262,32 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   selected as `ti` and the window is `[ti-60, ti)`, ending strictly before the
   alert date. Point-in-time holds; the prediction was wrong, not the code.
 - **Outcome:** Working. 102 rows, both guards green, suite 38, ruff clean.
+- **Status:** Accepted
+
+### D-58 — Power is counted in *evaluable* rows, not collected fires
+- **When:** 2026-09-06T05:49:03-05:00
+- **Decision:** Re-ran both pre-registrations unchanged on the refreshed 102-fire
+  extract. Both results are identical to the originals — D-31 z=+0.49, D-33
+  HIGH 45.5% (n=33) vs LOW 38.2% (n=34). Record the schedule in evaluable rows
+  from now on: spike 08's projection counted collected fires and overstates the
+  pace by ~1.5x.
+- **Why:** Not one of the four new fires entered either test. They are dated
+  2026-09-04 and the bars end 2026-09-04, so there is no forward return to score
+  yet — the outcome window has not elapsed. That is the general case, not a
+  quirk: **the testable dataset always lags the collected one by the evaluation
+  horizon.** Measuring the whole funnel on this run: 102 collected → 76 single
+  names (26 ETFs excluded by D-31's design) → 67 evaluable (9 lost to missing
+  bars, short history, or an unelapsed horizon). End-to-end yield 65.7%.
+  So a 15pp-detectable test needs ~530 collected fires to produce 348 evaluable
+  rows, not 348 collected. At today's 30/month that is 14.3 months, not the 8.2
+  spike 08 projected; with one more prolific source (D-56), 7.8 rather than 4.5.
+  The alternative — leaving the projection in collected fires because it is the
+  number the feed produces — lost because it is the number that decides when to
+  run a conclusive test, and being 1.5x optimistic about that is exactly the
+  error that gets a test run before it can resolve anything.
+- **Outcome:** pending — the corrected schedule has not yet been tested against
+  a real arrival. Re-measure the yield at the next refresh; if it holds near 66%
+  the projection stands.
 - **Status:** Accepted
 
 ## Open Questions

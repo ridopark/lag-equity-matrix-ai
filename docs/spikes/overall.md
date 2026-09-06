@@ -1023,6 +1023,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 
 ---
 
+### D-49 — Commit the baseline's expected side; leave its inputs out
+- **When:** 2026-09-05T20:21:42-05:00
+- **Decision:** `data/baseline-98.csv` is tracked via a `data/*` + negation pair;
+  every other file in `data/` stays ignored, including `data/bars.parquet`. The
+  repo therefore carries the 98 expected verdicts but not the bars they were
+  computed from.
+- **Why:** Committing `bars.parquet` too — the only option that would make
+  `check_baseline.py` green on a fresh clone — lost on two counts: it is 17 MB of
+  Alpaca vendor data we have no right to redistribute, and it is a binary blob
+  that would grow the history on every re-pull. Dropping the golden file instead
+  lost because it is the artefact that caught the PHASE-2 `--news` regression
+  (D-41); an unreproducible guard still beats no guard. The residual cost is that
+  the guard is now half-portable, which is what Q-27 is for. Note the mechanism:
+  `data/` had to become `data/*`, because git never descends into an excluded
+  *directory* and the negation would have been silently unread.
+- **Outcome:** pending — untested until someone actually clones this and tries.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1052,6 +1070,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-21~~ | Option P&L or underlying forward return as the label? | Q-07 | Answered by spike 07 / D-29: **underlying forward return.** Decided partly by data — no underlying spot is stored anywhere except `trade_context`'s 31 rows, and option P&L exists only for the ~60 filled fires. |
 | Q-26 | Should `graph_retriever` exclude the candidate's own column from the correlation pool? | `graph_retriever.py`, D-23 | **Latent bug found by phase6-red.** `corrwith` does not drop the candidate itself, so it ranks as its own leader at ρ=1.0; `leader_state`'s `or sym == c.symbol` then always emits a self-shock, and `context_fusion` can never satisfy `abs(cand_z) < abs(z)` against an identical value — one guaranteed contradicting unit per candidate. Production is **unaffected** only because D-27 excludes the 24 alert tickers, which happen to include every candidate: verified NFLX 2026-06-02 has no self-edge in production and one in a `signal_universe=set()` fixture. That is accidental correctness. Under `MarketScan` (D-23), where candidates are discovered rather than drawn from the alert feed, every candidate would contradict itself. Fix is one line; out of PHASE-6's scope. |
 | Q-19 | Which model labels co-mention articles at volume — `claude-opus-5`, or something cheaper for bulk? | D-05, D-17, `adapters/llm.py` | D-17 made bulk relationship-labelling the LLM's primary job; ~11 years of Benzinga news is a different order of magnitude from one call per signal. Answered by estimating article count after the Q-14 breadth filter, then pricing both options. |
+| Q-27 | How does a reader reproduce `baseline-98.csv` without our `bars.parquet`? | D-49, `scripts/check_baseline.py`, `scripts/capture_baseline.py` | Surfaced by the initial commit, not by design. `check_baseline.py` reads the committed expected side, then calls `capture_baseline.rows()`, which reads `data/bars.parquet` (ignored, 17 MB, vendor data) — so a clone fails generating the *actual* side, not the expected one. Answered by either: a `fetch_bars.py` run documented as a prerequisite with the exact symbol/date window pinned so the pull is deterministic, or a committed fixture slice covering only the 98 rows' symbols and their `trail=60` lookback. Second option is small enough to be worth pricing first. |
 | ~~Q-17~~ | Does the upstream signal's horizon match the graph horizon? | D-15 | **Answered wrongly, then corrected.** Spike 05 used days-to-expiry (median 8); the right field is holding period. `hold_minutes` gives a median of ~22 hours. Superseded by D-32; reopened as Q-25. |
 
 ---

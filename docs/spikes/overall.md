@@ -1106,9 +1106,13 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   schedule we control. Two commit messages were reworded in the rewrite because
   they described committing files that no longer exist — a rewrite that leaves
   the log lying about its own contents is worse than no rewrite.
-- **Outcome:** pending — history verified clean locally (0 commits touch the
-  three paths); the remote is deleted and recreated only once the `delete_repo`
-  scope is granted.
+- **Outcome:** Done. Old remote deleted at 0 forks / 0 stars, recreated public,
+  rewritten history pushed. Verified by cloning the published repo back: 108
+  files, 6 commits, `data/` holds only `excluded-etfs.csv`, `tests/fixtures/` is
+  absent, no withdrawn path appears in any tree, largest blob is `uv.lock` at
+  411 KB, and the suite passes from the clone (33). Residual risk unquantifiable
+  by construction — the repo was public ~4 minutes, and GitHub-side caches and
+  third-party scrapers are outside what we can inspect.
 - **Status:** Accepted
 
 ## Open Questions

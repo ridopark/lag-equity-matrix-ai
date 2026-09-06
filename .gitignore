@@ -37,6 +37,9 @@ data/*
 # and is what makes check_baseline.py --synthetic runnable from a clone (D-52).
 !tests/fixtures/synthetic-closes.parquet
 
+# playwright-mcp scratch output (console dumps, snapshots, screenshots)
+.playwright-mcp/
+
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json
 .unlazy/

@@ -1503,7 +1503,21 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   even after date-clustering, and the MDE should be expected to be worse than
   D-63's 17.9bp despite an identical sample size. This is also the fifth
   interrogation of related data, so it is exploratory regardless of outcome.
-- **Outcome:** pending.
+- **Outcome:** **Null by the rule, but underpowered — as predicted in advance.**
+  n=18,403 over 1,194 sessions: corroborated +4.28bp, neutral +4.64bp,
+  contradicted −6.11bp. Difference **+10.39bp** — right sign, clears the 10bp
+  economic threshold — clustered SE 8.11bp over 1,082 clusters, z=+1.28, 95% CI
+  [−5.5, +26.3]bp. The SE *rose* from D-63's 6.39bp at the same row count,
+  exactly the mega-cap co-movement declared beforehand, so MDE worsens 17.9 →
+  22.7bp. This null rules out little; it neither excludes zero nor 26bp.
+  **The important result is the power arithmetic, not the estimate.** Detecting
+  10.4bp at 80% power needs SE ≤ 3.71bp, i.e. 4.8x more trading days ≈ 21 years.
+  Alpaca's history begins in **2016**: ~10 years, giving SE 5.31bp and MDE
+  14.9bp — still above the estimate. Add sector/beta residualisation cutting
+  residual variance 50% and MDE lands at 10.5bp against an estimate of 10.4bp.
+  **So Q-32 is not resolvable with this data source at this effect size**, by
+  any amount of further compute or sampling. Recorded as a stopping condition
+  rather than a to-do.
 - **Status:** Accepted
 
 ## Open Questions
@@ -1533,7 +1547,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | Q-28 | Is the evaluation set generalisable, or is it one trader's selection style? | D-31, D-33, spike 13 | TradingTheTrend is 76% of all BTO fires, so a result from either pre-registration describes that account rather than "options alerts". Waiting cannot fix this — it accumulates more of the same author. Answered by getting a second high-volume source and re-running the pre-registered test per-author, or by reporting every result as single-source and scoping the claim accordingly. |
 | ~~Q-29~~ | Should the *daily* pipeline exclude funds from neighbour selection? | D-27, D-43, `graph_retriever.py`, D-31, D-33 | D-60 found 78% of neighbourhood slots are funds, some holding the candidate. Excluding them would change every verdict in the baseline and both pre-registered results, so it is not a free fix: it re-opens D-31/D-33 rather than improving them. Answered by measuring how much of the current evidence comes from funds that hold the candidate — which needs holdings data Alpaca does not provide (Q-22) — or by a correlation-threshold proxy for containment. **Answered by D-62: exclude them.** The deciding argument was construct validity, not measured performance. |
 | ~~Q-31~~ | Has the pipeline's actual feature ever been tested? | D-31, D-33, `context_fusion.py`, D-62 | No. D-31 pre-registered `max abs(neighbour z) - abs(candidate z)` and the experiments implement exactly that, faithfully. The pipeline instead computes an independence-weighted, direction-matched sum — Q-12's discounting, the project's distinctive idea — and no test has ever evaluated that statistic. The two are different features, so both pre-registered nulls are silent about the thing that actually ships. Answered by a fresh pre-registration on the shipped feature, which needs power this dataset does not have (D-58), or by testing it on synthetic candidates over a decade of bars where n is not the constraint. |
-| Q-32 | Does the feature carry information *conditional* on an alert-worthy setup? | D-63, spike 14, D-31, D-33 | The only surviving form of the hypothesis. D-63 tested random (symbol, date) pairs and found nothing above ~18bp, but that is not the population the product serves — real alerts are on names where something is already happening. Testing this needs either a much larger signal feed (D-56, D-58) or a defensible synthetic definition of 'alert-worthy', which risks encoding the answer into the selection. Materially harder than what D-63 settled. |
+| ~~Q-32~~ | Does the feature carry information *conditional* on an alert-worthy setup? | D-63, spike 14, D-31, D-33 | The only surviving form of the hypothesis. D-63 tested random (symbol, date) pairs and found nothing above ~18bp, but that is not the population the product serves — real alerts are on names where something is already happening. Testing this needs either a much larger signal feed (D-56, D-58) or a defensible synthetic definition of 'alert-worthy', which risks encoding the answer into the selection. Materially harder than what D-63 settled. |
 | Q-30 | Should repeat same-day alerts on one symbol be assessed separately? | D-61, `graph/state.py`, D-31, D-33 | `candidate_key` collapses them, so 102 fires are ~87 assessed branches and duplicates carry copies of one verdict. Now that `as_of_ts` exists, splitting them is possible — a second alert hours later sees a different neighbourhood state and is arguably a distinct observation. It would change the baseline and re-open D-31/D-33, so it is a real decision, not a cleanup. Answered by measuring how often the neighbourhood state actually differs between same-day repeats. |
 | Q-23 | Will `trade_context` backfill or keep growing, and will `realized_pnl` ever be populated? | D-26, evaluation | 31 rows over 3 weeks, `realized_pnl` populated on **zero** of them. Its schema (Greeks, `underlying_spot`, MFE/MAE) is exactly what the evaluation wants. If it grows it becomes the evaluation table; if not it stays a template. Owner question for oh-my-tradeagent, not this repo. |
 | Q-22 | Where do ETF constituent weights come from, given Alpaca has no holdings endpoint? | D-16, D-28 | First real conflict with the Alpaca-only constraint. Likely a small static weights file for 2-3 ETFs (~100 lines). Prefer equal-weighted breadth over cap-weighted contribution — it is far less sensitive to weight drift, so point-in-time exposure stays small. |

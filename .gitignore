@@ -42,5 +42,3 @@ tests/fixtures/
 .unlazy/
 .unlazy-hook-state.json
 
-# langgraph checkpoints (local run state)
-data/checkpoints.sqlite

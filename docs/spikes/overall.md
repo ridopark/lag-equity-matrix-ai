@@ -1426,6 +1426,48 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   predictive value untested and, at this n, untestable.
 - **Status:** Accepted
 
+### D-63 — Pre-registration: the shipped feature, on synthetic candidates, five years
+- **When:** 2026-09-06T07:17:49-05:00
+- **Decision:** Fixed **before any multi-year bar is fetched.** Answers Q-31.
+  - **Feature: the shipped one, by construction.** The evaluator calls
+    `retrieve_neighbourhood` → `leader_state` → `fuse_evidence` → `assess`
+    directly. Nothing is reimplemented — that is the entire point, since D-31/D-33
+    tested a proxy and were therefore silent about what ships.
+  - **Candidates are synthetic.** No signal feed. For a sampled (symbol, date)
+    pair, assess direction `"up"` and take the verdict. This tests the mechanism,
+    not the trader, and so is not limited by the 102 alerts.
+  - **Population.** Liquid non-fund single names from the existing universe
+    construction, 2021-2026, sampled to ~20,000 (symbol, date) pairs across
+    ~1,200 trading dates. Every date needs 60 prior sessions and 2 forward.
+  - **Label.** 2-session forward return, **market-excess**: minus the
+    equal-weighted mean return of the sampled universe that day. Raw returns
+    would let a market rally masquerade as corroboration working.
+  - **Primary test, one only.** Mean market-excess forward return, `corroborated`
+    minus `contradicted`. **Standard errors clustered by date.** Rows sharing a
+    date share a market shock, so unclustered SEs would treat ~1,200 effective
+    observations as 20,000 and manufacture significance — the specific failure
+    mode a large panel invites.
+  - **Economic threshold, declared now.** A difference below **10bp** over two
+    sessions is not meaningful regardless of p-value. At this n, statistical
+    significance is cheap and must not be reported as a result on its own.
+  - **Secondary, declared in advance so it is not a later fishing trip:** hit
+    rate (excess return > 0) for the same two groups, and the `neutral` group's
+    mean as a sanity anchor between them.
+  - **Stated limitations, not discovered later.** The universe is selected on
+    2026 liquidity, so the sample carries survivorship and look-ahead *in universe
+    construction*; delisted names are absent. Single vendor. One asset class.
+- **Why:** Q-31 established that the project's distinctive statistic —
+  independence-weighted, direction-matched evidence — has never been tested,
+  because both pre-registrations tested `max abs(neighbour z) - abs(candidate z)`
+  instead. Waiting for the signal feed to reach power lost: D-58 prices that at
+  14 months, and D-56 shows the feed is one author, so it would answer a narrower
+  question anyway. The mechanism does not need the feed, and testing it on
+  synthetic candidates is the only route to power that does not involve waiting.
+  The cost is that a result here is about the mechanism in general, **not** about
+  whether it corroborates this trader's picks — those remain separate claims.
+- **Outcome:** pending — no data fetched yet.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -1647,7 +1647,36 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   number. A per-symbol total that looks plausible can hide a per-window cap;
   the coverage table is what made it checkable, which is the argument for having
   recorded `n_articles` per window rather than just "done".
-- **Outcome:** pending — refetch of the 708 invalidated windows in flight.
+- **Outcome:** Refetched. 229,737 articles / 932,545 tags / 16,058 symbols,
+  2014-11-07 → 2026-09-07, 248 MB. Max window 4,772 against a 10,000 ceiling, so
+  nothing truncated; no retries needed. 7x the broken version's 32,213.
+- **Status:** Accepted
+
+### D-70 — Co-mention needs a breadth cutoff and PMI, or it is a popularity ranking
+- **When:** 2026-09-07T04:56:53-05:00
+- **Decision:** The co-mention edge is defined as **PMI over articles tagging
+  <= 8 symbols**, not raw co-occurrence counts. Answers Q-14.
+- **Why:** Two distinct failures, both measured on the full 229,737-article corpus.
+  **Hub noise.** Pairs scale as n(n-1)/2, so breadth-heavy articles dominate
+  combinatorially: the median article tags 2 symbols and the largest tags 2,649,
+  and the 2.1% of articles tagging more than 20 symbols contribute **95.2% of all
+  co-mention pairs**. An unfiltered graph is 95% market-wrap.
+  **Popularity.** Even after filtering breadth, raw counts rank NVDA's peers as
+  AAPL, MSFT, TSLA, META — not suppliers, merely the other most-covered names.
+  Raw co-occurrence measures base rate; PMI divides it out.
+  With both applied, NVDA's top peers become CRWV, ARM, SMH, MRVL, SFTBY, TSM,
+  SOXX, DELL, CSCO, AMD, BIDU, BABA, ORCL, SSNLF — GPU-cloud customer, attempted
+  acquisition target and its owner, foundry, competitors, server and cloud
+  customers, memory supplier. That is the economic structure D-16 abandoned for
+  want of Compustat.
+  The cutoff at 8 is p90 of the breadth distribution, chosen as a distributional
+  landmark rather than tuned against any outcome — no return data was consulted.
+  Sector ETFs (SMH, SOXX) survive and should be removed by D-62's fund list.
+  **Still descriptive.** Three measures over identical data give three different
+  graphs — funds, popular names, business relationships — and the third merely
+  looks the most sensible. The correlation edge also looked sensible before it
+  was a powered null (spike 14). No predictive claim until one is pre-registered.
+- **Outcome:** pending — no return test has been run against this edge.
 - **Status:** Accepted
 
 ## Open Questions
@@ -1666,7 +1695,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | ~~Q-10~~ | Does an exploitable lead-lag exist at *minute* scale, or only daily-to-monthly as the literature documents? | `shock_detector.py`, D-05, Q-03 | The design assumes `lag_minutes`; the evidence base (Cohen & Frazzini, "A frog in every pan", Network Momentum) is daily-to-monthly. Answered by D-15: no evidence for minute-scale supply-chain leads; retargeted to days. |
 | ~~Q-11~~ | Which mode is the product? | — | Answered by D-18: a corroboration/odds layer over an exogenous signal — closest to spike 02's red-team framing, with lagger-entry as the mechanism. |
 | Q-13 | Does `LagEdge` need an `as_of` field? | `domain/models.py` | Largely resolved by D-16 — Alpaca-derived edges are point-in-time by construction. Still add `as_of` as the observation date so the backtest can slice the graph at t. Now a small design task, not a bias risk. |
-| Q-14 | How complete and accurate is Benzinga's `symbols` tagging, and what article-breadth cutoff kills hub noise? | `adapters/vector.py`, edge quality | A "chip stocks rally" piece tagging 25 tickers generates ~300 spurious pairs. Sample a few hundred articles by hand. Determines whether co-mention edges are usable at all. |
+| ~~Q-14~~ | How complete and accurate is Benzinga's `symbols` tagging, and what article-breadth cutoff kills hub noise? | `adapters/vector.py`, edge quality. **Answered by D-70:** breadth <= 8 (p90) plus PMI. Unfiltered, 2.1% of articles carry 95.2% of pairs; unnormalised, the ranking is popularity. Formerly: edge quality | A "chip stocks rally" piece tagging 25 tickers generates ~300 spurious pairs. Sample a few hundred articles by hand. Determines whether co-mention edges are usable at all. |
 | Q-12 | How do we measure *effective independent* evidence in a neighbourhood rather than counting correlated neighbours? | `context_fusion.py`, `signal_analyst.py` | Meucci's Effective Number of Bets (entropy over uncorrelated factors / Minimum-Torsion Bets) is the candidate. Needs a covariance estimate over the neighbourhood — decide the window and shrinkage. Without this, any confluence score is overconfident by construction. |
 | Q-15 | Is the graph feature actually orthogonal to the upstream signal? | D-21, whole design | Answered in part: the signal is **technical + news-driven**, overlapping both edge modalities. D-21 argues the orthogonal axis is own-name vs neighbourhood. Now an empirical test on the replay set, not an open design question. |
 | ~~Q-18~~ | Is the upstream signal codified well enough to replay? | D-20 | **Moot.** Answered by spike 05: no — it is human options alerts from 10 authors, not a function. But replay is unnecessary; 284 real fires exist. See D-26. |

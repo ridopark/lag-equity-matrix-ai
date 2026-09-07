@@ -1711,10 +1711,48 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   and this run add no evidence against it.
 - **Status:** Accepted
 
+### D-72 — Directed EDGAR edges: the data supports them, regex extraction does not
+- **When:** 2026-09-07T06:53:46-05:00
+- **Decision:** Build `lagmatrix.filing_mention` / `filing_coverage` and a
+  `supply_edge` view from 10-K text, storing the **passage verbatim** alongside a
+  provisional `relation` label marked `confidence='heuristic'`. Labelling is
+  explicitly a separate, replaceable step. Reverses D-16's abandonment of the
+  supply-chain graph.
+- **Why:** D-16 dropped this for "no free substitute" for Compustat. EDGAR is
+  free and reachable, so the premise was wrong — but the data has a shape that
+  had to be measured before designing anything.
+  **Large filers anonymise.** NVDA: "one direct customer represented 22% of total
+  revenue"; AVGO and MU likewise. ASC 280 compels the magnitude, never the name.
+  **Suppliers name.** 14 of 20 sampled suppliers name a large customer — QRVO
+  names Apple at 50%, SWKS at 82%, AMKR at 72%, CRUS "one end customer, Apple
+  Inc." So the edge is built from the small end pointing up, which is also the
+  direction Cohen & Frazzini found predictive, and it is genuinely **directed**:
+  QRVO names Apple, Apple never names QRVO. Correlation is symmetric and
+  co-mention undirected, so this is the first edge in the project that can
+  express a lead-lag hypothesis at all.
+  **Regex extraction is the wrong instrument, and I proved it the slow way.**
+  Six tuning passes, each trading precision against recall: sentence boundaries
+  break on "Inc."; a length-sorted vocabulary truncated at 6,000 silently dropped
+  every *short* name, so "Apple" could never match; company short-names collide
+  with ordinary words (MicroStrategy renamed itself "Strategy"; Celsius Holdings
+  vs "degrees Celsius" in a chip filing); and a competitor veto scanned over
+  ±420 chars rejects nearly everything because 10-Ks say "competitive" on every
+  page. Final state is high precision, poor recall, with a known error class
+  (CRUS→GFS is a foundry read as a customer). That oscillation is the argument
+  for an LLM pass, which is the job D-16 reserved for it and which cannot run
+  here — no `ANTHROPIC_API_KEY` in this environment.
+  Hence the design: the passage is the durable artefact, the label is disposable.
+  Re-labelling never re-crawls EDGAR, and every edge stays auditable against the
+  filing that produced it.
+- **Outcome:** pending — crawl of 250 filers x 2 filings in flight; the banked
+  passages are the deliverable, the heuristic labels are not.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-34 | Does the directed supply-chain edge predict, where correlation did not? | D-72, D-63, spike 14 | The whole reason for building it: correlation is symmetric and was a powered null, co-mention is undirected, this is neither. Untestable until the relation labels are trustworthy (needs the LLM pass, hence an API key) and the crawl is wide enough that supplier-side edges reach the alert tickers. Must be pre-registered exactly as D-63 was — the graph looking economically sensible is not evidence, which is what correlation taught. |
 | ~~Q-01~~ | How is the leader→lagger topology built in the first place? | — | Answered by D-16: derived from Alpaca bars (statistical lag) and News API co-mention, recomputed on trailing windows. Supply-chain sourcing abandoned. Residual question is edge *quality* → Q-14. |
 | ~~Q-02~~ | Does Qdrant filtered search hold the latency budget with `symbol IN (...)` + recency filter? | D-03 | Moot — Qdrant dropped. Answered by D-13; the filtering concern survives as Q-09 |
 | ~~Q-03~~ | What is the end-to-end latency budget? | — | Largely dissolved by D-15: a daily cadence gives hours, not milliseconds. Survives only as a scheduling concern. |

@@ -31,8 +31,10 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -40,7 +42,30 @@ HOST = "ridopark@192.168.10.123"
 PSQL = ("kubectl -n copytrade exec -i postgres-0 -- "
         "psql -U temporal -d orchestrator -v ON_ERROR_STOP=1 -q")
 UA = {"User-Agent": "lag-equity-matrix-ai research ridopark@gmail.com"}
-SEC_PAUSE = 0.12          # SEC asks for <= 10 req/s
+SEC_RATE = 8.0            # req/s; SEC asks for <= 10
+WORKERS = 6               # each request spends most of its time on the wire
+FLUSH_EVERY = 40          # filings per DB round trip; psql over ssh costs ~0.5s
+
+
+class Throttle:
+    """Token bucket shared by the workers, so concurrency cannot outrun SEC's limit."""
+
+    def __init__(self, rate: float):
+        self.min_gap = 1.0 / rate
+        self.lock = threading.Lock()
+        self.last = 0.0
+
+    def wait(self) -> None:
+        with self.lock:
+            now = time.monotonic()
+            sleep = self.last + self.min_gap - now
+            if sleep > 0:
+                time.sleep(sleep)
+                now += sleep
+            self.last = now
+
+
+THROTTLE = Throttle(SEC_RATE)
 WINDOW = 420              # chars either side of a counterparty mention
 
 # Customer language must be near the name for the mention to count at all.
@@ -70,6 +95,7 @@ DESIGNATOR = re.compile(
 def http(url: str) -> bytes:
     for attempt in range(4):
         try:
+            THROTTLE.wait()
             return urllib.request.urlopen(
                 urllib.request.Request(url, headers=UA), timeout=40).read()
         except Exception:
@@ -154,80 +180,101 @@ def main() -> None:
 
     done = {ln.strip() for ln in psql("\\pset tuples_only on\n"
             "SELECT accession FROM lagmatrix.filing_coverage;\n").splitlines() if ln.strip()}
-    print(f"  {len(tickers)} filers, {args.filings} filing(s) each; "
+    print(f"  {len(tickers)} filers, up to {args.filings} filing(s) each; "
           f"{len(done)} filings already walked")
 
-    tot = 0
-    for i, tic in enumerate(tickers, 1):
+    # --- plan the whole crawl first, so the fetch stage is embarrassingly parallel
+    plan: list[tuple[str, str, str, str, str]] = []
+    for tic in tickers:
         if tic not in by_tic:
             continue
         cik = str(by_tic[tic]["cik_str"]).zfill(10)
         try:
             sub = json.loads(http(f"https://data.sec.gov/submissions/CIK{cik}.json"))
-        except Exception as e:
-            print(f"    {i}/{len(tickers)} {tic:<6} submissions: {type(e).__name__}")
+        except Exception:
             continue
         r = sub["filings"]["recent"]
-        tenks = [(r["accessionNumber"][j], r["filingDate"][j], r["primaryDocument"][j])
-                 for j in range(len(r["form"])) if r["form"][j] == "10-K"][: args.filings]
-        found = 0
-        for acc, fdate, doc in tenks:
+        n = 0
+        for j in range(len(r["form"])):
+            if r["form"][j] != "10-K" or n >= args.filings:
+                continue
+            acc = r["accessionNumber"][j]
+            n += 1
             if acc in done:
                 continue
-            a = acc.replace("-", "")
-            url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{a}/{doc}"
-            try:
-                text = clean(http(url))
-            except Exception:
-                continue
-            time.sleep(SEC_PAUSE)
-            rows, seen = [], set()
-            for mm in NAME_RE.finditer(text):
-                nm = mm.group(1)
-                cp = name_to_tic.get(nm)
-                if not cp or cp == tic:
-                    continue
-                # multi-word names are self-disambiguating; single words need a
-                # corporate designator immediately after them
-                if " " not in nm and not DESIGNATOR.match(text[mm.end(): mm.end() + 24]):
-                    continue
-                lo = max(0, mm.start() - WINDOW)
-                w = text[lo: mm.end() + WINDOW]
-                if not CUSTOMER_CTX.search(w):
-                    continue
-                rel = label(w, mm.start() - lo)
-                if rel != "customer":
-                    continue
-                key = (cp, w[:80])
-                if key in seen:
-                    continue
-                seen.add(key)
-                pct = PCT.search(w)
-                rows.append([tic, cik, acc, fdate, "10-K", nm, cp, rel, "heuristic",
-                             pct.group(1) if pct else "", w[:4000]])
-            if rows:
-                buf = io.StringIO()
-                csv.writer(buf, lineterminator="\n").writerows(rows)
-                psql("BEGIN;\nCREATE TEMP TABLE s (LIKE lagmatrix.filing_mention "
-                     "INCLUDING DEFAULTS) ON COMMIT DROP;\n"
-                     "COPY s (filer_ticker, filer_cik, accession, filing_date, form, "
-                     "counterparty, cp_ticker, relation, confidence, pct_revenue, passage) "
-                     "FROM STDIN WITH (FORMAT csv);\n" + buf.getvalue() + "\\.\n"
-                     "INSERT INTO lagmatrix.filing_mention (filer_ticker, filer_cik, "
-                     "accession, filing_date, form, counterparty, cp_ticker, relation, "
-                     "confidence, pct_revenue, passage) SELECT filer_ticker, filer_cik, "
-                     "accession, filing_date, form, counterparty, cp_ticker, relation, "
-                     "confidence, pct_revenue, passage FROM s "
-                     "ON CONFLICT DO NOTHING;\nCOMMIT;\n")
-            psql("INSERT INTO lagmatrix.filing_coverage (accession, filer_ticker, "
-                 f"filing_date, n_mentions) VALUES ('{acc}', '{tic}', '{fdate}', {len(rows)}) "
-                 "ON CONFLICT (accession) DO UPDATE SET n_mentions = EXCLUDED.n_mentions;\n")
-            found += len(rows)
-        tot += found
-        if found or i % 25 == 0:
-            print(f"    {i}/{len(tickers)} {tic:<6} {found} customer edges")
+            plan.append((tic, cik, acc, r["filingDate"][j], r["primaryDocument"][j]))
+    print(f"  {len(plan)} filings to fetch")
 
-    print(f"\n  extracted {tot} customer edges this run")
+    def walk(job):
+        tic, cik, acc, fdate, doc = job
+        a = acc.replace("-", "")
+        url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{a}/{doc}"
+        try:
+            text = clean(http(url))
+        except Exception:
+            return tic, acc, fdate, None
+        rows, seen = [], set()
+        for mm in NAME_RE.finditer(text):
+            nm = mm.group(1)
+            cp = name_to_tic.get(nm)
+            if not cp or cp == tic:
+                continue
+            if " " not in nm and not DESIGNATOR.match(text[mm.end(): mm.end() + 24]):
+                continue
+            lo = max(0, mm.start() - WINDOW)
+            w = text[lo: mm.end() + WINDOW]
+            if not CUSTOMER_CTX.search(w):
+                continue
+            if label(w, mm.start() - lo) != "customer":
+                continue
+            key = (cp, w[:80])
+            if key in seen:
+                continue
+            seen.add(key)
+            pct = PCT.search(w)
+            rows.append([tic, cik, acc, fdate, "10-K", nm, cp, "customer", "heuristic",
+                         pct.group(1) if pct else "", w[:4000]])
+        return tic, acc, fdate, rows
+
+    def flush(mentions, coverage):
+        if mentions:
+            buf = io.StringIO()
+            csv.writer(buf, lineterminator="\n").writerows(mentions)
+            cols = ("filer_ticker, filer_cik, accession, filing_date, form, counterparty, "
+                    "cp_ticker, relation, confidence, pct_revenue, passage")
+            psql("BEGIN;\nCREATE TEMP TABLE s (LIKE lagmatrix.filing_mention "
+                 "INCLUDING DEFAULTS) ON COMMIT DROP;\n"
+                 f"COPY s ({cols}) FROM STDIN WITH (FORMAT csv);\n" + buf.getvalue() + "\\.\n"
+                 f"INSERT INTO lagmatrix.filing_mention ({cols}) SELECT {cols} FROM s "
+                 "ON CONFLICT DO NOTHING;\nCOMMIT;\n")
+        if coverage:
+            vals = ",".join(f"('{a}','{tk}','{d}',{n})" for a, tk, d, n in coverage)
+            psql("INSERT INTO lagmatrix.filing_coverage "
+                 f"(accession, filer_ticker, filing_date, n_mentions) VALUES {vals} "
+                 "ON CONFLICT (accession) DO UPDATE SET n_mentions = EXCLUDED.n_mentions;\n")
+
+    mentions, coverage, tot, done_n, failed = [], [], 0, 0, 0
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for tic, acc, fdate, rows in pool.map(walk, plan):
+            done_n += 1
+            if rows is None:
+                failed += 1
+            else:
+                mentions.extend(rows)
+                coverage.append((acc, tic, fdate, len(rows)))
+                tot += len(rows)
+            if len(coverage) >= FLUSH_EVERY:
+                flush(mentions, coverage)
+                mentions, coverage = [], []
+            if done_n % 100 == 0:
+                rate = done_n / max(time.monotonic() - t0, 1e-9)
+                print(f"    {done_n}/{len(plan)}  {tot} edges  "
+                      f"{rate:.1f} filings/s  {failed} fetch failures", flush=True)
+    flush(mentions, coverage)
+
+    print(f"\n  extracted {tot} customer edges from {done_n} filings "
+          f"({failed} fetch failures)")
     print("  " + psql("\\pset tuples_only on\n"
           "SELECT 'store: '||count(*)||' mentions, '||count(DISTINCT filer_ticker)||"
           "' filers, '||count(DISTINCT cp_ticker)||' counterparties' "

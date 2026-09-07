@@ -1770,11 +1770,107 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   companies simply have no single >10% customer to disclose.
 - **Status:** Accepted
 
+### D-73 — Pre-registration: does Apple's move lead its suppliers? (Q-34)
+- **When:** 2026-09-07T11:52:18-05:00
+- **Decision:** Fixed before any relationship is examined. Only marginal
+  quantities — return variances — were computed to size the test.
+  - **Direction: customer → supplier**, the documented one. Cohen & Frazzini's
+    mechanism is that investors watch the large customer and fail to update the
+    small supplier, so AAPL's move should lead its suppliers, not the reverse.
+    Note this is *signal generation on suppliers*, not corroboration of an Apple
+    alert — a different product from the one D-18 describes, and worth saying.
+  - **Portfolio, point-in-time.** Equal-weighted across Apple suppliers, where a
+    supplier joins only on or after the `filing_date` of the 10-K that names
+    Apple. Membership grows 1 → 13 over 2018-10-19 → 2026-09-04. Using today's
+    supplier list on 2019 prices would be exactly the look-ahead the
+    `news_comention` view was designed to prevent.
+  - **Primary test, one only.** OLS slope `b` in
+    `supplier_excess(t+1) = a + b · AAPL_excess(t)`, both market-excess against
+    the equal-weighted universe. A one-session lag, so windows do not overlap and
+    no autocorrelation correction is needed — chosen for that reason.
+  - **Economic threshold, declared now: |b| >= 0.02.** Below that a 1% Apple move
+    implies under 2bp on the supplier portfolio, which is not tradeable whatever
+    the p-value.
+  - **Mandatory secondary, from D-71's lesson:** the same slope estimated per
+    year, with Cochran's Q and I². D-71 showed date-clustered errors understate
+    uncertainty ~3x when regime heterogeneity is present. A pooled slope that
+    is not stable across years is not a result.
+  - **Declared power.** Supplier-portfolio daily excess return sd is 156bp over
+    1,979 sessions; MDE on the mean is 9.8bp at h=1, 19.7bp at h=2, 49.2bp at
+    h=5. Cohen & Frazzini's 145bp/month is ~7bp/day, so **h=1 is the only
+    horizon where the expected effect is near the detectable one**, and even
+    there it is marginal. h=2 and h=5 are pre-emptively excluded rather than
+    tried and discarded.
+- **Why:** Q-34 exists because correlation is symmetric and was a powered null
+  (spike 14), and co-mention is undirected. This is the first directed edge the
+  project has had. Testing it now, narrow, beats widening the crawl first:
+  D-72 established only 8 of 24 alert tickers are reachable and only Apple has
+  depth, so more crawling buys coverage of names that are not in the signal
+  universe. Building more graph before testing the one in hand is how the
+  correlation edge consumed four months.
+- **Outcome:** **Null, and — for once — stable.** n=1,978; b=+0.0090, SE 0.0195,
+  z=+0.46, CI [−0.029, +0.047]; a 1% Apple move implies +0.9bp on the supplier
+  portfolio. Below the declared 0.02 threshold and not significant.
+  The heterogeneity check passes for the first time in this project:
+  **Cochran Q = 7.0 on 7 df, I² = 0%**, yearly slopes scattered around zero with
+  a single 2019 outlier. Contrast D-71, where I²=81% and the sign flipped between
+  periods. So the estimate itself is trustworthy — this is not a specification
+  artefact.
+  **But it is an underpowered null, not a powered one, and that must not be
+  overstated.** MDE is 0.0546 against a declared economic threshold of 0.02, so
+  a tradeable slope could exist unseen; the CI reaches +0.047. n=1,978 already
+  uses every available session and the edges only begin in 2018, so more compute
+  cannot fix it. Superseded as evidence by D-74, which pools across chains —
+  which is what Cohen & Frazzini actually did.
+- **Status:** Accepted — extended by D-74
+
+### D-74 — Pre-registration: pool the same test across every supply chain
+- **When:** 2026-09-07T11:53:31-05:00
+- **Decision:** Repeat D-73 unchanged in every respect except the population:
+  all customers with at least 3 distinct suppliers, each customer contributing
+  one point-in-time equal-weighted supplier portfolio, pooled into a single
+  panel regression of `supplier_excess(t+1)` on `customer_excess(t)`. Same
+  one-session lag, same market-excess construction, same 0.02 economic
+  threshold, same mandatory per-year heterogeneity check.
+  **Errors clustered by date**, because on any given session every chain shares
+  the same market shock — D-71's lesson, applied in advance rather than
+  discovered afterwards.
+- **Why:** D-73 returned a stable null but could not have detected an
+  economically meaningful slope: MDE 0.0546 against a 0.02 threshold. The cause
+  is not the design but the population — one customer's suppliers is a noisy
+  object, and Cohen & Frazzini's 145bp/month is a portfolio across *many* pairs,
+  not one chain. Pooling is therefore the properly powered form of the identical
+  question, not a new hypothesis, and it is the only lever available: n=1,978
+  already exhausts the sessions and the edges start in 2018.
+  Declared in advance: pooling multiplies observations but **not** independent
+  information, since chains co-move. Expect the date-clustered SE to fall far
+  less than sqrt(number of chains) would suggest, and report the effective
+  cluster count alongside the slope. If the clustered MDE still exceeds 0.02,
+  the honest conclusion is that this edge is untestable with what EDGAR yields,
+  not that it is absent.
+- **Outcome:** **Null, stable, still underpowered — and the pre-declared warning
+  held.** 18 chains, n=28,131 chain-days over **1,978 date clusters**. Pooling
+  moved the SE 0.0195 → 0.0120, a factor of **1.6 rather than sqrt(18)=4.2**,
+  exactly because chains co-move; writing that down first is what stopped 28k
+  "observations" reading as power they never had.
+  b = +0.0052, clustered SE 0.0120, z=+0.43, CI [−0.018, +0.029]; a 1% customer
+  move implies +0.5bp on its suppliers. Inverse-variance pooled slope is
+  **+0.0000**, Cochran Q = 5.3 on 7 df, **I² = 0%**, yearly slopes scattered
+  symmetrically about zero. This is the cleanest estimate the project has
+  produced — no instability, no specification sensitivity, no artefact.
+  **MDE 0.0337 still exceeds the 0.02 threshold**, and the CI contains 0.02, so a
+  tradeable slope cannot be excluded. The ceiling is structural: 1,978 clusters
+  is every session the edges span, Alpaca's prices start 2016 so deeper EDGAR
+  history buys at most 1.26x, and more chains yield ~1.6x per 18. Resolving this
+  needs a different data regime, not more work in this one — the same wall D-64
+  hit.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-34 | Does the directed supply-chain edge predict, where correlation did not? | D-72, D-63, spike 14 | The whole reason for building it: correlation is symmetric and was a powered null, co-mention is undirected, this is neither. Untestable until the relation labels are trustworthy (needs the LLM pass, hence an API key) and the crawl is wide enough that supplier-side edges reach the alert tickers. Must be pre-registered exactly as D-63 was — the graph looking economically sensible is not evidence, which is what correlation taught. |
+| ~~Q-34~~ | Does the directed supply-chain edge predict, where correlation did not? | D-72, D-63, spike 14 | The whole reason for building it: correlation is symmetric and was a powered null, co-mention is undirected, this is neither. Untestable until the relation labels are trustworthy (needs the LLM pass, hence an API key) and the crawl is wide enough that supplier-side edges reach the alert tickers. Must be pre-registered exactly as D-63 was — the graph looking economically sensible is not evidence, which is what correlation taught. **Answered by D-73/D-74: no effect detectable, estimate stable at zero, but underpowered against a 0.02 threshold.** Direction did not rescue the mechanism — though unlike the correlation nulls, this one shows no heterogeneity and no artefacts, so it is a clean measurement rather than a contested one. |
 | ~~Q-01~~ | How is the leader→lagger topology built in the first place? | — | Answered by D-16: derived from Alpaca bars (statistical lag) and News API co-mention, recomputed on trailing windows. Supply-chain sourcing abandoned. Residual question is edge *quality* → Q-14. |
 | ~~Q-02~~ | Does Qdrant filtered search hold the latency budget with `symbol IN (...)` + recency filter? | D-03 | Moot — Qdrant dropped. Answered by D-13; the filtering concern survives as Q-09 |
 | ~~Q-03~~ | What is the end-to-end latency budget? | — | Largely dissolved by D-15: a daily cadence gives hours, not milliseconds. Survives only as a scheduling concern. |

@@ -1623,7 +1623,9 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   Tuning the threshold lost to deleting it: any global coverage rule is universe
   selection with hindsight, and `graph_retriever` already applies
   `pool.notna().sum() >= trail * 0.8` inside each point-in-time window.
-- **Outcome:** pending — clean re-run in flight as `data/results6.csv`.
+- **Outcome:** Clean re-run done. The filter was inflating the estimate
+  (+27.06 → +17.95bp) but was not the whole story — see D-71, which shows the
+  residual is heterogeneity, not effect.
 - **Status:** Accepted
 
 ### D-69 — The news backfill captured 3% of the articles, biased to the earliest
@@ -1677,6 +1679,36 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   looks the most sensible. The correlation edge also looked sensible before it
   was a powered null (spike 14). No predictive claim until one is pre-registered.
 - **Outcome:** pending — no return test has been run against this edge.
+- **Status:** Accepted
+
+### D-71 — The estimate is 3x more variable across years than its errors allow
+- **When:** 2026-09-07T05:35:38-05:00
+- **Decision:** Treat the whole synthetic-candidate line of tests as **null**.
+  Date-clustered standard errors are insufficient; report inverse-variance
+  pooling across years, or a heterogeneity-inflated error, not the naive figure.
+- **Why:** With D-68's survivorship filter removed the 10-year run still showed
+  +17.95bp at z=+2.55, which looked like a real result surviving a bug fix. It is
+  not. Three independent checks agree:
+  **The sign flips by period.** 2016-2020 gives −17.81bp (z=−2.27), 2021-2026
+  gives +40.08bp (z=+3.89). By year, 2018 is −50bp (z=−3.99) and 2024 is +99bp
+  (z=+4.29). Both cannot be true.
+  **It is not robust to universe construction.** On identical 2021-2026 dates,
+  D-64's universe gives +10.4bp and this one +40.1bp — a 4x difference from a
+  defensible change in how the candidate list is built, with no return data
+  involved in either choice.
+  **The errors are quantifiably too small.** Cochran's Q = 47.4 on 9 df where ~9
+  is expected; I² = 81%; the estimate's year-to-year SD is 51.6bp against a
+  median within-year SE of 17.2bp — 3.0x more movement than sampling allows.
+  Inverse-variance pooling across years, which weights each year by its own
+  precision instead of equal-weighting observations, gives **−2.31bp**.
+  The cause is regime-level serial correlation: date-clustering absorbs
+  same-session shocks but nothing across adjacent days within a regime, and the
+  feature's verdicts are themselves persistent. Every "significant" result in
+  this line — +115bp at n=122, +64bp in one evidence band, +27bp under the
+  survivorship filter, +17.95bp here — has dissolved on a check the previous one
+  did not have. That pattern is itself the finding.
+- **Outcome:** Working as a correction. D-63's original powered null stands; D-64
+  and this run add no evidence against it.
 - **Status:** Accepted
 
 ## Open Questions

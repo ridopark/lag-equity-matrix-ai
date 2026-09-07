@@ -1942,6 +1942,38 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   written to `data/realized-pnl.csv`. See spike 15.
 - **Status:** Accepted
 
+### D-77 — Return to the original goal: a LangGraph + graph/vector showcase
+- **When:** 2026-09-07T17:08:11-05:00
+- **Decision:** Close the research thread and build the showcase the project was
+  started for. Implement `adapters/arango.py` and `adapters/vector.py` against
+  the corpora the research produced, honour `max_lag_hops` with real multi-hop
+  traversal, and surface both in the existing live web UI. Partially supersedes
+  D-16.
+- **Why:** Raised by the owner, and correct. The drift is traceable to two
+  decisions four hours apart on 2026-09-03. **D-16** ("graph edges are derived,
+  not sourced") removed the reason for a graph database to exist — once edges are
+  a pandas `corrwith` over Alpaca bars, ArangoDB stores nothing that is actually
+  a graph. It was decided for point-in-time correctness and single-vendor
+  reproducibility, both sound, and the cost to the stated goal went unnoticed.
+  **D-26** then made oh-my-tradeagent's `audit_log` the evaluation set — which
+  the owner asked for — and from there the work became validation. `arango.py`
+  and `vector.py` have been 21 and 14 lines of `NotImplementedError` for the
+  entire project, including after the owner restated the portfolio goal.
+  Reversing D-16 *now* rather than then is the right order, and not merely a
+  rationalisation: in September the graph store would have held derived
+  correlation edges, which is a graph database holding something that is not a
+  graph — a weak demo, and probably why it kept being deferred. The research
+  detour produced the assets that make it real: a 932,545-tag PMI-weighted
+  co-mention graph (D-67, D-70), 1,211 **directed** dated supply-chain edges
+  (D-72), and a 229,737-article text corpus. Those are genuinely graph- and
+  vector-shaped; correlation neighbourhoods never were.
+  Continuing the research lost on evidence: three edge types are null (spike 14),
+  two tests sit at the resolution limit of free data, and the literature explains
+  why — every documented cross-firm effect needs illiquid names or long horizons,
+  and this feed trades neither.
+- **Outcome:** pending — plan being written to `docs/plans/`.
+- **Status:** Accepted — partially supersedes D-16
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

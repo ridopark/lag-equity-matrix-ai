@@ -45,3 +45,5 @@ data/*
 .unlazy/
 .unlazy-hook-state.json
 
+
+# ArangoDB credentials live outside the repo (~/.lagmatrix-arango-pw)

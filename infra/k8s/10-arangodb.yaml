@@ -1,0 +1,77 @@
+# ArangoDB — the graph store D-02/D-13 chose and D-16 accidentally made
+# unnecessary. Now it has something genuinely graph-shaped to hold: a directed,
+# dated supply-chain graph and a PMI-weighted co-mention graph.
+#
+# Its own namespace so nothing here can touch the trading workloads, and modest
+# limits because the homelab node has ~4 GB headroom.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lagmatrix
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: arangodb-data
+  namespace: lagmatrix
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 8Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arangodb
+  namespace: lagmatrix
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce, so a rolling update
+  # starts the new pod while the old one still holds /var/lib/arangodb3/LOCK and
+  # the new one dies with "database is locked by process 1".
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: arangodb}
+  template:
+    metadata:
+      labels: {app: arangodb}
+    spec:
+      containers:
+        - name: arangodb
+          image: arangodb:3.12
+          # --experimental-vector-index turns on the HNSW vector index. Without
+          # it ArangoDB serves the graph but only brute-force COSINE_SIMILARITY
+          # in AQL, which is not a vector database in any meaningful sense.
+          # Enabling it lets one store fill both roles, which is what D-13 chose
+          # and what the node's memory headroom requires.
+          args: ["arangod", "--experimental-vector-index"]
+          env:
+            - name: ARANGO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: arangodb-auth, key: password}
+          ports:
+            - containerPort: 8529
+          resources:
+            requests: {memory: 512Mi, cpu: 100m}
+            limits:   {memory: 1500Mi, cpu: "1"}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/arangodb3}
+          readinessProbe:
+            tcpSocket: {port: 8529}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: arangodb-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: arangodb
+  namespace: lagmatrix
+spec:
+  selector: {app: arangodb}
+  ports:
+    - {port: 8529, targetPort: 8529}

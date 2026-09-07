@@ -1567,6 +1567,39 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending.
 - **Status:** Accepted
 
+### D-67 — News lands in Postgres, and the co-mention edge is economically real
+- **When:** 2026-09-07T03:54:46-05:00
+- **Decision:** Build `lagmatrix.news_article` / `news_symbol` / `news_coverage`
+  plus a `news_comention` **view**, in a dedicated schema inside the existing
+  `orchestrator` database. `scripts/load_news.py` backfills idempotently by
+  (symbol, 90-day window). This is D-16's unbuilt half, finally built.
+- **Why:** Parquet lost for this data: news is text with a many-to-many symbol
+  tagging, queried by "which names appear together before date X", which is
+  relational work. Postgres also makes it joinable to `audit_log`'s signals —
+  hence a schema inside `orchestrator` rather than a separate database, since
+  Postgres cannot join across databases. A separate database and a new k8s
+  service both lost to a namespaced schema: purely additive, nothing existing
+  touched, no new operational surface.
+  `news_comention` is deliberately a **view, not a materialised table**: every
+  caller must supply its own `created_at < as_of` bound, so look-ahead cannot be
+  introduced by forgetting to filter. Materialising it would bake in one as-of.
+  Bulk `COPY` through `ssh -> kubectl exec -i -> psql` rather than INSERT,
+  because 5432 is a headless ClusterIP with no external route and per-row round
+  trips over that path are unusable.
+  **The edge is qualitatively different from correlation, which is the point.**
+  On three months of NVDA/AMD news, NVDA's co-mention peers are AMD 44, MSFT 27,
+  AVGO 22, MU 21, INTC 21, AAPL 17, DELL 14, AMZN 13, TSM 12 — foundry, memory
+  supplier, customers, competitors. Correlation gave NVDY, DSI, QGRW, SPYG,
+  SNPE, VOOG: six index funds. The fund contamination of D-60 cannot occur here,
+  because nobody writes articles about VUG. This recovers the supply-chain
+  structure D-16 abandoned for want of a data source, from a source we already had.
+- **Outcome:** Schema live, loader verified idempotent (a re-run refetched 0 of 2
+  covered windows). 152 articles / 797 tags / 205 symbols from a two-symbol
+  three-month smoke test — 5.2 symbols per article, which is the co-mention
+  density the edge depends on. Ten-year backfill of the alert tickers running.
+  **No predictive claim is made or implied**: this is a data asset, not a result.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -119,8 +119,13 @@ footer{padding:2.6rem 0 4rem;color:var(--dimmer);font-size:.8rem}
     <h1>A supply chain, traversed <span class="g">two hops deep</span><br>and read <span class="v">semantically</span></h1>
     <p class="lede">Every number on this page was measured. The traversal is an AQL graph query
       against 1,211 directed supply-chain edges extracted from SEC 10-K filings. The retrieval is
-      approximate nearest-neighbour search over 47,640 embedded news articles. Both ran inside a
-      LangGraph pipeline, in parallel, and rejoined at a fusion node.</p>
+      approximate nearest-neighbour search over 47,640 embedded news articles, both against a live
+      ArangoDB instance.</p>
+    <p class="lede" style="font-size:.95rem;margin-top:.9rem">One caveat stated plainly, because the
+      rest of this page is measured: the two queries below were issued <em>directly</em> against those
+      stores. The pipeline's retrieval nodes do not call them yet — the adapters are being wired in
+      now. The topology, the fan-out and the query timings are real; "the pipeline ran this" will be
+      true shortly, and is not claimed until it is.</p>
     <div class="facts">
       <div class="fact"><b id="f-eq">606</b><span>equity vertices</span></div>
       <div class="fact"><b id="f-sup">1,211</b><span>directed edges</span></div>
@@ -197,8 +202,13 @@ footer{padding:2.6rem 0 4rem;color:var(--dimmer);font-size:.8rem}
     <p class="sub">One <span class="mono">Send</span> branch per candidate. Graph traversal and vector
       retrieval run in parallel and rejoin at <span class="mono">context_fusion</span>. Every run is
       checkpointed under a thread id and replayable; <span class="mono">review</span> is an
-      <span class="mono">interrupt()</span> gate that halts on a contradicted verdict. Timings below are
-      wall-clock from the captured run.</p>
+      <span class="mono">interrupt()</span> gate that halts on a contradicted verdict — this topology
+      is what the pipeline actually builds, and the suite that proves it is
+      <span class="mono">test_fanout</span>, <span class="mono">test_checkpointing</span> and
+      <span class="mono">test_review</span>.
+      The per-node timings below are the real durations of the AQL and ANN calls; the ordering is the
+      graph's own. Once the adapters land, these become one <span class="mono">graph.astream</span>
+      trace rather than a composed one.</p>
     <div class="tl" id="tl"></div>
   </div>
 </section>

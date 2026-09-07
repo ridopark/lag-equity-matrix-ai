@@ -83,7 +83,13 @@ def main() -> None:
 
     bars = pd.read_parquet(args.bars)
     closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
-    closes = closes.loc[:, closes.notna().sum() >= len(closes) * 0.9]
+    # NO global coverage filter. Requiring 90% coverage over the whole frame is
+    # harmless on a short window and a survivorship filter on a long one: over
+    # 2016-2026 it drops every post-2016 IPO (ABNB, PLTR, HOOD, COIN, CRWD,
+    # SNOW, UBER...) and keeps only decade-long survivors. Measured cost of that
+    # mistake: on identical 2021-2026 dates the gap went +10.4bp (D-64's
+    # universe) -> +41.1bp (decade survivors). The nodes already enforce
+    # coverage per trailing window, which is the point-in-time place to do it.
     sessions = closes.index
     rets = closes.pct_change()
     print(f"  grid: {closes.shape[0]} sessions x {closes.shape[1]} symbols "

@@ -1600,6 +1600,31 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   **No predictive claim is made or implied**: this is a data asset, not a result.
 - **Status:** Accepted
 
+### D-68 — A coverage filter I wrote became a survivorship filter, and it manufactured an effect
+- **When:** 2026-09-07T04:24:26-05:00
+- **Decision:** Remove the global `closes.notna().sum() >= len(closes) * 0.9`
+  column filter from `experiment3.py`. Coverage is enforced per trailing window
+  inside the nodes, which is the point-in-time place for it. Any result from the
+  first 10-year run (`data/results5.csv`) is void.
+- **Why:** The 10-year run reported **+27.06bp, z=+4.53**, monotonic across all
+  three verdicts — the first significant positive of the project, and false.
+  It contradicted D-64's +10.39bp / z=+1.28, and the only intended change was
+  history depth. The unintended change was the universe: that filter is applied
+  over the **whole frame**, so lengthening the frame from 5 to 10 years silently
+  required continuous trading since 2016. It dropped every post-2016 IPO — ABNB,
+  PLTR, HOOD, COIN, CRWD, SNOW, UBER, AFRM, RKLB, SOFI, ASTS — and backfilled
+  with decade-old names (CMCSA, PM, TJX, NEE, COP). 28 of 100 candidates differed.
+  The diagnostic that settles it: on the **identical** 2021-2026 dates, D-64's
+  universe gives +10.4bp and the decade-survivor universe gives **+41.1bp**. Same
+  dates, same code, same design — only the survivor selection differs, and the
+  effect quadruples. Effect size scaling with the degree of survivor selection is
+  the signature of the bias, not of alpha.
+  Tuning the threshold lost to deleting it: any global coverage rule is universe
+  selection with hindsight, and `graph_retriever` already applies
+  `pool.notna().sum() >= trail * 0.8` inside each point-in-time window.
+- **Outcome:** pending — clean re-run in flight as `data/results6.csv`.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

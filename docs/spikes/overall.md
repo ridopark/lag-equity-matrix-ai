@@ -1744,8 +1744,21 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   Hence the design: the passage is the durable artefact, the label is disposable.
   Re-labelling never re-crawls EDGAR, and every edge stays auditable against the
   filing that produced it.
-- **Outcome:** pending — crawl of 250 filers x 2 filings in flight; the banked
-  passages are the deliverable, the heuristic labels are not.
+- **Outcome:** Crawled 470 filings across 250 filers. **79 edges, 36 suppliers,
+  29 customers — and only 11% of filings yielded one.** That corrects a number in
+  this entry's own Why: the "14 of 20 suppliers name a customer" figure came from
+  a sample I hand-picked *because* they were known concentrated semiconductor
+  suppliers, then cited as evidence of density. Measured across a broad
+  cross-section the rate is **~13%**, and it does not vary with size — 15%, 16%,
+  9%, 15% across liquidity ranks 1-50, 51-100, 101-175, 176-250, with hits and
+  misses at the same median rank. So the anonymisation asymmetry is real for
+  individual mega-caps (NVDA, AVGO, MU do hide names) but is *not* what drives
+  the low yield: most companies simply have no single >10% customer to disclose.
+  Top customers by in-degree: AAPL(4), COR(4), WMT(4), META(3) — plausible — and
+  QUBT, SKHY, COKE, which are residual false positives.
+  The graph is therefore thin: ~13% x 2,183 tradeable names implies a few hundred
+  edges at full crawl, concentrated in supply-chain-heavy industries (semis, auto
+  parts, contract manufacturing) rather than spread evenly.
 - **Status:** Accepted
 
 ## Open Questions

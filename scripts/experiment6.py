@@ -115,7 +115,7 @@ def main() -> None:
     b, se, n, nc = cluster_ols(df.x.values, df.y.values,
                                df.date.values.astype("datetime64[D]"))
     z = b / se
-    print(f"\n  PRIMARY (D-75): candidate_excess(t+1) = a + b * pmi_neighbours_excess(t)")
+    print("\n  PRIMARY (D-75): candidate_excess(t+1) = a + b * pmi_neighbours_excess(t)")
     print(f"    n = {n:,} seed-days over {nc} date clusters, {df.seed.nunique()} seeds")
     print(f"    b  = {b:+.4f}   clustered SE {se:.4f}   z = {z:+.2f}")
     print(f"    95% CI [{b-1.96*se:+.4f}, {b+1.96*se:+.4f}]")

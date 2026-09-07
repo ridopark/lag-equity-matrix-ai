@@ -1916,6 +1916,32 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   artefact depending on the heterogeneity it is applied to.
 - **Status:** Accepted
 
+### D-76 — Measure the signal, not just the graph: the feed earns, unprovably
+- **When:** 2026-09-07T13:23:34-05:00
+- **Decision:** Record realized P&L from broker fills as a first-class result,
+  and treat the index-ETF leg as the one actionable finding. `scripts/realized_pnl.py`
+  reconstructs round-trips from `EntryFilled` / `PartialExitFilled`.
+- **Why:** Every experiment here asked whether the *graph feature* predicts; none
+  asked whether the *signal* does, and the fills were in `audit_log` throughout.
+  77 real-money round-trips: **+$37,586**, mean +5.9%, win rate 68.8%, median hold
+  22.4h. Three qualifications, each measured:
+  **Five trades from breakeven.** Top 3 = 86% of P&L, top 5 = 115%; without them
+  the account is −$5,634. Those five are NVDA/MU/NVDA/MU/AMD at +79% to +101%,
+  on positions 2.1x typical — concentration in *return*, not sizing.
+  **Not distinguishable from zero.** SE 4.5%, t=+1.31, CI [−2.9%, +14.7%]. A
+  payoff ratio of 0.70 means it survives only while the 68.8% win rate does.
+  **Index ETFs lose systematically**: SPY/QQQ, 30 trades, −5.9% mean, −$6,867,
+  against single names at +13.4% and +$44,454. That is the one pattern not
+  carried by outliers, and it is 39% of all activity.
+  This also undercuts D-29's choice of the underlying's forward return as the
+  label: D-33 measured that at −0.86% with a 41.8% hit rate over 2 sessions,
+  while the options were profitable over the same feed. Leverage and a 22-hour
+  hold mean the underlying return is not what the account earns, so every
+  experiment scored against it has been measuring an adjacent quantity.
+- **Outcome:** Working — 217 round-trips reconstructed (77 real, 140 paper),
+  written to `data/realized-pnl.csv`. See spike 15.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
@@ -1975,3 +2001,4 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 | 12 | [LangGraph 1.2.11 behaviour, probed rather than read](12-langgraph-v1-behaviour.md) | evidence for D-44/D-46/D-47; records 8 failed claims | done — 14 probes, all re-probed during execution |
 | 13 | [Widening the signal feed: what the 30/month is actually made of](13-widening-the-signal-feed.md) | answered Q-24; corrected spike 08's linearity claim; raised Q-28 | done — read-only |
 | 14 | [The shipped feature, tested properly, does not predict](14-shipped-feature-null.md) | answered Q-31 with a powered null; raised Q-32 | done |
+| 15 | [What the signal feed actually earned](15-realized-pnl.md) | first measurement of the signal itself; +$37.6k, t=1.31, ETFs lose | done — read-only |

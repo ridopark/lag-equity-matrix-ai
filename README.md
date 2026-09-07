@@ -25,36 +25,75 @@ Over 102 real signals across 24 tickers:
 | contradicted | 16 |
 | no_assessment | 3 |
 
-**The premise does not hold, and that is the main result.** The feature the
-pipeline actually computes — independence-weighted, direction-matched
-neighbourhood evidence — was tested on 19,867 synthetic candidate-dates across
-1,194 sessions, calling the production nodes rather than a reimplementation:
+**The premise does not hold.** Three different ways of defining "related
+company" were built and tested. None predicts returns at the horizons this
+signal feed trades.
+
+### 1. Correlation — the shipped edge
+
+Neighbours ranked by return correlation over a trailing 60 sessions.
 
 | test | result |
 |---|---|
-| unconditional, 2-session horizon | **−4.6 bp**, z=−0.72, CI [−17.1, +7.9], **MDE 17.9 bp** |
-| intraday lead-lag | **null**, twice; neighbours move *with* the candidate, not before |
-| conditional on mega-cap | +10.4 bp, z=+1.28 — **underpowered**, CI [−5.5, +26.3] |
+| unconditional, 2-session horizon | **−4.6 bp**, z=−0.72, **MDE 17.9 bp** — a *powered* null |
+| intraday lead-lag, 1-minute bars | **null**, twice; peers move *with* the candidate, 89% at lag 0 |
+| conditional on mega-cap | +10.4 bp, z=+1.28 — underpowered, CI [−5.5, +26.3] |
 
-The first is a *powered* null: it rules out any unconditional effect above
-~18 bp. The two earlier pre-registrations (D-31, D-33) had minimum detectable
-effects of 100.6 pp and 34.2 pp, too blunt to distinguish anything, and they
-tested a simpler proxy statistic rather than the shipped one — which is why the
-shipped feature went four months without a real test (Q-31).
+Correlation is **symmetric**, which is why the intraday test found lag 0: you
+cannot select neighbours by "moves together" and then be surprised they move
+together. It also selects funds — 78% of neighbourhood slots were index ETFs
+holding the candidate, until D-62 excluded them.
 
-What survives is narrow: a possible ~10 bp effect on mega-caps, which cannot be
-confirmed here. Detecting it needs ~21 years of daily history; Alpaca's begins in
-2016. Even using all of it *and* halving residual variance leaves the minimum
-detectable effect at 10.5 bp against an estimate of 10.4 bp. That is a stopping
-condition, not a to-do.
+### 2. News co-mention — built, not tested
 
-It is not negligible if real: at the median 120× leverage of the options actually
-traded (7 DTE, 3% OTM, $2.48 premium), 10 bp on the underlying is 4–6% of
-premium — the same order as the spread, not beneath it. Whether it clears
-execution costs is unpriced in both directions (Q-33).
+229,737 Benzinga articles (2014→2026) in Postgres. Two corrections were needed
+before the edge meant anything: 2.1% of articles tag more than 20 symbols and
+contribute **95.2% of all co-mention pairs**, and raw counts rank *popularity*
+rather than relationship. With a breadth cutoff at p90 and PMI, NVDA's peers
+become CRWV, ARM, TSM, MRVL, SFTBY, DELL, AMD — foundry, customers,
+competitors. Correlation gave NVDY, DSI, QGRW, SPYG, VOOG.
 
-`docs/spikes/overall.md` carries the working, including a 400-sample run that
-reported +115 bp at z=+3.89 before the full sample reversed it.
+Descriptive only. No return test has been run against it.
+
+### 3. Supply chain from EDGAR — directed, and the cleanest null
+
+1,211 customer edges extracted from 5,880 10-K filings, 2018→2026,
+point-in-time by filing date. The first **directed** edge in the project: QRVO
+names Apple; Apple never names QRVO.
+
+| test | result |
+|---|---|
+| Apple's 13 suppliers, 1-day lag | b=+0.0090, z=+0.46, I²=0% |
+| pooled across 18 chains | **b=+0.0052**, z=+0.43, pooled estimate **+0.0000**, I²=0% |
+
+A 1% customer move implies +0.5 bp on its suppliers. Unlike the correlation
+nulls, this one is *stable* — no regime dependence, no specification
+sensitivity. Still underpowered: MDE 0.0337 against a declared 0.02 threshold.
+
+### Why the negative results are the deliverable
+
+Four apparent positives appeared during testing and every one dissolved under a
+check the previous one lacked:
+
+| claim | what killed it |
+|---|---|
+| +115 bp, z=+3.89 | n=122 smoke sample; the full 19,867 reversed the sign |
+| +64 bp in one evidence band | the *strongest* band showed +1.66 bp |
+| +27 bp, z=+4.53 | a coverage filter I wrote had become a survivorship filter |
+| +17.95 bp, z=+2.55 | I²=81%; sign flipped between halves, both "significant" |
+
+The methodology exists because of that. Every test is pre-registered before the
+data is fetched, with the decision rule, the economic threshold and the expected
+power written down first — see D-59, D-63, D-66, D-73, D-74. Several tests were
+declared unpowered *in advance* rather than reported as null afterwards.
+
+### Where it stops
+
+Two tests are now at the resolution limit of free data rather than the limit of
+effort. Confirming a 10 bp mega-cap effect needs ~21 years of daily history;
+Alpaca's begins in 2016. The supply-chain test needs 2.9× more independent
+information than 1,978 date clusters provide. Both are stopping conditions, not
+to-do items.
 
 ## Graph topology
 
@@ -225,6 +264,38 @@ Reads `data/bars.parquet` and `data/fires.csv`, diffs against
 a silent fallback would let the guard report "unchanged" while the real inputs
 were missing.
 
+## Data
+
+Three stores, none of them committed.
+
+**Local parquet** — analytical caches, regenerated by script:
+
+| file | span | contents |
+|---|---|---|
+| `data/bars.parquet` | 159 sessions | OHLCV + vwap + dollar_vol, 3,204 symbols |
+| `data/bars-10y.parquet` | 2016→2026, 2,514 sessions | close + volume, 2,183 symbols, 4.7M rows |
+| `data/minute*.parquet` | 48 alert dates | 1-minute closes, ~1.1M rows |
+
+**Postgres** (`lagmatrix` schema, inside the existing `orchestrator` database —
+namespaced away from the trading tables, but joinable to `audit_log`):
+
+| table | rows | purpose |
+|---|---|---|
+| `news_article` / `news_symbol` | 229,737 / 932,545 | Benzinga 2014→2026, 248 MB |
+| `news_comention` | *view* | undirected co-mention pairs |
+| `filing_mention` | 1,211 | 10-K customer disclosures, 2018→2026 |
+| `supply_edge` | *view* | directed supplier → customer |
+
+Both graph tables are exposed as **views, never materialised**, so every caller
+must supply its own `created_at < as_of` or `filing_date < as_of` bound.
+Materialising them would bake in a single as-of date and make look-ahead a
+matter of forgetting to filter rather than an impossibility.
+
+`filing_mention` stores the **passage verbatim** alongside a `relation` label
+marked `confidence='heuristic'`. The passage is the durable artefact; the label
+is disposable. Re-labelling with an LLM never re-crawls EDGAR, and every edge
+stays auditable against the filing that produced it.
+
 ## What is not in this repo, and why
 
 | withheld | reason |
@@ -248,14 +319,21 @@ rest needs your own Alpaca credentials and your own signal source —
 | `capture_trace.py` | stream a run to JSON for the web view (`--synthetic`) |
 | `make_synthetic.py` | regenerate the synthetic universe |
 | `capture_baseline.py` / `check_baseline.py` | freeze and diff the verdict table |
-| `fetch_bars.py` / `extract_fires.py` | build the local inputs |
-| `build_exclusions.py` | leveraged/inverse classifier (D-43) |
-| `experiment.py` / `experiment2.py` | the two pre-registered tests (D-31, D-33) |
+| `fetch_bars.py` / `fetch_history.py` / `fetch_minute.py` | daily, decade and minute panels |
+| `extract_fires.py` | pull the signal feed from the upstream `audit_log` |
+| `build_exclusions.py` | fund classifier (`--leveraged-only` for pre-D-62 behaviour) |
+| `load_news.py` | backfill Benzinga into Postgres, idempotent by 90-day window |
+| `load_edgar.py` | crawl 10-Ks for directed customer edges, concurrent + throttled |
+| `experiment.py` / `experiment2.py` | the first two pre-registrations (D-31, D-33) |
+| `experiment3.py` | the shipped feature on synthetic candidates (D-63, D-64) |
+| `experiment4.py` / `experiment5.py` | supply-chain lead-lag, one chain and pooled (D-73, D-74) |
+| `horizon_ladder.py` | decay profile with block-clustered errors (D-66) |
+| `intraday_lag.py` | minute-resolution cross-correlation (D-59, D-60) |
 | `seed_arango.py` | bootstrap for the graph store that is not yet built |
 
 ## Research & decisions
 
-`docs/spikes/overall.md` is the running log: 53 decisions, 27 questions, 12 spike
+`docs/spikes/overall.md` is the running log: 74 decisions, 34 questions, 14 spike
 write-ups. Every decision names the alternative that lost and carries an
 `Outcome` field that stays `pending` until the decision has actually been
 exercised — including the ones that turned out wrong. Read it before changing

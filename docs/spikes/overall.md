@@ -1596,7 +1596,8 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** Schema live, loader verified idempotent (a re-run refetched 0 of 2
   covered windows). 152 articles / 797 tags / 205 symbols from a two-symbol
   three-month smoke test — 5.2 symbols per article, which is the co-mention
-  density the edge depends on. Ten-year backfill of the alert tickers running.
+  density the edge depends on. First ten-year backfill completed at 32,213
+  articles — and was **90%+ incomplete**, see D-69. Refetch in flight.
   **No predictive claim is made or implied**: this is a data asset, not a result.
 - **Status:** Accepted
 
@@ -1623,6 +1624,30 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   selection with hindsight, and `graph_retriever` already applies
   `pool.notna().sum() >= trail * 0.8` inside each point-in-time window.
 - **Outcome:** pending — clean re-run in flight as `data/results6.csv`.
+- **Status:** Accepted
+
+### D-69 — The news backfill captured 3% of the articles, biased to the earliest
+- **When:** 2026-09-07T04:34:43-05:00
+- **Decision:** `WINDOW_LIMIT = 10_000` replaces `PAGE_LIMIT = 50` in
+  `load_news.py`, and the hand-rolled `next_page_token` loop is deleted. Coverage
+  rows with `n_articles >= 50` are invalidated and refetched; the 280 rows below
+  50 are genuinely complete and kept.
+- **Why:** The first completed backfill reported 32,213 articles and looked
+  healthy. It was not: **no window ever exceeded 50 articles and 708 hit exactly
+  50**, which is 41 windows x 50 = the 2,050 that TSLA, SPY, NVDA, NFLX and MU
+  each reported to the row. `alpaca-py`'s `get_news` paginates *internally* up to
+  `NewsRequest.limit` and returns `next_page_token=None` regardless, so the manual
+  token loop could never advance and `limit=50` was a hard per-window ceiling.
+  Two things made it worse than a simple undercount. With `sort="asc"` the 50
+  kept were the **earliest** in each 90-day window, so the sample is
+  systematically biased in time rather than merely thin. And the true volume is
+  an order of magnitude higher: TSLA alone has 497 articles in January 2024, and
+  2024-2026 yields 12,146 against the ~550 the broken version produced — 22x.
+  Caught by noticing that five different tickers reported the identical round
+  number. A per-symbol total that looks plausible can hide a per-window cap;
+  the coverage table is what made it checkable, which is the argument for having
+  recorded `n_articles` per window rather than just "done".
+- **Outcome:** pending — refetch of the 708 invalidated windows in flight.
 - **Status:** Accepted
 
 ## Open Questions

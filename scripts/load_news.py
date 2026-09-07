@@ -37,7 +37,11 @@ HOST = "ridopark@192.168.10.123"
 PSQL = ("kubectl -n copytrade exec -i postgres-0 -- "
         "psql -U temporal -d orchestrator -v ON_ERROR_STOP=1 -q")
 CHUNK_DAYS = 90       # one fetch window; Benzinga paginates within it
-PAGE_LIMIT = 50       # Alpaca's per-request cap
+WINDOW_LIMIT = 10_000  # NOT a page size. The SDK paginates internally up to
+                       # NewsRequest.limit and always returns next_page_token=None,
+                       # so this is the per-window ceiling. Setting it to 50 (the
+                       # per-page size) silently truncated every busy window to its
+                       # first 50 articles: TSLA has 497 in Jan 2024 alone.
 
 
 def psql(sql: str, stdin: str = "") -> str:
@@ -126,21 +130,23 @@ def with_retry(fn, what: str):
 
 
 def fetch_window(client: NewsClient, symbol: str, start: datetime, end: datetime):
-    """All articles for one symbol/window, following Alpaca's page token."""
-    arts, token = [], None
-    while True:
-        def _call(tok=token):
-            req = NewsRequest(symbols=symbol, start=start, end=end,
-                              limit=PAGE_LIMIT, page_token=tok,
-                              include_content=False, sort="asc")
-            return client.get_news(req)
+    """All articles for one symbol/window.
 
-        resp = with_retry(_call, f"{symbol} {start.date()}")
-        page = resp.data.get("news", []) if hasattr(resp, "data") else []
-        arts.extend(page)
-        token = getattr(resp, "next_page_token", None)
-        if not token or not page:
-            return arts
+    No manual page loop: alpaca-py's get_news paginates internally up to
+    NewsRequest.limit and hands back next_page_token=None either way, so a
+    hand-rolled token loop can never advance. The ceiling is `limit`.
+    """
+    def _call():
+        return client.get_news(NewsRequest(
+            symbols=symbol, start=start, end=end, limit=WINDOW_LIMIT,
+            include_content=False, sort="asc"))
+
+    resp = with_retry(_call, f"{symbol} {start.date()}")
+    arts = resp.data.get("news", []) if hasattr(resp, "data") else []
+    if len(arts) >= WINDOW_LIMIT:
+        print(f"      WARNING {symbol} {start.date()}: hit WINDOW_LIMIT, window truncated",
+              flush=True)
+    return arts
 
 
 def main() -> None:

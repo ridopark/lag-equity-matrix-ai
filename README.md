@@ -97,11 +97,24 @@ declared unpowered *in advance* rather than reported as null afterwards.
 
 ### Where it stops
 
-Two tests are now at the resolution limit of free data rather than the limit of
-effort. Confirming a 10 bp mega-cap effect needs ~21 years of daily history;
-Alpaca's begins in 2016. The supply-chain test needs 2.9× more independent
-information than 1,978 date clusters provide. Both are stopping conditions, not
-to-do items.
+**Three** tests are now at the resolution limit of free data rather than the
+limit of effort:
+
+| test | needs | available |
+|---|---|---|
+| mega-cap correlation (10 bp) | ~21 years of daily history | Alpaca begins 2016 |
+| supply chain (0.02 slope) | 2.9× more independent information | 1,978 date clusters is every session the edges span |
+| co-mention (0.02 slope) | a different regression orientation | forced by the hypothesis — the candidate must be the dependent variable |
+
+The last one is structural rather than a data shortage. D-74 reached SE 0.0120
+by regressing a supplier *portfolio* on a customer *single stock*; the
+co-mention hypothesis is that neighbours lead the candidate, so the noisy single
+stock has to be the dependent variable and the quiet portfolio the regressor —
+the worst arrangement for identification, and no reformulation preserves the
+question.
+
+These are stopping conditions, not to-do items. More compute, more sampling and
+more patience do not move any of them.
 
 ## Graph topology
 
@@ -341,7 +354,7 @@ rest needs your own Alpaca credentials and your own signal source —
 
 ## Research & decisions
 
-`docs/spikes/overall.md` is the running log: 74 decisions, 34 questions, 14 spike
+`docs/spikes/overall.md` is the running log: 75 decisions, 34 questions, 14 spike
 write-ups. Every decision names the alternative that lost and carries an
 `Outcome` field that stays `pending` until the decision has actually been
 exercised — including the ones that turned out wrong. Read it before changing

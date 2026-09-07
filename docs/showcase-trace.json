@@ -1,0 +1,509 @@
+{
+ "meta": {
+  "equity": 606,
+  "supplies": 1211,
+  "comention": 2129,
+  "articles": 47640,
+  "as_of": "2026-06-01",
+  "generated_at": "2026-09-07T22:30:09Z",
+  "arangodb": "3.12.11",
+  "embedding_model": "all-MiniLM-L6-v2 (384-dim)",
+  "total_ms": 5099.9
+ },
+ "aql": {
+  "traversal": "FOR v, e, p IN 1..@hops INBOUND @start supplies_to\n  FILTER p.edges[*].filing_date ALL <= @as_of\n  COLLECT symbol = v.symbol\n    AGGREGATE hops = MIN(LENGTH(p.edges)),\n              path = MIN(CONCAT_SEPARATOR(\">\", REVERSE(p.vertices[*].symbol))),\n              pct  = MAX(p.edges[-1].pct_revenue),\n              filed = MAX(p.edges[-1].filing_date)\n  RETURN {symbol, hops, path, pct, filed}",
+  "vector": "FOR a IN article\n  LET score = APPROX_NEAR_COSINE(a.embedding, @vec)\n  FILTER a.date < @as_of\n  SORT score DESC\n  LIMIT @k\n  RETURN {headline: a.headline, date: a.date, symbols: a.symbols, score: score}"
+ },
+ "events": [
+  {
+   "t_ms": 0.0,
+   "node": "START",
+   "key": null,
+   "detail": "Send fan-out: 3 candidates"
+  },
+  {
+   "t_ms": 1133.3,
+   "node": "graph_retriever",
+   "key": "AAPL",
+   "detail": "13 at 1 hop, 6 at 2 hops (20 ms AQL)"
+  },
+  {
+   "t_ms": 1951.2,
+   "node": "vector_retriever",
+   "key": "AAPL",
+   "detail": "6 articles (12 ms ANN)"
+  },
+  {
+   "t_ms": 3023.1,
+   "node": "graph_retriever",
+   "key": "AVGO",
+   "detail": "3 at 1 hop, 6 at 2 hops (5 ms AQL)"
+  },
+  {
+   "t_ms": 3658.1,
+   "node": "vector_retriever",
+   "key": "AVGO",
+   "detail": "6 articles (7 ms ANN)"
+  },
+  {
+   "t_ms": 4469.0,
+   "node": "graph_retriever",
+   "key": "TSLA",
+   "detail": "2 at 1 hop, 0 at 2 hops (2 ms AQL)"
+  },
+  {
+   "t_ms": 5099.8,
+   "node": "vector_retriever",
+   "key": "TSLA",
+   "detail": "6 articles (4 ms ANN)"
+  },
+  {
+   "t_ms": 5099.8,
+   "node": "context_fusion",
+   "key": null,
+   "detail": "3 candidates weighted"
+  },
+  {
+   "t_ms": 5099.8,
+   "node": "assessor",
+   "key": null,
+   "detail": "3 assessments"
+  },
+  {
+   "t_ms": 5099.8,
+   "node": "review",
+   "key": null,
+   "detail": "no contradicted verdict \u2014 interrupt not raised"
+  },
+  {
+   "t_ms": 5099.8,
+   "node": "publisher",
+   "key": null,
+   "detail": "published"
+  }
+ ],
+ "candidates": [
+  {
+   "symbol": "AAPL",
+   "as_of": "2026-06-01",
+   "traversal_ms": 20,
+   "vector_ms": 12,
+   "query": "AAPL supply chain, suppliers, component demand, orders and production outlook",
+   "hop1": [
+    {
+     "symbol": "ADI",
+     "hops": 1,
+     "path": "ADI>AAPL",
+     "pct": "30",
+     "filed": "2021-12-03"
+    },
+    {
+     "symbol": "AMKR",
+     "hops": 1,
+     "path": "AMKR>AAPL",
+     "pct": "69",
+     "filed": "2024-02-16"
+    },
+    {
+     "symbol": "APH",
+     "hops": 1,
+     "path": "APH>AAPL",
+     "pct": "12",
+     "filed": "2021-02-10"
+    },
+    {
+     "symbol": "AVGO",
+     "hops": 1,
+     "path": "AVGO>AAPL",
+     "pct": "9",
+     "filed": "2023-12-14"
+    },
+    {
+     "symbol": "CGNX",
+     "hops": 1,
+     "path": "CGNX>AAPL",
+     "pct": "15",
+     "filed": "2020-02-13"
+    },
+    {
+     "symbol": "COHR",
+     "hops": 1,
+     "path": "COHR>AAPL",
+     "pct": null,
+     "filed": "2023-08-18"
+    },
+    {
+     "symbol": "CRUS",
+     "hops": 1,
+     "path": "CRUS>AAPL",
+     "pct": null,
+     "filed": "2026-05-21"
+    },
+    {
+     "symbol": "JBL",
+     "hops": 1,
+     "path": "JBL>AAPL",
+     "pct": "10",
+     "filed": "2024-10-28"
+    },
+    {
+     "symbol": "QRVO",
+     "hops": 1,
+     "path": "QRVO>AAPL",
+     "pct": "50",
+     "filed": "2026-05-08"
+    },
+    {
+     "symbol": "SITM",
+     "hops": 1,
+     "path": "SITM>AAPL",
+     "pct": "10",
+     "filed": "2026-02-11"
+    },
+    {
+     "symbol": "SNX",
+     "hops": 1,
+     "path": "SNX>AAPL",
+     "pct": "12",
+     "filed": "2022-01-28"
+    },
+    {
+     "symbol": "SWKS",
+     "hops": 1,
+     "path": "SWKS>AAPL",
+     "pct": null,
+     "filed": "2025-11-07"
+    },
+    {
+     "symbol": "TTMI",
+     "hops": 1,
+     "path": "TTMI>AAPL",
+     "pct": "33",
+     "filed": "2020-02-26"
+    }
+   ],
+   "hop2": [
+    {
+     "symbol": "DELL",
+     "hops": 2,
+     "path": "DELL>AVGO>AAPL",
+     "pct": null,
+     "filed": "2024-03-25"
+    },
+    {
+     "symbol": "GEN",
+     "hops": 2,
+     "path": "GEN>AVGO>AAPL",
+     "pct": null,
+     "filed": "2020-05-28"
+    },
+    {
+     "symbol": "LITE",
+     "hops": 2,
+     "path": "LITE>AVGO>AAPL",
+     "pct": null,
+     "filed": "2022-08-24"
+    },
+    {
+     "symbol": "MTSI",
+     "hops": 2,
+     "path": "MTSI>QRVO>AAPL",
+     "pct": null,
+     "filed": "2025-11-14"
+    },
+    {
+     "symbol": "MXL",
+     "hops": 2,
+     "path": "MXL>QRVO>AAPL",
+     "pct": null,
+     "filed": "2022-02-02"
+    },
+    {
+     "symbol": "QCOM",
+     "hops": 2,
+     "path": "QCOM>QRVO>AAPL",
+     "pct": null,
+     "filed": "2018-11-07"
+    }
+   ],
+   "articles": [
+    {
+     "headline": "Apple's Margins Catch A Break, But Road Ahead Still Looks  Bumpy",
+     "date": "2025-04-14",
+     "symbols": [
+      "AAPL"
+     ],
+     "score": 0.564335286617279
+    },
+    {
+     "headline": "Apple: Market Structure And Key Support Levels Ahead Of Q2 Earnings",
+     "date": "2025-04-24",
+     "symbols": [
+      "AAPL"
+     ],
+     "score": 0.5527594089508057
+    },
+    {
+     "headline": "Stock Of The Day: Will Apple Bring Tech Sector Down?",
+     "date": "2025-07-10",
+     "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "XLK"
+     ],
+     "score": 0.5464950203895569
+    },
+    {
+     "headline": "AAPL Surges 15% In May: What's Driving The Rally And Will It Continue?",
+     "date": "2026-05-27",
+     "symbols": [
+      "AAPL",
+      "GOOGL"
+     ],
+     "score": 0.5272969007492065
+    },
+    {
+     "headline": "As Apple Sheds Over $500 Billion In Market Cap Since Trump's 'Liberation Day,' Top Analysts Weigh In On Its Path Ahead",
+     "date": "2025-04-11",
+     "symbols": [
+      "AAPL",
+      "MSFT"
+     ],
+     "score": 0.5231068134307861
+    },
+    {
+     "headline": "Apple Reportedly Cuts iPhone Air Production, Ramps Up Other Flagship Models",
+     "date": "2025-10-22",
+     "symbols": [
+      "AAPL"
+     ],
+     "score": 0.5211336612701416
+    }
+   ]
+  },
+  {
+   "symbol": "AVGO",
+   "as_of": "2026-06-01",
+   "traversal_ms": 5,
+   "vector_ms": 7,
+   "query": "AVGO supply chain, suppliers, component demand, orders and production outlook",
+   "hop1": [
+    {
+     "symbol": "DELL",
+     "hops": 1,
+     "path": "DELL>AVGO",
+     "pct": null,
+     "filed": "2024-03-25"
+    },
+    {
+     "symbol": "GEN",
+     "hops": 1,
+     "path": "GEN>AVGO",
+     "pct": null,
+     "filed": "2020-05-28"
+    },
+    {
+     "symbol": "LITE",
+     "hops": 1,
+     "path": "LITE>AVGO",
+     "pct": null,
+     "filed": "2022-08-24"
+    }
+   ],
+   "hop2": [
+    {
+     "symbol": "APLD",
+     "hops": 2,
+     "path": "APLD>DELL>AVGO",
+     "pct": null,
+     "filed": "2024-08-30"
+    },
+    {
+     "symbol": "CLS",
+     "hops": 2,
+     "path": "CLS>DELL>AVGO",
+     "pct": "73",
+     "filed": "2026-02-27"
+    },
+    {
+     "symbol": "COHR",
+     "hops": 2,
+     "path": "COHR>DELL>AVGO",
+     "pct": null,
+     "filed": "2022-08-29"
+    },
+    {
+     "symbol": "FN",
+     "hops": 2,
+     "path": "FN>LITE>AVGO",
+     "pct": null,
+     "filed": "2025-08-19"
+    },
+    {
+     "symbol": "NTNX",
+     "hops": 2,
+     "path": "NTNX>DELL>AVGO",
+     "pct": "48",
+     "filed": "2025-09-24"
+    },
+    {
+     "symbol": "SMTC",
+     "hops": 2,
+     "path": "SMTC>LITE>AVGO",
+     "pct": null,
+     "filed": "2023-03-30"
+    }
+   ],
+   "articles": [
+    {
+     "headline": "Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment",
+     "date": "2025-09-25",
+     "symbols": [
+      "NVDA"
+     ],
+     "score": 0.42470476031303406
+    },
+    {
+     "headline": "Cisco, Nvidia, Arista Tackle Tariff Turmoil: Who's Best Positioned?",
+     "date": "2025-03-10",
+     "symbols": [
+      "AMZN",
+      "ANET",
+      "APH",
+      "CDW",
+      "COHR",
+      "CSCO",
+      "FN",
+      "NVDA"
+     ],
+     "score": 0.42133957147598267
+    },
+    {
+     "headline": "Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment",
+     "date": "2025-09-26",
+     "symbols": [
+      "NVDA"
+     ],
+     "score": 0.41834086179733276
+    },
+    {
+     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
+     "date": "2025-07-15",
+     "symbols": [
+      "NVDA"
+     ],
+     "score": 0.40402913093566895
+    },
+    {
+     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
+     "date": "2025-07-14",
+     "symbols": [
+      "NVDA"
+     ],
+     "score": 0.40402913093566895
+    },
+    {
+     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
+     "date": "2025-05-09",
+     "symbols": [
+      "NVDA"
+     ],
+     "score": 0.40402913093566895
+    }
+   ]
+  },
+  {
+   "symbol": "TSLA",
+   "as_of": "2026-06-01",
+   "traversal_ms": 2,
+   "vector_ms": 4,
+   "query": "TSLA supply chain, suppliers, component demand, orders and production outlook",
+   "hop1": [
+    {
+     "symbol": "APTV",
+     "hops": 1,
+     "path": "APTV>TSLA",
+     "pct": "9",
+     "filed": "2023-02-08"
+    },
+    {
+     "symbol": "JBL",
+     "hops": 1,
+     "path": "JBL>TSLA",
+     "pct": null,
+     "filed": "2020-10-22"
+    }
+   ],
+   "hop2": [],
+   "articles": [
+    {
+     "headline": "Amazon, Alphabet, KLA And A Health Care Stock On CNBC's 'Final Trades'",
+     "date": "2025-04-03",
+     "symbols": [
+      "AMZN",
+      "GILD",
+      "GOOG",
+      "GOOGL",
+      "KLAC"
+     ],
+     "score": 0.4233931005001068
+    },
+    {
+     "headline": "Amazon, JPMorgan, RH And More: CNBC's 'Final Trades'",
+     "date": "2025-04-07",
+     "symbols": [
+      "AMZN",
+      "JPM",
+      "RH"
+     ],
+     "score": 0.4189804792404175
+    },
+    {
+     "headline": "Meta, TJX, Taiwan Semiconductor Manufacturing And A Health Care Stock: CNBC's 'Final Trades'",
+     "date": "2025-04-14",
+     "symbols": [
+      "ABBV",
+      "META",
+      "TJX",
+      "TSM"
+     ],
+     "score": 0.41852709650993347
+    },
+    {
+     "headline": "Microsoft, Morgan Stanley And A Basic Materials Stock On CNBC's 'Final Trades'",
+     "date": "2025-03-20",
+     "symbols": [
+      "CRH",
+      "MS",
+      "MSFT",
+      "NVDA"
+     ],
+     "score": 0.4168128967285156
+    },
+    {
+     "headline": "CNBC Halftime Report Final Trades: Meta Platforms, TJX Companies, AbbVie, Taiwan Semiconductor Manufacturing",
+     "date": "2025-04-11",
+     "symbols": [
+      "ABBV",
+      "META",
+      "TJX",
+      "TSM"
+     ],
+     "score": 0.41467899084091187
+    },
+    {
+     "headline": "CNBC Halftime Report Final Trades: Tesla, Delta Air Lines, Teck Resources, Rocket Companies",
+     "date": "2025-09-11",
+     "symbols": [
+      "DAL",
+      "RKT",
+      "TECK",
+      "TSLA"
+     ],
+     "score": 0.4134949743747711
+    }
+   ]
+  }
+ ]
+}

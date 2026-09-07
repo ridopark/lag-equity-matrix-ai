@@ -44,7 +44,7 @@ cannot select neighbours by "moves together" and then be surprised they move
 together. It also selects funds — 78% of neighbourhood slots were index ETFs
 holding the candidate, until D-62 excluded them.
 
-### 2. News co-mention — built, not tested
+### 2. News co-mention — tested, bounded
 
 229,737 Benzinga articles (2014→2026) in Postgres. Two corrections were needed
 before the edge meant anything: 2.1% of articles tag more than 20 symbols and
@@ -53,7 +53,15 @@ rather than relationship. With a breadth cutoff at p90 and PMI, NVDA's peers
 become CRWV, ARM, TSM, MRVL, SFTBY, DELL, AMD — foundry, customers,
 competitors. Correlation gave NVDY, DSI, QGRW, SPYG, VOOG.
 
-Descriptive only. No return test has been run against it.
+| test | result |
+|---|---|
+| 24 seeds, monthly point-in-time PMI, 1-day lag | **b=+0.0013**, z=+0.07, CI [−0.035, +0.038] |
+
+A 1% neighbour move implies +0.1 bp on the candidate. Declared underpowered
+*before* running: MDE 0.052 against a 0.02 threshold, because the hypothesis
+forces a noisy single stock as the dependent variable and a quiet portfolio as
+the regressor. So this bounds a **large** effect and cannot resolve a tradeable
+one — "no large effect", never "no effect".
 
 ### 3. Supply chain from EDGAR — directed, and the cleanest null
 

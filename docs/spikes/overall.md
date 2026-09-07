@@ -1866,6 +1866,56 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   hit.
 - **Status:** Accepted
 
+### D-75 — Pre-registration: the co-mention edge, and what it can and cannot answer
+- **When:** 2026-09-07T12:19:29-05:00
+- **Decision:** Mirror D-74's design exactly, changing **only the edge**:
+  neighbours are the top-20 PMI peers over articles tagging <= 8 symbols (D-70),
+  recomputed from articles strictly before each month, seeds are the 24 alert
+  tickers, one-session lag, both sides market-excess, errors clustered by date,
+  and the same mandatory per-year heterogeneity check.
+  **Declared before running: this test cannot resolve the 0.02 economic
+  threshold.** Detectable effects are |b| >= ~0.06. It is run to bound a *large*
+  effect, not to establish a tradeable one, and a null must be reported as
+  "no large effect" rather than "no effect".
+- **Why:** Co-mention is the last untested edge, and it is not the same object as
+  correlation despite both being undirected. Correlation selects for
+  contemporaneous co-movement, which is why D-59/D-60 found lag 0 almost
+  tautologically. Co-mention selects for shared news attention, and two
+  co-mentioned firms need not co-move at all — so it can carry information
+  correlation structurally cannot.
+  Power, computed from marginal variances only: single-seed slope SE 0.0345;
+  pooling 17 seeds buys ~1.6x (the factor D-74 *measured*, not sqrt(17), because
+  seeds co-move), giving ~0.0216 and MDE ~0.060.
+  The orientation is the reason it is worse than D-74's 0.0120, and it is
+  **forced**: D-74 regressed a supplier *portfolio* (sd 156bp) on a customer
+  *single stock*, whereas the co-mention hypothesis is that neighbours lead the
+  candidate, so the candidate — sd 244bp — must be the dependent variable and the
+  low-variance portfolio the regressor. A noisy dependent with a quiet regressor
+  is the worst arrangement for identification, and no reformulation preserves the
+  hypothesis.
+  Running it anyway beat the alternatives. Skipping loses the only bound
+  obtainable on the last edge. Backfilling news for 100+ seeds to reach MDE ~0.03
+  costs hours and still would not clear 0.02, so it is not the lever it appears
+  to be. Reporting a null here as evidence of absence would be the actual error,
+  which is why the limit is written down first.
+- **Outcome:** **No large effect, exactly as bounded in advance.** n=29,014
+  seed-days over 2,411 date clusters, 18 seeds, neighbours recomputed monthly
+  from articles strictly prior. b=+0.0013, clustered SE 0.0187, z=+0.07,
+  CI [−0.035, +0.038]; a 1% neighbour move implies +0.1bp on the candidate. MDE
+  landed at 0.0524 against the ~0.06 predicted, so effects above ~0.04 are
+  excluded and the 0.02 threshold is not resolved — as declared.
+  Heterogeneity is low: Q=10.3 on 9 df, **I²=12%**.
+  **One diagnostic worth keeping.** The inverse-variance pooled slope reads
+  −0.0247 against a naive +0.0013, and that is an artefact: 2021's clustered SE
+  is 0.0178 against 0.04-0.10 elsewhere, so it carries **53% of the pooled
+  weight**, and dropping that single year flips the pooled estimate to +0.0028.
+  The primary clustered estimate is the sound one. This is the *opposite*
+  diagnosis from D-71 — there I²=81% and pooling was the correction; here I² is
+  low, so pooling adds nothing and merely concentrates weight on whichever year
+  had the most regressor variance. The same statistic can be the fix or the
+  artefact depending on the heterogeneity it is applied to.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

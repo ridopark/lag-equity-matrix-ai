@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS lagmatrix.news_article (
     id           bigint      PRIMARY KEY,          -- Alpaca/Benzinga article id
     created_at   timestamptz NOT NULL,             -- publication instant
     updated_at   timestamptz,
-    headline     text        NOT NULL,
+    headline     text,                             -- Benzinga ships some with none (002)
     author       text,
     source       text,
     summary      text,

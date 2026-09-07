@@ -23,8 +23,10 @@ import argparse
 import csv
 import io
 import os
+import random
 import subprocess
 import sys
+import time
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
@@ -39,11 +41,25 @@ PAGE_LIMIT = 50       # Alpaca's per-request cap
 
 
 def psql(sql: str, stdin: str = "") -> str:
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PSQL],
-                       input=sql + stdin, capture_output=True, text=True, timeout=600)
-    if r.returncode:
-        sys.exit(f"psql failed:\n{r.stderr[:1500]}")
-    return r.stdout
+    """Run SQL over ssh -> kubectl exec -> psql, retrying transport failures.
+
+    A non-zero exit from psql itself is a real SQL error and stops the run; only
+    the ssh transport is retried, and only when psql produced no diagnostic.
+    """
+    last = ""
+    for attempt in range(1, 4):
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PSQL],
+                           input=sql + stdin, capture_output=True, text=True,
+                           timeout=900)
+        if r.returncode == 0:
+            return r.stdout
+        last = r.stderr
+        if "ERROR:" in r.stderr:          # SQL error — retrying will not help
+            sys.exit(f"psql failed:\n{r.stderr[:1500]}")
+        if attempt < 3:
+            print(f"      ssh/psql transport failed, retry {attempt}/2", flush=True)
+            time.sleep(3 * attempt)
+    sys.exit(f"psql failed after retries:\n{last[:1500]}")
 
 
 def already_covered(symbol: str) -> set[tuple[date, date]]:
@@ -81,14 +97,45 @@ def copy_in(table: str, columns: list[str], rows: list[list]) -> None:
     psql(sql)
 
 
+MAX_TRIES = 6
+
+
+def with_retry(fn, what: str):
+    """Alpaca drops long-lived connections; a decade-scale backfill will hit it.
+
+    Retry transient transport failures with exponential backoff and jitter.
+    Deliberately does NOT catch every exception — an auth or request error
+    should stop the run, not be retried 6 times per window.
+    """
+    import requests
+
+    transient = (requests.exceptions.ConnectionError,
+                 requests.exceptions.Timeout,
+                 requests.exceptions.ChunkedEncodingError)
+    for attempt in range(1, MAX_TRIES + 1):
+        try:
+            return fn()
+        except transient as e:
+            if attempt == MAX_TRIES:
+                raise
+            wait = min(2 ** attempt, 30) + random.uniform(0, 1.5)
+            print(f"      {what}: {type(e).__name__}, retry {attempt}/{MAX_TRIES - 1} "
+                  f"in {wait:.1f}s", flush=True)
+            time.sleep(wait)
+    return None
+
+
 def fetch_window(client: NewsClient, symbol: str, start: datetime, end: datetime):
     """All articles for one symbol/window, following Alpaca's page token."""
     arts, token = [], None
     while True:
-        req = NewsRequest(symbols=symbol, start=start, end=end,
-                          limit=PAGE_LIMIT, page_token=token,
-                          include_content=False, sort="asc")
-        resp = client.get_news(req)
+        def _call(tok=token):
+            req = NewsRequest(symbols=symbol, start=start, end=end,
+                              limit=PAGE_LIMIT, page_token=tok,
+                              include_content=False, sort="asc")
+            return client.get_news(req)
+
+        resp = with_retry(_call, f"{symbol} {start.date()}")
         page = resp.data.get("news", []) if hasattr(resp, "data") else []
         arts.extend(page)
         token = getattr(resp, "next_page_token", None)

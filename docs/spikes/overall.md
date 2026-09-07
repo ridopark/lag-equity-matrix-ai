@@ -1744,21 +1744,30 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   Hence the design: the passage is the durable artefact, the label is disposable.
   Re-labelling never re-crawls EDGAR, and every edge stays auditable against the
   filing that produced it.
-- **Outcome:** Crawled 470 filings across 250 filers. **79 edges, 36 suppliers,
-  29 customers — and only 11% of filings yielded one.** That corrects a number in
-  this entry's own Why: the "14 of 20 suppliers name a customer" figure came from
-  a sample I hand-picked *because* they were known concentrated semiconductor
-  suppliers, then cited as evidence of density. Measured across a broad
-  cross-section the rate is **~13%**, and it does not vary with size — 15%, 16%,
-  9%, 15% across liquidity ranks 1-50, 51-100, 101-175, 176-250, with hits and
-  misses at the same median rank. So the anonymisation asymmetry is real for
-  individual mega-caps (NVDA, AVGO, MU do hide names) but is *not* what drives
-  the low yield: most companies simply have no single >10% customer to disclose.
-  Top customers by in-degree: AAPL(4), COR(4), WMT(4), META(3) — plausible — and
-  QUBT, SKHY, COKE, which are residual false positives.
-  The graph is therefore thin: ~13% x 2,183 tradeable names implies a few hundred
-  edges at full crawl, concentrated in supply-chain-heavy industries (semis, auto
-  parts, contract manufacturing) rather than spread evenly.
+- **Outcome:** Deep crawl done — 5,880 filings, 1,000 filers, 8 filings each,
+  **0 fetch failures** after making the crawl concurrent (6 workers behind a
+  shared 8 req/s token bucket) and batching writes 40 filings at a time.
+  **1,211 edges, 172 suppliers, 137 counterparties, 239 distinct pairs, spanning
+  2018-10-19 → 2026-08-20** at 126-168 edges per year — a point-in-time series,
+  not a snapshot, which is what a backtest needs.
+  **Precision ~9/12** on a random audit. The correct ones are textbook: KMB→WMT
+  ("our largest customer, Walmart Inc., represented approximately 13 percent"),
+  CAG→WMT (28%), AMGN→COR (McKesson/Cencora/Cardinal, each >10%). The three
+  failures have distinct causes, all of them LLM-fixable: an industry statistic
+  ("the Baker Hughes Land rig count increased 52%" → SEI→BKR), a generic-term
+  collision (Quantum Computing Inc. matching "Quantum Computing as a Service"
+  → RGTI→QUBT), and a competitor list that slipped the proximity veto
+  (APTV→TEL, among Leoni/Molex/Sumitomo/Yazaki).
+  **Coverage is the binding limit, not precision.** Only **8 of the 24 alert
+  tickers** are reachable as customers, and only AAPL has depth: AAPL←13
+  suppliers, AVGO/GOOGL/META←3, TSLA/NOW/SMCI←2, PLTR←1. So this edge can
+  support a test on Apple's supply chain and essentially nothing else in the
+  signal universe.
+  Also corrects a number in this entry's own Why: "14 of 20 suppliers name a
+  customer" came from a sample I hand-picked *because* they were concentrated
+  semiconductor suppliers. Across a broad cross-section it is ~13%, flat across
+  liquidity ranks (15%/16%/9%/15% for ranks 1-50/51-100/101-175/176-250). Most
+  companies simply have no single >10% customer to disclose.
 - **Status:** Accepted
 
 ## Open Questions

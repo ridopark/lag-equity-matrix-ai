@@ -37,6 +37,7 @@ from lagmatrix.graph.nodes.leader_state import leader_state
 
 TRAIL = 60
 FWD = 2               # sessions; matches D-33's corrected horizon
+HORIZONS = (2, 5, 10, 21)  # D-66 ladder, computed in one pass
 MIN_EFFECT_BP = 10.0  # D-63's declared economic threshold
 
 
@@ -127,13 +128,27 @@ def main() -> None:
         if got is None:
             continue
         verdict, eff = got
-        p0, p1 = closes[sym].iloc[ti], closes[sym].iloc[ti + FWD]
-        if not np.isfinite(p0) or not np.isfinite(p1) or p0 <= 0:
+        p0 = closes[sym].iloc[ti]
+        if not np.isfinite(p0) or p0 <= 0:
             continue
-        raw = p1 / p0 - 1.0
-        exc = raw - (mkt.iloc[ti + 1: ti + 1 + FWD].sum())
-        rows.append({"symbol": sym, "date": str(sessions[ti].date()), "verdict": verdict,
-                     "effective_evidence": eff, "raw_fwd": raw, "excess_fwd": exc})
+        row = {"symbol": sym, "date": str(sessions[ti].date()), "ti": ti,
+               "verdict": verdict, "effective_evidence": eff}
+        ok = False
+        for h in HORIZONS:
+            if ti + h >= len(sessions):
+                row[f"excess_{h}"] = np.nan
+                continue
+            p1 = closes[sym].iloc[ti + h]
+            if not np.isfinite(p1):
+                row[f"excess_{h}"] = np.nan
+                continue
+            row[f"excess_{h}"] = (p1 / p0 - 1.0) - mkt.iloc[ti + 1: ti + 1 + h].sum()
+            ok = ok or h == FWD
+        row["excess_fwd"] = row.get(f"excess_{FWD}", np.nan)
+        row["raw_fwd"] = np.nan
+        if not np.isfinite(row["excess_fwd"]):
+            continue
+        rows.append(row)
 
     df = pd.DataFrame(rows)
     df.to_csv(args.out, index=False)

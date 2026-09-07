@@ -1541,6 +1541,32 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   unresolvable on Alpaca history (D-64).
 - **Status:** Accepted
 
+### D-66 — Pre-registration: the horizon ladder is a shape test, not a power play
+- **When:** 2026-09-07T03:21:27-05:00
+- **Decision:** Run the D-64 mega-cap design unchanged except the label, over
+  horizons **2, 5, 10 and 21 sessions**, computed in a single pass so every
+  horizon shares identical neighbourhoods and verdicts. Ten years of history
+  (2016-2026, the maximum Alpaca carries). Standard errors clustered on
+  **non-overlapping blocks of length = horizon**, because consecutive dates share
+  all but one day of a 21-session forward return and date-clustering does nothing
+  about that. The claim under test is the **shape** — whether the gap grows with
+  holding period — not significance at any single horizon.
+- **Why:** The motivation was that Cohen & Frazzini's 1.45% is *monthly* while we
+  hold two days, so we may be exiting before the effect materialises. Computing
+  power before running kills the hoped-for version of that: expected effect grows
+  as `h` under linear accrual, while SE grows as `sqrt(h)` from return variance
+  times `sqrt(h)` from losing blocks — also `h`. The ratio is invariant: 10.4/21.0,
+  26/52.6, 52/105.2, 109/221, all 0.49. **Extending the horizon cannot increase
+  statistical confidence**, by construction, and no horizon is powered. Running it
+  anyway lost nothing and answers a different, useful question: the decay profile.
+  If the gap is flat past two sessions, holding longer adds variance for no
+  return; if it accrues, the trading implication is real even unproven; if it
+  reverses, that is a reversal effect wearing a corroboration costume.
+  Declared now so it cannot be claimed later: **no horizon in this ladder can
+  produce a significant result**, and reporting one as such would be reading noise.
+- **Outcome:** pending.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

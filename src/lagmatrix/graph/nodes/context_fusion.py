@@ -33,7 +33,11 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
 
     for c in state.get("candidates", []):
         key = candidate_key(c)
-        leaders = [e.leader for e in edges_for(state, c)]
+        # Only edges where the candidate is the lagger carry leader_move
+        # evidence: correlation edges have leader=neighbour, lagger=candidate,
+        # but supply edges (D-79) have leader=candidate, lagger=supplier — a
+        # supplier's move is not evidence about its customer (D-73, D-81).
+        leaders = [e.leader for e in edges_for(state, c) if e.lagger == c.symbol]
         if not leaders:
             continue
 

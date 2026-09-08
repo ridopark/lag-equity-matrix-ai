@@ -22,5 +22,7 @@ class LagMatrixContext:
     cluster_rho: float = 0.7
     news_lookback_days: int = 5
     news_limit: int = 20
-    news_client: object | None = None  # set in PHASE-5; None disables news
     halt_on_contradicted: bool = False  # PHASE-6: False (default) never interrupts `review`
+    arango_topology: object | None = None  # set in PHASE-4; None disables graph traversal
+    max_lag_hops: int = 2
+    vector_index: object | None = None  # set in PHASE-7; None disables news

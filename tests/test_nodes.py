@@ -13,12 +13,13 @@ import numpy as np
 import pandas as pd
 from langgraph.runtime import Runtime
 
-from lagmatrix.domain.models import Candidate
+from lagmatrix.domain.models import Candidate, LagEdge, Shock
 from lagmatrix.graph.context import LagMatrixContext
 from lagmatrix.graph.nodes.assessor import assess
 from lagmatrix.graph.nodes.context_fusion import fuse_evidence
 from lagmatrix.graph.nodes.graph_retriever import retrieve_neighbourhood
 from lagmatrix.graph.nodes.leader_state import leader_state
+from lagmatrix.graph.state import candidate_key
 
 
 def _candidate(sym="CAND", d=date(2026, 6, 1), direction="up") -> Candidate:
@@ -102,6 +103,112 @@ def test_retrieve_neighbourhood_excludes_signal_universe_and_leveraged_products_
     out = retrieve_neighbourhood({"candidates": [_candidate()]}, rt)
     leaders = {e.leader for e in out["lag_edges"]}
     assert leaders.isdisjoint({"LEAD1", "LEAD2", "CANDD"})
+
+
+def _fake_arango_edge(leader: str, lagger: str, lag_days: int = 1) -> LagEdge:
+    """A canned edge shaped like `ArangoTopology.laggers_of`'s real output
+    (D-79): `leader` is the candidate passed in, `lagger` is the supplier
+    reached -- the opposite convention from the correlation edges above,
+    where `leader` is the neighbour and `lagger` is the candidate.
+    """
+    return LagEdge(
+        leader=leader, lagger=lagger, correlation=0.0, lag_days=lag_days,
+        beta=0.42, relation="supplier",
+    )
+
+
+class FakeArangoTopology:
+    """Fake `ArangoTopology`-shaped adapter, mirroring `FlakyNewsClient`'s
+    fake-adapter pattern in `test_news_node.py`. Returns canned `LagEdge`s
+    from `laggers_of` and records every call's arguments so tests can assert
+    on them without touching a real ArangoDB.
+    """
+
+    def __init__(self, edges_by_leader: dict[str, list[LagEdge]]):
+        self._edges_by_leader = edges_by_leader
+        self.calls: list[tuple[str, int, date]] = []
+
+    def laggers_of(self, leader: str, max_hops: int, as_of: date) -> list[LagEdge]:
+        self.calls.append((leader, max_hops, as_of))
+        return self._edges_by_leader.get(leader, [])
+
+
+def test_graph_retriever_arango_edges_are_additive_not_conditional(closes):
+    """PHASE-4/TASK-4.1 (D-79): when `arango_topology` is set, its edges must
+    appear *alongside* the existing correlation edges for a candidate that
+    produces both, not instead of them.
+
+    Falsifies if: `lag_edges_by_key[key]` is missing any of the correlation
+    edges (the ArangoDB path replaced them) or is missing the fake's edge
+    (the ArangoDB path was never consulted) -- i.e. if the merge is
+    conditional rather than additive.
+    """
+    cand = _candidate()
+    key = candidate_key(cand)
+
+    baseline_rt = _runtime(closes)
+    baseline = retrieve_neighbourhood({"candidates": [cand]}, baseline_rt)["lag_edges_by_key"][key]
+    assert baseline, "fixture must produce correlation edges for this test to mean anything"
+
+    fake_edge = _fake_arango_edge(leader=cand.symbol, lagger="AVGO")
+    fake = FakeArangoTopology({cand.symbol: [fake_edge]})
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=closes, signal_universe=set(), arango_topology=fake, max_lag_hops=2
+        )
+    )
+
+    combined = retrieve_neighbourhood({"candidates": [cand]}, rt)["lag_edges_by_key"][key]
+
+    assert len(combined) == len(baseline) + 1
+    for edge in baseline:
+        assert edge in combined
+    assert fake_edge in combined
+
+
+def test_graph_retriever_reads_max_lag_hops_from_context(closes):
+    """PHASE-4/TASK-4.1 (D-79): the hop bound and traversal endpoint passed
+    to `laggers_of` must come from `runtime.context`, not be hardcoded.
+
+    Falsifies if: `max_lag_hops`'s long-standing default of 2 is hardcoded
+    instead of read from context (caught by using 3 here, a non-default
+    value), or if the candidate is passed on the wrong end -- `leader` must
+    be the candidate's own symbol and `as_of` must be the candidate's own
+    date, per D-79's "the candidate is the leader, not the lagger".
+    """
+    cand = _candidate(sym="CAND", d=date(2026, 6, 1))
+    fake = FakeArangoTopology({})
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=closes, signal_universe=set(), arango_topology=fake, max_lag_hops=3
+        )
+    )
+
+    retrieve_neighbourhood({"candidates": [cand]}, rt)
+
+    assert fake.calls == [(cand.symbol, 3, cand.as_of)]
+
+
+def test_graph_retriever_byte_identical_when_arango_disabled(closes):
+    """PHASE-4/TASK-4.1 (D-79): with `arango_topology` left at its default
+    (`None`), the output must be byte-identical to today's correlation-only
+    behaviour -- this is the test that protects `scripts/check_baseline.py`.
+
+    Falsifies if: adding the new code path perturbs any existing edge,
+    weight, or ordering in `lag_edges`, `lag_edges_by_key`, or `errors` --
+    a strict, total equality check, not a spot check on one field.
+    """
+    cand = _candidate()
+
+    baseline_rt = _runtime(closes)
+    baseline = retrieve_neighbourhood({"candidates": [cand]}, baseline_rt)
+
+    explicit_none_rt = Runtime(
+        context=LagMatrixContext(closes=closes, signal_universe=set(), arango_topology=None)
+    )
+    out = retrieve_neighbourhood({"candidates": [cand]}, explicit_none_rt)
+
+    assert out == baseline
 
 
 def _self_edge_closes() -> pd.DataFrame:
@@ -230,3 +337,154 @@ def test_fuse_evidence_effective_evidence_never_exceeds_raw_count():
     assert out["evidence"]
     assert out["effective_evidence"] <= len(out["evidence"]) + 1e-9
     assert cand.symbol not in {e.symbol for e in out["evidence"]}
+
+
+def _supply_edge(supplier: str) -> LagEdge:
+    """A `laggers_of`-shaped supply edge (D-79): `leader` is the candidate
+    itself, `lagger` is the supplier reached -- the opposite orientation from
+    a correlation edge, where `leader` is the neighbour and `lagger` is the
+    candidate. Same shape as `_fake_arango_edge` above, kept separate here so
+    each test in this block states its own edge inline.
+    """
+    return LagEdge(
+        leader="CAND", lagger=supplier, correlation=0.0, lag_days=1,
+        beta=0.42, relation="supplier",
+    )
+
+
+def test_fuse_evidence_does_not_crash_when_correlation_and_supply_edges_coexist(closes):
+    """PHASE-4 wired ArangoDB supply edges into `graph_retriever` additively
+    (D-79), alongside the pre-existing correlation edges, so a candidate's
+    `lag_edges_by_key` entry now mixes both orientations: correlation edges
+    have `leader` = a neighbour, `lagger` = the candidate; supply edges have
+    `leader` = the candidate, `lagger` = a supplier. `fuse_evidence` reads
+    only `e.leader`, so every supply edge contributes the candidate's own
+    symbol to `leaders` -- once per supplier.
+
+    Three suppliers plus a correlating neighbour (LEAD1, both shocked, as
+    real `leader_state` output would have -- it unconditionally attaches a
+    self-shock for the candidate, see `leader_state.py`'s `sym == c.symbol`
+    clause) makes `movers` repeat "CAND" three times. `sub.corr()` then has
+    a duplicate "CAND" column label, so `rho["CAND"]` returns a DataFrame
+    instead of a Series and `int(...)` blows up.
+
+    Falsifies if: this raises `TypeError: int() argument must be a string,
+    a bytes-like object or a real number, not 'Series'` -- the exact crash
+    from mixing edge orientations without accounting for direction.
+    """
+    cand = _candidate(sym="CAND", d=date(2026, 6, 1))
+    key = candidate_key(cand)
+    corr_edge = LagEdge(
+        leader="LEAD1", lagger="CAND", correlation=0.5, lag_days=0,
+        beta=0.3, relation="correlation",
+    )
+    supply_edges = [_supply_edge("SUPPLIER1"), _supply_edge("SUPPLIER2"), _supply_edge("SUPPLIER3")]
+
+    state = {
+        "candidates": [cand],
+        "lag_edges_by_key": {key: [corr_edge, *supply_edges]},
+        "leader_shocks": {
+            key: [
+                Shock(symbol="LEAD1", pct_change=0.05, sigma=3.0,
+                      lookback_days=60, date=cand.as_of),
+                Shock(symbol="CAND", pct_change=0.0005, sigma=0.1,
+                      lookback_days=60, date=cand.as_of),
+            ]
+        },
+    }
+    rt = _runtime(closes)
+
+    out = fuse_evidence(state, rt)  # must not raise
+
+    assert out["evidence"]
+
+
+def test_supply_edges_contribute_no_leader_move_evidence(closes):
+    """D-73: a supply edge's `leader` is the candidate itself (D-79's
+    orientation), so the candidate is never the *lagger* of its own supplier
+    -- a supplier's move can never be `leader_move` evidence *for* the
+    candidate; that inference runs the other way (customer -> supplier, not
+    supplier -> customer).
+
+    The self-shock is included because `leader_state` unconditionally
+    attaches one for the candidate (`sym == c.symbol`, see `leader_state.py`)
+    -- without it this test would pass by accident, since today's code reads
+    only `e.leader` and a supply-only edge list never puts the supplier's own
+    symbol into `leaders` at all. With the self-shock present, today's code
+    instead manufactures a spurious self-referential `leader_move` entry
+    (symbol="CAND") once per supply edge and inflates `effective_evidence`,
+    which is what this test catches.
+
+    Falsifies if: `effective_evidence` is nonzero, or any `Evidence` names
+    the supplier as a leader move -- either would mean a supply edge (where
+    the candidate is the leader, not the lagger) got treated as evidence
+    about the candidate.
+    """
+    cand = _candidate(sym="CAND", d=date(2026, 6, 1))
+    key = candidate_key(cand)
+    state = {
+        "candidates": [cand],
+        "lag_edges_by_key": {key: [_supply_edge("SUPPLIER1")]},
+        "leader_shocks": {
+            key: [
+                Shock(symbol="SUPPLIER1", pct_change=0.05, sigma=3.0,
+                      lookback_days=60, date=cand.as_of),
+                Shock(symbol="CAND", pct_change=0.0005, sigma=0.1,
+                      lookback_days=60, date=cand.as_of),
+            ]
+        },
+    }
+    rt = _runtime(closes)
+
+    out = fuse_evidence(state, rt)
+
+    assert "SUPPLIER1" not in {e.symbol for e in out["evidence"]}
+    assert out["effective_evidence"] == 0.0
+
+
+def test_correlation_only_evidence_is_unchanged_by_the_supply_edge_fix():
+    """Regression pin for `scripts/check_baseline.py`: a candidate whose
+    `lag_edges` are all correlation edges (no supply edges at all -- the
+    shape every candidate had before PHASE-4/D-79) must keep producing
+    exactly today's evidence, weights and `effective_evidence`. Captured
+    from a real `retrieve_neighbourhood` -> `leader_state` -> `fuse_evidence`
+    run over `_shocked_closes()` (also used by
+    `test_fuse_evidence_effective_evidence_never_exceeds_raw_count`).
+
+    Falsifies if: a fix for the supply-edge orientation bug changes any
+    correlation-only result -- symbol, supports, weight or the effective
+    count -- not just a spot check on one field.
+    """
+    closes = _shocked_closes()
+    cand = _candidate(d=date(2026, 3, 26))
+    rt = _runtime(closes)
+    edges = retrieve_neighbourhood({"candidates": [cand]}, rt)["lag_edges"]
+    shocks = leader_state({"candidates": [cand], "lag_edges": edges}, rt)["leader_shocks"]
+
+    out = fuse_evidence({"candidates": [cand], "lag_edges": edges, "leader_shocks": shocks}, rt)
+
+    assert {(e.kind, e.symbol, e.supports, e.weight) for e in out["evidence"]} == {
+        ("leader_move", "LEAD1", True, 0.5),
+        ("leader_move", "LEAD2", True, 0.5),
+    }
+    assert out["effective_evidence"] == 1.0
+
+
+# --- Q-38: leader_state's baseline must not overlap the recent window -----
+#
+# `leader_state.py` currently computes `baseline = returns.iloc[ti-trail:ti]`
+# and `recent = returns.iloc[ti-move_win:ti]` -- the latter is literally the
+# tail of the former, so the move being measured sits inside the sample its
+# own sigma is estimated from. `shocks.standardised_moves` documents the
+# opposite requirement ("baseline ... must end strictly before returns
+# begins") and `MarketScan.shocked_leaders` (adapters/candidates.py) already
+# honours it with adjacent, non-overlapping windows
+# (`returns.iloc[ti-move_win-trail:ti-move_win]`). `leader_state` must match.
+
+TRAIL = 60
+MOVE_WIN = 3
+SIGMA = 2.0
+
+
+
+

@@ -32,7 +32,7 @@ import pandas as pd
 
 HOST = "ridopark@192.168.10.123"
 PG = ("kubectl -n copytrade exec -i postgres-0 -- "
-      "psql -U temporal -d orchestrator -q -t -A -F'\x1f'")
+      "psql -U temporal -d orchestrator -q -t -A -v ON_ERROR_STOP=1 -F'\x1f'")
 DB = "lagmatrix"
 
 
@@ -81,21 +81,30 @@ def main() -> None:
     argparse.ArgumentParser().parse_args()
     ensure_db()
     arango_js("""
-      var want = {equity:2, supplies_to:3, co_mentioned:3, article:2};
+      // deliberately NOT touching `article`: this script does not load it, and
+      // dropping it here destroyed 47,640 embeddings and their vector index on a
+      // re-run. scripts/load_vectors.py owns that collection.
+      var want = {equity:2, supplies_to:3, co_mentioned:3};
       for (var name in want) {
         if (db._collection(name)) { db._drop(name); }
         db._create(name, {}, want[name] === 3 ? "edge" : "document");
       }
+      if (!db._collection("article")) { db._create("article"); }
       db.supplies_to.ensureIndex({type:"persistent", fields:["filing_date"]});
       db.co_mentioned.ensureIndex({type:"persistent", fields:["pmi"]});
       print("collections created");
     """)
 
     print("  loading supply-chain edges (directed, dated)…")
-    sup = pg("""SELECT supplier, customer, filing_date,
-                       coalesce(pct_revenue::text,''), passage
-                FROM lagmatrix.supply_edge;""")
-    sup.columns = ["supplier", "customer", "filing_date", "pct", "passage"]
+    # counterparty = the name AS WRITTEN in the filing ("Apple Inc."). Needed to
+    # find the sentence that actually names the customer: picking the nearest
+    # percentage instead returns Amkor's "ten largest customers accounted for
+    # 69%" rather than "Direct sales to Apple Inc. accounted for 27.7%".
+    sup = pg("""SELECT filer_ticker, cp_ticker, filing_date,
+                       coalesce(pct_revenue::text,''), passage, counterparty
+                FROM lagmatrix.filing_mention
+                WHERE relation='customer' AND cp_ticker IS NOT NULL;""")
+    sup.columns = ["supplier", "customer", "filing_date", "pct", "passage", "counterparty"]
     syms = set(sup.supplier) | set(sup.customer)
 
     print("  loading co-mention edges (PMI-weighted, dated)…")
@@ -121,7 +130,8 @@ def main() -> None:
     bulk("supplies_to", [
         {"_from": f"equity/{r.supplier}", "_to": f"equity/{r.customer}",
          "filing_date": r.filing_date, "pct_revenue": r.pct or None,
-         "passage": r.passage[:600], "relation": "supplies_to"}
+         "passage": r.passage[:900], "counterparty": r.counterparty,
+         "relation": "supplies_to"}
         for r in sup.itertuples()])
     bulk("co_mentioned", [
         {"_from": f"equity/{r.a}", "_to": f"equity/{r.b}",

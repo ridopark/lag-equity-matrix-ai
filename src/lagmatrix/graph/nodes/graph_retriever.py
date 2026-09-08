@@ -63,6 +63,12 @@ def retrieve_neighbourhood(state: LagMatrixState, runtime: Runtime[LagMatrixCont
                     relation="correlation",
                 )
             )
+        if runtime.context.arango_topology is not None:
+            c_edges.extend(
+                runtime.context.arango_topology.laggers_of(
+                    c.symbol, runtime.context.max_lag_hops, c.as_of
+                )
+            )
         lag_edges_by_key[key] = c_edges
         edges.extend(c_edges)
 

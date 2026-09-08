@@ -352,9 +352,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   scanning open, rather than a plugin framework. Node order also changed
   (`graph_retriever` now precedes `leader_state`) because a candidate's
   neighbourhood must be known before there is anything to check for shocks.
-- **Outcome:** pending — `MarketScan` is a documented stub raising
-  NotImplementedError; the claim that no node needs branching is untested until
-  it is written.
+- **Outcome:** **Written, and the claim holds — narrowly.** `MarketScan` is
+  implemented (13 tests), wired into the live UI as a third source, and a real
+  scan at 2026-05-11 sweeps 3,204 symbols, traverses to suppliers of what moved,
+  and produces 19 candidates in 8.7 s with genuine verdicts (APTV corroborated,
+  CDW contradicted). **No node needed branching** — `graph/` was not touched at
+  all, exactly as this entry predicted.
+  **But "no node needed branching" turned out to be narrower than "no caller
+  needed changes."** The scan surfaced a circularity that corroboration mode
+  cannot have: the shocked leader `Y` that *originates* a candidate `X` is often
+  correlated with `X`, so without intervention `Y` re-enters `X`'s own
+  neighbourhood and `context_fusion` counts `Y`'s move as evidence for the
+  candidate `Y` created. Selecting on a signal and then scoring on the same
+  signal is the exact circularity `MarketScan` exists to remove, one hop
+  removed. It is closed at the caller, by unioning `MarketScan.shocked_leaders()`
+  into `signal_universe` — the mechanism D-27 already provides — and proved
+  end-to-end: the test first asserts the hole is real with `signal_universe=set()`
+  (a `leader_move` evidence for `Y`, verdict `corroborated`) before asserting it
+  disappears with the fix. Found in plan review, not in code review.
 - **Status:** Accepted
 
 ### D-24 — mattpocock/skills installed as a plugin, not vendored
@@ -1768,6 +1783,15 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   semiconductor suppliers. Across a broad cross-section it is ~13%, flat across
   liquidity ranks (15%/16%/9%/15% for ranks 1-50/51-100/101-175/176-250). Most
   companies simply have no single >10% customer to disclose.
+  **Superseded by a full-population audit (2026-09-07).** The "~9/12" above was
+  12 rows read by hand. Classifying all 1,211 stored passages by the sentence
+  that actually names the counterparty gives **69.2% sound** (838), and names the
+  three failure modes rather than sampling them: 20.9% (253) name the party but
+  state no relation — this is where CRUS→GFS lives, "wafers primarily *supplied
+  by* GLOBALFOUNDRIES", a reversed relation the active-voice veto never saw;
+  5.5% (66) competitor lists; 3.7% (45) acquisitions; 0.7% (9) explicitly
+  reversed. GOOG→GOOGL is in there too — a share class, not a counterparty.
+  This is the re-labelling D-72 reserved, and it needed no re-crawl. See D-78.
 - **Status:** Accepted
 
 ### D-73 — Pre-registration: does Apple's move lead its suppliers? (Q-34)
@@ -1974,10 +1998,257 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — plan being written to `docs/plans/`.
 - **Status:** Accepted — partially supersedes D-16
 
+### D-78 — Classify the relation from the naming sentence, not the ±420-char window
+- **When:** 2026-09-07T17:55:25-05:00
+- **Decision:** Derive `relation` from the single sentence that names the
+  counterparty, with an explicit precedence — competitor > corporate_action >
+  reversed > customer > unstated — and build `supplies_to` edges from the
+  `customer` label alone. The percentage is read from that same sentence. Six
+  labels replace the one hardcoded `'customer'`; `passage` is untouched, so this
+  is a re-read of stored text and re-crawls nothing.
+- **Why:** The showcase page shows a reviewer the verbatim filing sentence behind
+  each edge, and that panel is what exposed this: `LITE→AVGO` would have rendered
+  "we compete against various companies" beneath a *supplies* label. The
+  alternative was to ship all 1,211 edges with an honest accuracy caveat. Rejected
+  — a caveat does not survive contact with a reader who can click the edge and
+  read the contradiction, and the goal's whole premise is that the graph is shown
+  working rather than described as working. Window-scoped matching is what failed:
+  a ±420-char window spans several sentences, so a competitor list two sentences
+  away from a customer mention scored as a customer. One sentence cannot say both.
+- **Outcome:** **Applied to real data.** 1,211 rows rewritten in one transaction:
+  818 customer, 288 unstated, 47 competitor, 46 corporate_action, 12 reversed.
+  `supplies_to` reloaded at 818 edges / 514 vertices. Q-35 then re-ran D-74's
+  pooled test on the cleaned graph: **b = -0.0015, I² = 44%** (was +0.0000, I² 0%)
+  — still a null far below the declared 0.02 threshold, so the conclusion holds
+  while its inputs no longer do. A cost this also surfaced: every 2-hop supply
+  path vanished with the bad edges, so supply-chain multi-hop was an artifact of
+  competitor lists and the "Baker Hughes rig count" statistic.
+- **Status:** Accepted
+
+### D-79 — The candidate is the leader, not the lagger: `leaders_of` dropped for `laggers_of`
+- **When:** 2026-09-07T18:05:00-05:00
+- **Decision:** `graph_retriever` calls the already-declared
+  `laggers_of(leader, max_hops, as_of)`, walking **INBOUND** from the candidate
+  to its suppliers. The planned `leaders_of` / `OUTBOUND` pair is dropped before
+  it was written. On the returned `LagEdge`, `leader` is the candidate and
+  `lagger` is the neighbour reached.
+- **Why:** PLAN-2026-09-07 TASK-3.1 assumed "a candidate is a potential lagger"
+  and added `leaders_of` to find what leads it. That premise is false for this
+  candidate set, and D-72 already contains the measurement that refutes it:
+  "only 8 of the 24 alert tickers are reachable **as customers**." Every real
+  candidate — AAPL, AVGO, TSLA — sits at the customer end. Combined with D-73's
+  fixed direction (customer → supplier, Cohen & Frazzini), the candidate is a
+  **leader** and its suppliers are its **laggers**. `leaders_of(AAPL)` would ask
+  for Apple's customers, which barely exist in this graph; the traversal that
+  produces the 13 suppliers is `laggers_of`. The alternative — keep `leaders_of`
+  and walk OUTBOUND — was defended on D-73's economics, which are correct but do
+  not rescue the premise: getting the direction right while putting the candidate
+  on the wrong end still inverts the query. Surfaced by the `red-adapters` agent,
+  which noticed that `scripts/capture_showcase.py` had been running INBOUND
+  against real data all along while the plan's worked example said OUTBOUND.
+  Test isolation landed at the **database** layer, not the collection layer: the
+  fixtures create disposable `test_arango_topology` / `test_vector_index`
+  databases holding production-named `equity`/`supplies_to`/`article`, so the
+  adapters hardcode those names and take only `db`. Collection-name constructor
+  kwargs were tried first and abandoned — they put a parameter on the production
+  API whose only purpose was to make a test pass (CLAUDE.md §2), and they forced
+  test collections into the live `lagmatrix` database, which promptly produced
+  real races between concurrent runners (`IndexCreateError: index was dropped`,
+  `DocumentInsertError: conflicting key: chip-article`). A separate database
+  cannot collide with production data at all. Reaching that took five reversals
+  across two agents and me, most of them caused by my own crossed messages.
+- **Outcome:** **Done and verified against the live instance**, not on report:
+  6 passed (4 topology + 2 vector) with `LAGMATRIX_ARANGO_URL` tunnelled to the
+  homelab ArangoDB 3.12.11; full suite 73 passed + 6, ruff clean; production
+  `equity`/`supplies_to`/`co_mentioned`/`article` confirmed at 514/818/2129/47640
+  afterwards with no leftover test collections. `laggers_of` implements the
+  ALL-quantified per-path guard and picks the shortest path, mirroring
+  `capture_showcase.py`. Two real defects surfaced *because the next agent in the
+  chain refused to guess* rather than from the tests: the plan's inverted premise,
+  and fixtures that seeded collections the adapter could not reach — the latter
+  hidden underneath a `TypeError` that looked like a complete explanation.
+- **Status:** Accepted
+
+### D-80 — The comparison bar: FalkorDB's GraphRAG app, and the one element we were missing
+- **When:** 2026-09-07T18:40:00-05:00
+- **Decision:** Treat FalkorDB's GraphRAG showcase as the reference page the goal
+  demands, and adopt its most persuasive device: a **side-by-side where vector
+  retrieval visibly fails and the graph visibly succeeds**, on the same question,
+  with both halves real output. For LagMatrix that is TSLA — semantic search over
+  47,640 articles returns CNBC "Final Trades" noise, while the traversal returns
+  APTV at 9% of net sales and JBL, each with the verbatim 10-K sentence.
+- **Why:** The goal says success is measured by comparison, not self-assessment,
+  so the bar had to be an actual page. FalkorDB's makes four things visible:
+  SSE-streamed pipeline stages, an "explainability subgraph" (source document →
+  chunks → entities → answer), a clickable force-directed explorer, and a
+  side-by-side where vector RAG hallucinates three non-existent World Cup host
+  cities while GraphRAG lists all 22 finals correctly. We already had analogues
+  of the first three — `scripts/serve.py` streams a real `graph.astream` over
+  SSE, D-78's sentence-level provenance is a stronger explainability chain than
+  theirs (a dated SEC filing, not an LLM-extracted chunk), and the page draws the
+  traversal. **The contrast demo is the one we lacked**, and it is the element
+  that does the actual persuading, because it is the only one that shows the
+  graph doing something the vector index cannot. The alternative — asserting in
+  prose that the graph adds value — is exactly the "read about it rather than see
+  it" failure the goal names.
+  Two things we have that the bar does not, and should therefore lead with rather
+  than bury: **point-in-time correctness** (an `as_of` that provably changes the
+  result, which no LLM-extraction demo attempts) and **honest negative results**.
+- **Outcome:** The contrast is real and, usefully, **it cuts both ways** — which
+  is a better demo than FalkorDB's, whose side-by-side only ever shows the graph
+  winning. Measured on the current trace:
+  **AAPL** — graph returns 12 named suppliers with disclosed percentages (AMKR
+  27.7%, QRVO 50%, AVGO 25%) in 6 ms; vector returns "ISM Manufacturing Prices
+  For February 70.5 Vs 60.6 Est." at 0.411. Graph wins decisively.
+  **TSLA** — graph returns APTV at 9% of net sales; vector returns "Amazon,
+  Alphabet, KLA And A Health Care Stock On CNBC's 'Final Trades'". Graph wins.
+  **AVGO** — graph returns **nothing** (every AVGO edge was a divestiture or a
+  competitor list and was dropped by D-78); vector returns Arista on supply
+  shortages and ASML on EUV demand, both genuinely on-topic. **Vector wins.**
+  Shipping the case the graph loses is the point: a demo that admits a failure
+  mode is more credible than one that cannot, and this one costs nothing because
+  the honest answer — use both, they fail differently — is also the correct one.
+- **Status:** Accepted
+
+### D-81 — Two edge types, opposite orientations: only the candidate's *laggers* count as evidence
+- **When:** 2026-09-08T00:10:00-05:00
+- **Decision:** `context_fusion` builds `leader_move` evidence only from edges
+  where the candidate is the **lagger** (`e.lagger == c.symbol`). Supply-chain
+  edges, where the candidate is the leader, contribute none. They stay in
+  `lag_edges` and stay on the showcase page; this governs what counts toward a
+  verdict, not what is retrieved or displayed.
+- **Why:** PHASE-4 made `graph_retriever` additive — correlation edges plus
+  ArangoDB supply edges — and the two carry **opposite orientations relative to
+  the candidate**. A correlation edge has `leader`=neighbour, `lagger`=candidate.
+  A supply edge (D-79) has `leader`=candidate, `lagger`=supplier. `fuse_evidence`
+  read `[e.leader for e in ...]` assuming every leader is a neighbour, so the
+  candidate's own symbol entered that list once per supplier — AAPL twelve times
+  — duplicating DataFrame columns until `rho[m]` returned a Series and
+  `int()` raised. Deduplication would have silenced the crash while leaving the
+  real error: counting a supplier's move as evidence about its customer inverts
+  the inference D-73 fixed. D-73 already said so — the supply edge is "signal
+  generation on suppliers, not corroboration of an Apple alert" — so the edge
+  genuinely cannot corroborate a mega-cap candidate, and the honest wiring says
+  that rather than manufacturing evidence from it.
+  **Found only by running the real pipeline.** Every unit test passed; the
+  showcase capture crashed on its first real `graph.astream`. The old capture
+  synthesised its node timeline with a `mark()` helper, so it would have produced
+  a clean-looking page from a pipeline that could not complete a single run.
+- **Outcome:** Fixed with a one-line filter plus a comment naming this entry.
+  80 passed, `check_baseline.py --synthetic` unchanged. Verified the fix is not a
+  behaviour regression by running the same three candidates with and without
+  `arango_topology`: both give `effective_evidence 0.0` on 2026-06-01, so the
+  earlier inflation only arose where a self-shock coincided with a supply edge.
+  `scripts/capture_showcase.py` now runs a real `graph.astream` and the trace is
+  observed rather than synthesised: `Send` fan-out, `leader_state` and
+  `vector_retriever` landing at identical `t_ms` (genuinely parallel), the
+  rejoin at `context_fusion`, and — with `halt_on_contradicted=True` on
+  **2026-05-11** — `__interrupt__`, the `review` gate firing on TSLA, and the
+  resume through to `publisher`. That date was chosen because it is the only
+  sampled one producing all three verdicts (AAPL neutral, AVGO corroborated,
+  TSLA contradicted); the interrupt had never been demonstrable before because no
+  capture had ever produced a contradiction.
+- **Status:** Accepted
+
+### D-82 — The vector retriever had no point-in-time guard at all
+- **When:** 2026-09-08T00:45:00-05:00
+- **Decision:** `NewsIndex.search` takes the candidate's `as_of` and filters
+  `a.date < @as_of` — strictly before — and `vector_retriever` passes `c.as_of`.
+  The predicate is combined into the *same* `FILTER` as the symbol test, not a
+  second clause.
+- **Why:** PHASE-7 replaced the Alpaca news call with the vector index and
+  carried over no date bound. `_SEARCH_AQL` filtered on symbol intersection and
+  nothing else, so a candidate assessed as of 2026-05-11 retrieved an article
+  published **2026-06-04** — 24 days of future information. Every other retrieval
+  path in this project is point-in-time by construction: the traversal's
+  `ALL`-quantified per-path `filing_date` guard, and `news_comention` being kept
+  a view precisely so a caller cannot forget to bound it (D-16). The vector half
+  was the one hole, and the showcase page states "the traversal cannot see a
+  filing that had not happened" two sections above the leaked row.
+  The single-`FILTER` form is not stylistic: ArangoDB's optimiser refuses
+  `APPROX_NEAR_COSINE` when two separate `FILTER` statements sit between it and
+  the `SORT`/`LIMIT` (`ERR 1554: Vector search could not be applied`), so the
+  alternative — a second filter line — does not run at all. Established against
+  the live instance by the `red-asof` agent before green began.
+- **Outcome:** Closed and verified in data, not just in tests. `FILTER
+  LENGTH(INTERSECTION(a.symbols, @symbols)) > 0 AND a.date < @as_of`; suite 89
+  passed / 0 skipped with the live instance, `check_baseline.py --synthetic`
+  unchanged. A fresh capture at as-of 2026-05-11 retrieves 0 of 18 articles on or
+  after that date, latest 2026-04-21 — previously 2026-06-04.
+- **Status:** Accepted
+
+  **How it was found, which matters more than the fix.** Not by the test suite —
+  80 tests passed over it. Not by me; I wrote and reviewed the wiring. It was
+  found by an outside reviewer reading the *retrieved data* on a published page
+  and noticing a date. Every guard in this project is enforced by construction
+  except this one, which was enforced by a docstring: `vector_retriever` has
+  claimed "only articles published strictly before the candidate's date are
+  retrieved" since PHASE-5, and that sentence was aspiration for two phases.
+
+### D-83 — The news query was near-contentless, and `direction` made it worse
+- **When:** 2026-09-08T00:55:00-05:00
+- **Decision:** `vector_retriever` asks
+  `f"{symbol} catalyst: earnings, demand, guidance, production, regulation"`.
+  The candidate's **direction is deliberately excluded** from the retrieval
+  query, reversing the specification this project set two phases ago.
+- **Why:** `f"news relevant to a {direction} move in {symbol}"` is almost
+  contentless, and the nearest neighbours of a contentless query are contentless
+  headlines: 18 of 18 retrieved articles across three candidates were the same
+  `"Market-Moving News for <date>"` template. Every assessment this pipeline has
+  ever made used market-wrap noise as its news context, so this is a production
+  defect, not a presentation one. Probed against the live index to locate the
+  fault: the corpus and the embeddings are fine — `"iPhone production cuts,
+  component orders and supplier demand"` returns Ming-Chi Kuo on iPhone Air demand
+  at 0.713 against the same filter and `as_of`.
+  **Direction was measured, not assumed, and it loses.** With it, AVGO returns
+  "Smart Money Is Betting Big In AVGO Options" three times and TSLA returns
+  "Trade Strategy For SPY, QQQ, AAPL..." three times — speculative trading
+  chatter, the same pathology reintroduced. Without it, all three candidates get
+  on-company substance (*Apple Earnings Are Imminent*, *Broadcom Slides 4%
+  Despite Q4 Beat*, *Tesla's Q4 Earnings Looms*). Direction belongs to the thesis
+  being assessed, not to what context to retrieve: news is not written
+  directionally, so asking for it retrieves people speculating about direction.
+  **The score falls and that is correct.** `catalyst` scores 0.516 where the old
+  query scored 0.567. Cosine measures proximity to the query, not usefulness — a
+  vague query sits near the corpus centroid and therefore scores well against
+  almost everything, so the *high* number was the symptom. Optimising the visible
+  score would have selected the worse retriever; the alternative form (`drivers`)
+  scored highest at 0.700 and returned generic stock chatter.
+  The query is also uneven across candidates — thinner for AVGO than for AAPL or
+  TSLA — and that is kept rather than tuned away. AVGO genuinely has less
+  retail-facing coverage, and tuning a template until it flatters three chosen
+  seeds is the cherry-picking this project has spent its whole life avoiding.
+- **Outcome:** pending
+- **Status:** Accepted — supersedes the query specification in D-77's PHASE-7
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-37 | Does `pipeline/runner.py` have the same leader re-entry hole as the live UI did? | D-23, `pipeline/runner.py`, REQ-7 | `runner.py:80` builds `signal_universe = {c.symbol for c in signals.candidates()}` — the identical pattern `serve.py` had before PHASE-5 fixed it. It is not a live bug today, because `runner.py` type-hints `signals: ExternalSignals | None` and no caller passes a `MarketScan`. It becomes one the moment scan mode is wired into the batch runner. Answered by either unioning `shocked_leaders()` there too, or by making the runner refuse a `MarketScan` until it does. **Answered 2026-09-08 by unioning.** It was worse than latent: line 80
+called `signals.candidates()` with no `as_of`, which `MarketScan.candidates(as_of: date)` cannot
+accept, so a scan source raised `TypeError` there — and it recomputed the whole candidate list a
+second time, meaning a second full 3,204-symbol sweep. Fixed by capturing the list once (preserving
+that `signal_universe` is built from *all* candidates, not the `limit`-truncated ones) and unioning
+`shocked_leaders(as_of)` duck-typed, matching `serve.py`. Duck-typed rather than on the
+`CandidateSource` protocol, so `ExternalSignals` is not forced to expose scan-only machinery. One
+pre-existing test changed with it: `test_run_uses_injected_signals_for_both_candidate_lookups`
+pinned the double call as correct and now pins a single lookup. |
+| Q-38 | Should `leader_state.py` use a non-overlapping baseline like `shocks.standardised_moves` specifies? | `graph/nodes/leader_state.py`, `adapters/candidates.py`, D-23 | `MarketScan` reads `standardised_moves`' contract literally — *"baseline must end strictly before returns begins"* — and passes adjacent, non-overlapping windows. `leader_state.py` passes an overlapping one, so its sigma is estimated from a sample that includes the move being measured, which shrinks the z-score of exactly the shocks it is looking for. The two now disagree about the same function. Deliberately not fixed here: changing it moves every published corroboration-mode result. Answered by measuring how much the z-scores differ on real data, then deciding whether the historical results need re-running. **Attempted 2026-09-08 and parked — it is bigger than the z-scores suggest.** The
+window fix itself is three lines (patch kept at `q38-leader_state.patch`), but: (a) it forces a
+rename, since `from lagmatrix import shocks` shadows `leader_state`'s local `shocks: list[Shock]`
+and raises `UnboundLocalError`; (b) the new window needs `trail + move_win` sessions, and several
+committed fixtures were sized for `trail` alone — `_shocked_closes` (62 rows), `_self_edge_closes`,
+and `test_fanout`'s two-bloc fixture — so `returns.iloc[ti - 63 : ti - 3]` comes out **empty**, not
+merely shifted, and the node produces no shocks at all; (c) that cascades into 9 failures across
+`test_nodes`, `test_fanout` and `test_review`, plus the expected baseline move
+(`2026-04-27 SYNA up: n_supporting 16 -> 20`). So the real work is lengthening fixtures so they
+stay meaningful rather than merely passing — a test change, and the reason this was parked rather
+than rushed alongside a commit. The measured "99% of classifications unchanged" holds for real
+data with 159 sessions, where the history bound never binds; it does not describe short unit
+fixtures. |
+| Q-36 | `capture_showcase.py` and `lagmatrix.edgar.relations` now split sentences and read percentages differently — which is canonical? | D-78, `scripts/capture_showcase.py`, `src/lagmatrix/edgar/relations.py` | Two fixes went into the capture script for the page and not into the tested module: (a) the initials guard `(?<![A-Z])` blocked splitting after "Form 10-K.", gluing an unrelated clause to CGNX's disclosure; (b) "10% or more" is the ASC 280 *threshold*, not the counterparty's share — JBL's filing says "10% or more" then tables Apple at 11%, so the stored `pct_revenue=10` is wrong and the page now says 11. The duplication is the real defect: the page and the database disagree about the same filing. Answered by fixing both in `relations.py` under TDD and having `capture_showcase.py` import `classify` instead of carrying its own copy, then re-running the reclassification. |
+| ~~Q-35~~ | Do D-73/D-74's supply-chain nulls hold on the audited 818-edge graph? | D-73, D-74, README | Both pre-registrations ran when 31% of edges were competitor lists, acquisitions and reversed relations (D-78). Re-running is cheap — the scripts exist and the edges are reloaded. Direction of the error is knowable (dropping non-supply edges removes noise, so a null stays null or sharpens; it cannot flip to a false positive this way), but the magnitude is not, and D-74's pooled estimate of +0.0000 was computed over chains that partly did not exist. Answered by re-running `experiment4.py`/`experiment5.py` against the reclassified graph and comparing b, z and I². **Answered 2026-09-07:** yes — pooled b = -0.0015 (was +0.0000), I² = 44% (was 0%), still far below the 0.02 threshold. The null holds; its heterogeneity rose. |
 | ~~Q-34~~ | Does the directed supply-chain edge predict, where correlation did not? | D-72, D-63, spike 14 | The whole reason for building it: correlation is symmetric and was a powered null, co-mention is undirected, this is neither. Untestable until the relation labels are trustworthy (needs the LLM pass, hence an API key) and the crawl is wide enough that supplier-side edges reach the alert tickers. Must be pre-registered exactly as D-63 was — the graph looking economically sensible is not evidence, which is what correlation taught. **Answered by D-73/D-74: no effect detectable, estimate stable at zero, but underpowered against a 0.02 threshold.** Direction did not rescue the mechanism — though unlike the correlation nulls, this one shows no heterogeneity and no artefacts, so it is a clean measurement rather than a contested one. |
 | ~~Q-01~~ | How is the leader→lagger topology built in the first place? | — | Answered by D-16: derived from Alpaca bars (statistical lag) and News API co-mention, recomputed on trailing windows. Supply-chain sourcing abandoned. Residual question is edge *quality* → Q-14. |
 | ~~Q-02~~ | Does Qdrant filtered search hold the latency budget with `symbol IN (...)` + recency filter? | D-03 | Moot — Qdrant dropped. Answered by D-13; the filtering concern survives as Q-09 |

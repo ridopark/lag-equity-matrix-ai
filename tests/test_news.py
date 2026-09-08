@@ -6,25 +6,25 @@ raises `TypeError: 'list' object is not a mapping` the moment two branches
 (or even one) write into the `news` channel — so the news branch cannot run
 at all today.
 
-`LagMatrixContext.news_client` exists precisely so a fake can be substituted
-here instead of hitting the real Alpaca API. Since `vector_retriever` does
-not yet read that field (it builds its own `NewsClient` from `os.environ`
-inside `make_retrieve_news`), the fake is also patched over the module's
-`NewsClient` import so no test run dials out regardless of which path the
-current or future implementation takes.
+PHASE-7 retargets this file's fake from the old direct Alpaca `NewsClient` to
+the real semantic index's `NewsIndex.search(query, symbols, limit)`
+(`src/lagmatrix/adapters/vector.py`), injected via
+`LagMatrixContext.vector_index` — the reserved injection point that lets a
+fake stand in for the real index, matching `retrieve_news`'s actual
+collaborator now that PHASE-7 deleted the module's `NewsClient` import.
+Injection replaces the old monkeypatch of that import, which no longer has
+anything to patch.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from types import SimpleNamespace
 
 import pytest
 
-from lagmatrix.domain.models import Candidate
+from lagmatrix.domain.models import Candidate, NewsChunk
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
-from lagmatrix.graph.nodes import vector_retriever as vector_retriever_module
 from lagmatrix.graph.state import candidate_key
 
 # topk=3 so CAND (LEAD1/LEAD2 bloc) and CAND2 (LEAD4/LEAD5 bloc) have disjoint
@@ -36,52 +36,47 @@ def _candidate(sym, d=date(2026, 6, 1), direction="up") -> Candidate:
     return Candidate(symbol=sym, direction=direction, as_of=d, origin="external")
 
 
-def _article(article_id: str, symbol: str) -> SimpleNamespace:
-    """Stands in for one `alpaca.data.models.news.News` item -- only the
-    attributes `retrieve_news` actually reads."""
-    return SimpleNamespace(
-        id=article_id,
-        symbols=[symbol],
-        headline=f"{symbol} headline {article_id}",
-        created_at=datetime(2026, 5, 30, tzinfo=UTC),
+def _chunk(doc_id: str, symbol: str) -> NewsChunk:
+    """Stands in for one row `NewsIndex.search` maps into a `NewsChunk`."""
+    return NewsChunk(
+        doc_id=doc_id,
+        symbol=symbol,
+        text=f"{symbol} headline {doc_id}",
+        published_at=datetime(2026, 5, 30, tzinfo=UTC),
+        score=1.0,
     )
 
 
-class FakeNewsClient:
-    """Stands in for `alpaca.data.historical.news.NewsClient`. Filters by
-    `request.symbols` the same way the real client's response would be
-    scoped to the requested symbol, so each candidate's fetch only ever
-    returns its own articles."""
+class FakeNewsIndex:
+    """Stands in for `lagmatrix.adapters.vector.NewsIndex`. Filters by
+    `symbols[0]` the same way the real index's AQL `INTERSECTION` filter
+    would scope results to the requested symbol, so each candidate's fetch
+    only ever returns its own articles."""
 
-    def __init__(self, articles_by_symbol: dict[str, list[SimpleNamespace]]):
-        self._articles_by_symbol = articles_by_symbol
+    def __init__(self, chunks_by_symbol: dict[str, list[NewsChunk]]):
+        self._chunks_by_symbol = chunks_by_symbol
 
-    def get_news(self, request):
-        return SimpleNamespace(data={"news": self._articles_by_symbol.get(request.symbols, [])})
+    def search(self, query, symbols, limit, as_of=None):
+        return self._chunks_by_symbol.get(symbols[0], [])
 
 
 @pytest.fixture
-def fake_news_client(monkeypatch):
-    """One article per symbol. Wired onto `LagMatrixContext.news_client`
-    (the reserved injection point) and also patched over the `NewsClient`
-    import inside `vector_retriever` (what the current, un-fixed factory
-    actually constructs) so neither today's nor a `context`-reading fix can
-    reach the network in this test.
-    """
-    client = FakeNewsClient({"CAND": [_article("n1", "CAND")], "CAND2": [_article("n2", "CAND2")]})
-    monkeypatch.setattr(vector_retriever_module, "NewsClient", lambda *a, **k: client)
-    return client
+def fake_vector_index():
+    """One article per symbol, injected via `LagMatrixContext.vector_index`
+    (the reserved injection point) so this test never dials out to a real
+    ArangoDB/embedding model."""
+    return FakeNewsIndex({"CAND": [_chunk("n1", "CAND")], "CAND2": [_chunk("n2", "CAND2")]})
 
 
-async def _invoke(closes, candidates, news_client):
+async def _invoke(closes, candidates, vector_index):
     g = build_graph(with_news=True)
     ctx = LagMatrixContext(
-        closes=closes, signal_universe=set(), topk=TOPK, news_client=news_client
+        closes=closes, signal_universe=set(), topk=TOPK, vector_index=vector_index
     )
     return await g.ainvoke({"candidates": candidates}, context=ctx)
 
 
-async def test_news_branch_runs_with_injected_client(closes, fake_news_client):
+async def test_news_branch_runs_with_injected_client(closes, fake_vector_index):
     """The graph must complete `with_news=True` using the injected fake and
     produce an assessment.
 
@@ -90,11 +85,11 @@ async def test_news_branch_runs_with_injected_client(closes, fake_news_client):
     returns a flat list for the dict-typed `news` channel), or the run
     completes but `out["assessments"]` is empty.
     """
-    out = await _invoke(closes, [_candidate("CAND")], fake_news_client)
+    out = await _invoke(closes, [_candidate("CAND")], fake_vector_index)
     assert out["assessments"]
 
 
-async def test_news_is_keyed_per_candidate_not_cross_attributed(closes, fake_news_client):
+async def test_news_is_keyed_per_candidate_not_cross_attributed(closes, fake_vector_index):
     """`news` must be keyed by `candidate_key`, like `lag_edges_by_key` /
     `leader_shocks` / `evidence_by_key` -- CAND's entry must hold only CAND's
     article and CAND2's entry only CAND2's, even though both share one batch
@@ -107,7 +102,7 @@ async def test_news_is_keyed_per_candidate_not_cross_attributed(closes, fake_new
     candidate's branch overwriting the other's entry).
     """
     cand, cand2 = _candidate("CAND"), _candidate("CAND2")
-    out = await _invoke(closes, [cand, cand2], fake_news_client)
+    out = await _invoke(closes, [cand, cand2], fake_vector_index)
 
     news = out["news"]
     cand_chunks = news[candidate_key(cand)]

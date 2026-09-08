@@ -257,9 +257,24 @@ extends D-02's adapter contract rather than merely implementing it.
     regardless of `as_of` (no filing_date filter in the AQL).
   - `leaders_of("NONEXISTENT", max_hops=2, as_of=...)` returns `[]`, not an
     error.
-- TASK-3.2 (impl, `tdd-green`): Implement `leaders_of` as an AQL `OUTBOUND`
-  traversal (edges point supplier→customer; walking outbound from the
-  candidate reaches its customers, i.e. its leaders) with a `FILTER
+> **CORRECTED 2026-09-07 (D-79) — this phase had the candidate on the wrong end.**
+> The prose above assumes "a candidate is a potential lagger". That is false for
+> this candidate set. D-73 fixes the predictive direction as customer → supplier,
+> and D-72 measured that **the alert tickers are all at the customer end** ("only
+> 8 of the 24 alert tickers are reachable as customers"). A candidate is therefore
+> a **leader**, and the things it relates to are its **laggers**. So the method is
+> the already-declared `laggers_of(leader, max_hops, as_of)` walking **INBOUND**
+> from the candidate to its suppliers — which is what `scripts/capture_showcase.py`
+> has been running against real data all along. **`leaders_of` is not needed and
+> is not being added**; read `leaders_of` as `laggers_of` and `OUTBOUND` as
+> `INBOUND` throughout TASK-3.1 and TASK-3.2, and swap the worked example's
+> endpoints (`laggers_of("AAPL", 1)` → `AVGO`, not `leaders_of("GEN", 1)`).
+> On the returned `LagEdge`: `leader` is the candidate, `lagger` is the neighbour
+> reached — not the reverse.
+
+- TASK-3.2 (impl, `tdd-green`): Implement `laggers_of` as an AQL `INBOUND`
+  traversal (edges point supplier→customer; walking inbound from the
+  candidate reaches its suppliers, i.e. its laggers) with a `FILTER
   edge.filing_date <= @as_of` and `1..@max_hops` bounds, mapping each result
   path segment to a `LagEdge(leader=<customer>, lagger=<previous hop symbol>,
   relation="supplier", lag_days=<hop index>, correlation=0.0, beta=<pct_revenue

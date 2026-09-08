@@ -33,17 +33,16 @@ def _boom(*_args, **_kwargs):
 
 
 async def test_run_uses_injected_signals_for_both_candidate_lookups(closes, monkeypatch, tmp_path):
-    """Both the as_of-filtered candidate list and the unfiltered
-    `signal_universe` must come from the injected `signals=` object, not from
-    a default `ExternalSignals()` constructed internally.
+    """The as_of-filtered candidate list and the unfiltered `signal_universe`
+    must both derive from a single call to the injected `signals=` object,
+    not from a default `ExternalSignals()` constructed internally (Q-37: the
+    candidate list is reused for `signal_universe` instead of a second call).
 
     Falsifies if: `run()` has no `signals=` kwarg (TypeError), or an
-    implementation that injects `signals` at only one of the two call sites
-    (e.g. the `as_of`-filtered lookup) still lets the other call site
-    construct the default `ExternalSignals()` — the patched constructor
-    raises immediately if invoked at all, and the stub's recorded call
-    pattern must show exactly one as_of-filtered call and one unfiltered
-    call.
+    implementation that injects `signals` at only one of the two use sites
+    still lets the other construct the default `ExternalSignals()` — the
+    patched constructor raises immediately if invoked at all, and the stub
+    must be called exactly once, with `as_of`.
     """
     monkeypatch.setattr(runner_mod, "ExternalSignals", _boom)
     monkeypatch.setattr(runner_mod, "CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
@@ -60,9 +59,9 @@ async def test_run_uses_injected_signals_for_both_candidate_lookups(closes, monk
         signals=stub,
     )
 
-    assert stub.calls == [as_of, None], (
-        "expected one as_of-filtered call (candidate list) and one "
-        f"unfiltered call (signal_universe) against the injected source, got {stub.calls}"
+    assert stub.calls == [as_of], (
+        f"expected exactly one call to candidates(), with as_of, reused for "
+        f"both the candidate list and signal_universe, got {stub.calls}"
     )
     assert assessments, "run should have produced an assessment for the injected candidate"
 

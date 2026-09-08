@@ -162,16 +162,24 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 <header>
   <p class="eyebrow">LangGraph · ArangoDB · GraphRAG · live</p>
   <h1>Which companies would feel it first?</h1>
-  <p class="lede">When something happens to a big company, which smaller companies are exposed
-    to it? This answers that two ways at once, live.</p>
-  <p class="sub" style="margin-top:.8rem">The first way reads a <b>graph</b>:
-    Apple's suppliers are the companies that named Apple as a customer in their own SEC filings.
-    The second reads the <b>news</b>: 47,640 headlines, searched by meaning rather than by
-    keyword. Press Run and both happen in front of you — no recording, no replay. Everything with
-    a number attached was measured during the run you just triggered.</p>
+  <p class="lede">Start from what actually moved today — then ask the filings whether a real
+    relationship explains it.</p>
+  <p class="sub" style="margin-top:.8rem"><b>Why that order matters.</b> The obvious way round is
+    to take a company, look up whoever it correlates with, and check whether they moved. That
+    cannot tell you anything: neighbours picked because they move together will be found to move
+    together — it is the definition, checked against itself. So this starts at the other end. It
+    sweeps every company's own price history for the ones that just moved, then uses the graph to
+    ask whether a genuine, dated, directed relationship exists among them: a company that named
+    the mover as a customer in an SEC filing, filed before the date in question. The graph is used
+    to <em>verify</em> a relationship, not to pick one.</p>
+  <p class="sub" style="margin-top:.5rem">Press Run and it happens in front of you — no recording,
+    no replay. Everything with a number attached was measured during the run you just triggered.
+    The older <b>corroboration-first</b> ordering is still in the dropdown, where a company arrives
+    from an outside alert feed and the graph looks up its neighbours to check the story; it is
+    labelled as such.</p>
   <div class="bar">
     <label for="src">source</label>
-    <select id="src"><option value="synthetic">synthetic — invented companies</option></select>
+    <select id="src"><option value="synthetic">alert feed, invented data — corroboration-first</option></select>
     <label for="lim">limit</label>
     <input id="lim" type="number" min="1" value="3" style="width:4.5rem">
     <button class="go" id="go">Run</button>
@@ -442,14 +450,21 @@ fetch("/config").then(r => r.json()).then(c => {
   }
   if (c.allow_real) {
     const o = document.createElement("option");
-    o.value = "real"; o.textContent = "real market data — this machine only";
+    o.value = "real"; o.textContent = "alert feed, real data — corroboration-first";
     $("#src").appendChild(o);
   }
   if (c.allow_real && c.graphrag) {
+    // scan-first goes first and is selected: discovery is the primary story,
+    // the alert-fed sources are the older corroboration-first ordering.
     const o = document.createElement("option");
-    o.value = "scan"; o.textContent = "scan-first — start from what moved";
-    $("#src").appendChild(o);
+    o.value = "scan"; o.textContent = "scan-first — start from what moved (default)";
+    $("#src").prepend(o);
+    $("#src").value = "scan";
   }
+  // the note is what keeps the diagram from overclaiming, so it shows whenever
+  // scan-first is selected — including at rest, before any run
+  $("#ordernote").hidden = $("#src").value !== "scan";
+  drawTopo();
   $("#rag").className = "dot " + (c.graphrag ? "on" : "off");
   $("#ragtxt").textContent = c.graphrag
     ? "GraphRAG online" : "graph/vector offline — correlation only";
@@ -576,7 +591,11 @@ function drawTopo(){
   const W = Math.max(760, cols * LW + PAD * 2);
   const cx = i => PAD + LW / 2 + i * LW;
   const mid = W / 2;
-  const PRE = SCAN ? 176 : 0;           // headroom for the two scan stages
+  // Draw the two origination stages whenever scan-first is selected, not only
+  // once a run has reported them — otherwise the page at rest still opens with
+  // "find related companies" and reads as though a ticker were handed to it.
+  const scanMode = SCAN !== null || $("#src")?.value === "scan";
+  const PRE = scanMode ? 176 : 0;
   const Y = {sweep: 46, trav: 126, start: 46 + PRE, fan: 156 + PRE,
              leaf: 266 + PRE, chain: 376 + PRE};
   const GAP = 82;                       // vertical pitch of the tail
@@ -635,19 +654,21 @@ function drawTopo(){
       <text class="nc" x="${x}" y="${(Y.fan + Y.leaf) / 2 + 12}"
         text-anchor="middle">identical shape, not drawn</text>`;
   }
-  if (SCAN) {
+  if (scanMode) {
     out += link(mid, Y.sweep + HB, mid, Y.trav - HB, "on");
     out += link(mid, Y.trav + HB, mid, Y.start - HB, "on");
-    out += `<rect class="nd done" x="${mid - 130}" y="${Y.sweep - HB}" width="260"
+    out += `<rect class="nd ${SCAN ? "done" : ""}" x="${mid - 130}" y="${Y.sweep - HB}" width="260"
         height="${HB * 2}"></rect>
       <text class="nl" x="${mid}" y="${Y.sweep - 3}" text-anchor="middle">1 · find what just moved</text>
-      <text class="nc" x="${mid}" y="${Y.sweep + 11}" text-anchor="middle">swept ${
-        SCAN.swept.toLocaleString()} companies → ${SCAN.movers} moved</text>
-      <rect class="nd done" x="${mid - 130}" y="${Y.trav - HB}" width="260"
+      <text class="nc" x="${mid}" y="${Y.sweep + 11}" text-anchor="middle">${
+        SCAN ? `swept ${SCAN.swept.toLocaleString()} companies → ${SCAN.movers} moved`
+             : "every company's own price history"}</text>
+      <rect class="nd ${SCAN ? "done" : ""}" x="${mid - 130}" y="${Y.trav - HB}" width="260"
         height="${HB * 2}"></rect>
       <text class="nl" x="${mid}" y="${Y.trav - 3}" text-anchor="middle">2 · who supplies them?</text>
-      <text class="nc" x="${mid}" y="${Y.trav + 11}" text-anchor="middle">graph traversal → ${
-        SCAN.found} candidates</text>
+      <text class="nc" x="${mid}" y="${Y.trav + 11}" text-anchor="middle">${
+        SCAN ? `graph traversal → ${SCAN.found} candidates`
+             : "who filed as their supplier?"}</text>
       <text class="br" x="${mid + 148}" y="${Y.sweep + 4}">before the graph runs</text>`;
   }
   out += box(mid, Y.start, 132, "START", "START", "");
@@ -733,6 +754,13 @@ function noteConcurrency(){
 }
 
 /* ---------- run ---------- */
+$("#src").addEventListener("change", () => {
+  // the previous run's origination stages describe the source that produced
+  // them, not the one now selected — drop them rather than show them stale
+  SCAN = null;
+  $("#ordernote").hidden = $("#src").value !== "scan";
+  drawTopo();
+});
 $("#go").addEventListener("click", () => {
   if (es) es.close();
   SPANS = []; CKPTS = []; LANES = []; INTERRUPT = null; SCAN = null;

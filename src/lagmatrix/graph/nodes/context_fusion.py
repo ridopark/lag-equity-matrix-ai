@@ -30,6 +30,8 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
     effective = 0.0
     evidence_by_key: dict[str, list[Evidence]] = {}
     effective_by_key: dict[str, float] = {}
+    room_by_key: dict[str, float | None] = {}
+    origin_status_by_key: dict[str, str | None] = {}
 
     for c in state.get("candidates", []):
         key = candidate_key(c)
@@ -38,23 +40,22 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
         # but supply edges (D-79) have leader=candidate, lagger=supplier — a
         # supplier's move is not evidence about its customer (D-73, D-81).
         leaders = [e.leader for e in edges_for(state, c) if e.lagger == c.symbol]
-        if not leaders:
-            continue
-
         shocks = {s.symbol: s for s in leader_shocks_by_key.get(key, [])}
         movers = [s for s in leaders if s in shocks]
+        if not leaders and not (c.origin_leader and c.origin_leader in shocks):
+            continue
 
         c_evidence: list[Evidence] = []
         c_effective = 0.0
+
+        cand_z = shocks[c.symbol].sigma if c.symbol in shocks else 0.0
+        want = 1.0 if c.direction == "up" else -1.0
 
         if movers:
             ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])
             win = returns.iloc[ti - trail : ti]
             sub = win[[m for m in movers if m in win.columns]]
             rho = sub.corr().abs() if sub.shape[1] > 1 else None
-
-            cand_z = shocks[c.symbol].sigma if c.symbol in shocks else 0.0
-            want = 1.0 if c.direction == "up" else -1.0
 
             for m in movers:
                 z = shocks[m].sigma
@@ -71,6 +72,45 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
                         weight=round(w, 4),
                         detail=(f"{m} moved {z:+.2f}σ while {c.symbol} moved "
                                 f"{cand_z:+.2f}σ; bloc of {bloc}"),
+                    )
+                )
+
+        if c.origin_leader and c.origin_leader in shocks:
+            y_component = shocks[c.origin_leader].sigma * want
+            x_component = cand_z * want
+
+            if y_component <= 0:
+                pass  # degenerate: no Evidence, no room/status entry
+            elif x_component < 0:
+                origin_status_by_key[key] = "opposed"
+                room_by_key[key] = None
+                c_effective += 1.0
+                c_evidence.append(
+                    Evidence(
+                        kind="lag_response",
+                        symbol=c.origin_leader,
+                        supports=False,
+                        weight=1.0,
+                        detail=(f"{c.origin_leader} moved {y_component:+.2f}σ toward the thesis "
+                                f"while {c.symbol} moved {x_component:+.2f}σ against it"),
+                    )
+                )
+            elif x_component >= y_component:
+                origin_status_by_key[key] = "responded"
+                room_by_key[key] = 0.0
+            else:
+                origin_status_by_key[key] = "open"
+                room_by_key[key] = round(1 - x_component / y_component, 4)
+                c_effective += 1.0
+                c_evidence.append(
+                    Evidence(
+                        kind="lag_response",
+                        symbol=c.origin_leader,
+                        supports=True,
+                        weight=1.0,
+                        detail=(f"{c.origin_leader} moved {y_component:+.2f}σ toward the thesis "
+                                f"while {c.symbol} moved {x_component:+.2f}σ; "
+                                f"room={room_by_key[key]}"),
                     )
                 )
 
@@ -92,4 +132,6 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
         "effective_evidence": round(effective, 3),
         "evidence_by_key": evidence_by_key,
         "effective_evidence_by_key": effective_by_key,
+        "room_by_key": room_by_key,
+        "origin_status_by_key": origin_status_by_key,
     }

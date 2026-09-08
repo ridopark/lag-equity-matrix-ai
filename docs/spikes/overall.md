@@ -2221,10 +2221,75 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending
 - **Status:** Accepted — supersedes the query specification in D-77's PHASE-7
 
+### D-84 — "Already responded" is a separate axis from "contradicted", and the ratio is signed
+- **When:** 2026-09-08T18:22:00-05:00
+- **Decision:** A scan-discovered candidate `X` now carries two new fields
+  alongside its verdict: `origin_status` (`"open"` | `"responded"` |
+  `"opposed"` | `None`) and `room` (`float | None`). `fuse_evidence` classifies
+  on two **signed** quantities computed the same way for both symbols —
+  `y_component = z_Y * want`, `x_component = z_X * want`, where `Y` is the
+  candidate's `origin_leader` and `want` is `+1`/`-1` for an up/down thesis:
+  `y_component <= 0` skips entirely (no evidence, both fields `None`);
+  `x_component < 0` is **opposed** (`room=None`, one contradicting
+  `Evidence(kind="lag_response", weight=1.0)`); `x_component >= y_component` is
+  **responded** (`room=0.0`, and **no `Evidence` at all**); otherwise **open**
+  (`room = 1 - x_component/y_component`, one corroborating unit). The tie
+  `x_component == y_component` lands in *responded*, not open-with-zero-room.
+- **Why:** the alternative that lost was an unsigned single formula,
+  `responded = |z_X| / |z_Y|`. It is shorter and needs no sign handling, but it
+  is sign-blind: a candidate that moved 1σ *against* the thesis and one that
+  moved 1σ *with* it but has not caught up both yield `0.5`, so a room-sorted
+  list would rank a refuted thesis in the middle of the "still has room" names
+  instead of at the bottom. That collapses the exact distinction this whole
+  change exists to keep. Emitting no `Evidence` for *responded* (rather than a
+  contradicting one) is the same distinction on the verdict side: the
+  opportunity is spent, not refuted, so it must not be able to push `verdict`
+  to `"contradicted"` on its own. Reusing the existing three-way `verdict`
+  string for this also lost — `"neutral"` already means "insufficient
+  evidence, or a tie", and overloading it would make one string mean two
+  unrelated things.
+  `room` is deliberately built from z-scores only and multiplies by **no**
+  transfer coefficient, measured or assumed: D-74's pooled slope for exactly
+  this customer→supplier relationship is `b=-0.0015` against a pre-registered
+  `0.02` threshold — a null on the wrong side of zero — so any assumed fraction
+  of `Y`'s move appearing in `X` would present as fact the one quantity this
+  project measured and did not find. It orders candidates against each other
+  and is never shown as an expected return, target, or bp/% figure. This also
+  keeps the change clear of `LagEdge.beta` entirely (Q-39).
+- **Outcome:** pending — the classification is green on synthetic fixtures
+  (five in `tests/test_nodes.py`), including the falsifying case where `X` has
+  already outrun `Y`; whether it changes what a reader would act on is unknown
+  until it is exercised on a real scan.
+- **Status:** Accepted
+
+### D-85 — `fuse_evidence`'s `if not leaders: continue` gate now admits the origin-leader path
+- **When:** 2026-09-08T18:22:00-05:00
+- **Decision:** the guard becomes
+  `if not leaders and not (c.origin_leader and c.origin_leader in shocks): continue`,
+  with `shocks`/`movers` built above it rather than below. A candidate with
+  `origin_leader=None` and no correlation neighbours still skips, byte-identically
+  to before.
+- **Why:** found by reading the code during execution, not written into
+  PLAN-2026-09-08-unresponded-lag, which is why it is logged separately. The old
+  gate ran before `shocks` was even built, so a scan candidate with no
+  correlation neighbours never reached fusion, got no `_by_key` entry, and was
+  dropped by `assess()` under D-27 — meaning a `lag_response` unit could never
+  be the *only* evidence for a candidate. That would have made the "responded
+  alone cannot manufacture a verdict" and "lag_response weight alone clears
+  `MIN_EFFECTIVE`" tests unwritable, because there would be no `Assessment` to
+  assert on at all. Leaving the gate and weakening those two tests was the
+  alternative; it would have removed the only checks that pin `lag_response`'s
+  independent behaviour.
+- **Outcome:** pending — verified not to disturb existing behaviour
+  (`tests/test_nodes.py`, `test_market_scan.py`, `test_fanout.py`: 41 passed,
+  `check_baseline.py --synthetic` unchanged at 6 identical rows).
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-40 | Are `lag_response` and correlation `leader_move` evidence independent enough to sit in one weighted sum? | D-84, `graph/nodes/context_fusion.py`, Q-12 | `Y` itself never double-counts — Q-37's `signal_universe` fix keeps the originating leader out of `X`'s own correlation pool — but a *third* symbol highly correlated with `Y` still contributes an ordinary `leader_move` unit alongside the `lag_response` unit, and the two are not weighted against each other. The independence discount (Q-12) operates within the correlation bloc only; it does not see `lag_response` at all, so a candidate discovered from `Y` and also neighboured by `Y`'s bloc can reach `MIN_EFFECTIVE` on what is arguably one observation counted twice. Mirrors Q-12's general unresolved question rather than worsening it. Answered by extending the cluster-size discount to cover the origin leader's bloc, or by measuring how often the two sources actually overlap on a real scan. |
 | Q-39 | `LagEdge.beta` carries two incompatible quantities, and the correlation one looks inverted — which is right? | `graph/nodes/graph_retriever.py:62`, `adapters/arango.py:63`, PLAN-2026-09-08-unresponded-lag | Two defects, both currently latent. **(a)** On a correlation edge `beta = corr * std(leader) / std(cand)`; on a supply edge it is `pct_revenue / 100`, an accounting ratio. One field, a volatility ratio and a revenue share, distinguished only by `relation`. **(b)** The correlation form is the reciprocal of the conventional beta for predicting the candidate from the leader (`corr * std(cand) / std(leader)`), so it appears inverted for the direction the pipeline cares about. Neither bites today: `grep -rn '\.beta\b' src/ tests/ scripts/` finds exactly one reader, a test asserting the supply edge's `pct_revenue`. Nothing in production reads it. The unresponded-lag work deliberately computes `room` from z-scores alone so it never touches `beta` — which is why this is logged rather than fixed inline. Answered by deciding what `beta` is *for*: if it is the transfer coefficient the lag hypothesis would want, it needs one meaning, the right orientation, and a test; if nothing will read it, it should be removed rather than left as a trap. |
 | Q-37 | Does `pipeline/runner.py` have the same leader re-entry hole as the live UI did? | D-23, `pipeline/runner.py`, REQ-7 | `runner.py:80` builds `signal_universe = {c.symbol for c in signals.candidates()}` — the identical pattern `serve.py` had before PHASE-5 fixed it. It is not a live bug today, because `runner.py` type-hints `signals: ExternalSignals | None` and no caller passes a `MarketScan`. It becomes one the moment scan mode is wired into the batch runner. Answered by either unioning `shocked_leaders()` there too, or by making the runner refuse a `MarketScan` until it does. **Answered 2026-09-08 by unioning.** It was worse than latent: line 80
 called `signals.candidates()` with no `as_of`, which `MarketScan.candidates(as_of: date)` cannot

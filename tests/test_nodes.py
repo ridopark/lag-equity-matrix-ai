@@ -486,5 +486,371 @@ MOVE_WIN = 3
 SIGMA = 2.0
 
 
+# --- PHASE-2: leader_state always resolves the origin leader's shock ------
 
 
+def _origin_leader_closes() -> pd.DataFrame:
+    """A hand-built universe isolating the `origin_leader` mechanism from the
+    ordinary correlation-derived `leaders` list.
+
+    Three columns: OTHERLEAD (X's only `lag_edges` leader, wired directly in
+    the test rather than via `retrieve_neighbourhood`), X (the candidate),
+    and Y (the candidate's `origin_leader` -- deliberately *not* one of X's
+    `lag_edges`, so Y's symbol can reach `leader_shocks` only through the
+    PHASE-2 mechanism, never through the pre-existing `leaders` list).
+
+    trail=10, move_win=3. 12 sessions: session 0 is a throwaway base row
+    (`pct_change` of the first row is always NaN), sessions 1-10 are the
+    trail=10 baseline window with `as_of` landing on session 10 (the last of
+    that window, so `recent` is the overlapping tail sessions 8-10 -- the
+    pre-existing Q-38 baseline/recent overlap, unchanged here), and session
+    11 exists only so a session strictly after `as_of` is available (D-16
+    point-in-time lookup). Same total-session shape as `_self_edge_closes`
+    above, which already exercises this exact slicing without an empty
+    baseline/recent slice; confirmed non-empty here too by computing
+    `shocks.standardised_moves` directly against this data before writing
+    the assertions below (ti=11, baseline 10 rows, recent 3 rows), rather
+    than assuming it.
+    """
+    y = [0.001, -0.001, 0.0015, -0.0005, 0.001, -0.0015, 0.0005, -0.001, 0.0012, -0.0008]
+    x = [0.0009, -0.0011, 0.0013, -0.0006, 0.0011, -0.0016, 0.0004, -0.0009, 0.0015, -0.0007]
+    other = [0.002, -0.0018, 0.0021, -0.0022, 0.0019, -0.002, 0.0022, -0.0021, 0.0023, -0.0019]
+    idx = pd.bdate_range("2026-01-01", periods=12, tz="UTC")
+    r = {"OTHERLEAD": [0.0, *other, 0.0], "X": [0.0, *x, 0.0], "Y": [0.0, *y, 0.0]}
+    return pd.DataFrame(
+        {k: 100 * np.cumprod([1 + v for v in vals]) for k, vals in r.items()}, index=idx
+    )
+
+
+def test_leader_state_always_resolves_the_origin_leader_even_below_sigma():
+    """PHASE-2: `leader_state` must emit a `Shock` for `c.origin_leader` even
+    when its own `|z| < sigma` -- the same unconditional treatment the
+    candidate's own symbol already gets (`sym == c.symbol`).
+
+    Y is engineered to sit genuinely below the sigma=2.0 threshold: computed
+    directly against `_origin_leader_closes()` with
+    `shocks.standardised_moves` before writing this assertion, Y's z there is
+    -0.3124 (`|z| = 0.31 < 2.0`). Y is also deliberately absent from
+    `lag_edges` (only OTHERLEAD->X is wired) -- see `_origin_leader_closes`'s
+    docstring -- so the only way Y's symbol can reach `leader_shocks` at all
+    is through `c.origin_leader`, not through the ordinary `leaders` list.
+    This pins both halves of TASK-2.2 (the `syms` extension and the `sigma`
+    filter extension) in one assertion.
+
+    Falsifies if: no `Shock` with `symbol == "Y"` appears in `leader_shocks`
+    for this candidate -- either because `leader_state` never computed a `z`
+    for Y at all (`syms` not extended), or computed one and discarded it
+    below threshold (filter not extended).
+    """
+    closes = _origin_leader_closes()
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    edges = [
+        LagEdge(
+            leader="OTHERLEAD", lagger="X", correlation=0.5, lag_days=0,
+            beta=0.3, relation="correlation",
+        )
+    ]
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=closes, signal_universe=set(), trail=10, topk=2, move_win=3, sigma=2.0
+        )
+    )
+
+    out = leader_state({"candidates": [cand], "lag_edges": edges}, rt)
+
+    key = candidate_key(cand)
+    y_shocks = [s for s in out["leader_shocks"][key] if s.symbol == "Y"]
+    assert len(y_shocks) == 1
+    assert abs(y_shocks[0].sigma) < 2.0
+
+
+def test_leader_state_does_not_raise_when_origin_leader_missing_from_closes():
+    """PHASE-2's halt condition: if `c.origin_leader` names a symbol absent
+    from `returns.columns` (e.g. delisted, or a data gap), `leader_state`
+    must not raise -- no `z` can be computed for a column that doesn't
+    exist, so that symbol simply produces no `Shock`, silently.
+
+    Falsifies if: this raises (e.g. a `KeyError` from indexing `returns` on
+    a missing column while extending `syms`), or a `Shock` for the missing
+    symbol appears anyway.
+    """
+    closes = _origin_leader_closes()
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan",
+        origin_leader="MISSING",
+    )
+    edges = [
+        LagEdge(
+            leader="OTHERLEAD", lagger="X", correlation=0.5, lag_days=0,
+            beta=0.3, relation="correlation",
+        )
+    ]
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=closes, signal_universe=set(), trail=10, topk=2, move_win=3, sigma=2.0
+        )
+    )
+
+    out = leader_state({"candidates": [cand], "lag_edges": edges}, rt)  # must not raise
+
+    key = candidate_key(cand)
+    assert "MISSING" not in {s.symbol for s in out["leader_shocks"][key]}
+
+
+def test_leader_state_external_candidate_unaffected_by_origin_leader_resolution():
+    """Corroboration-mode invariance guard: an `origin="external"` candidate
+    never sets `origin_leader` (PHASE-1 -- it defaults to `None`), so the
+    PHASE-2 extension must be a no-op for it: exactly today's shocks, nothing
+    added, nothing removed.
+
+    Uses `_shocked_closes()` and the existing `_candidate()` helper (default
+    `origin_leader=None`) -- the same fixture
+    `test_fuse_evidence_effective_evidence_never_exceeds_raw_count` and
+    `test_correlation_only_evidence_is_unchanged_by_the_supply_edge_fix`
+    already rely on for their own invariance claims. LEAD1/LEAD2 clear
+    sigma=2.0 on their own merits (computed directly beforehand: sigma =
+    6.17 / 6.01) and CAND is included via the pre-existing `sym ==
+    c.symbol` clause, so this exact three-symbol set is unrelated to the
+    PHASE-2 change and must not move.
+
+    Falsifies if: the symbol set gains or loses a member -- e.g. `None`
+    being matched against a literal "None" column, or any other interaction
+    between the new `or sym == c.origin_leader` clause and an unset
+    `origin_leader`.
+    """
+    closes = _shocked_closes()
+    cand = _candidate(d=date(2026, 3, 26))
+    rt = _runtime(closes)
+    edges = retrieve_neighbourhood({"candidates": [cand]}, rt)["lag_edges"]
+
+    out = leader_state({"candidates": [cand], "lag_edges": edges}, rt)
+
+    key = candidate_key(cand)
+    assert {s.symbol for s in out["leader_shocks"][key]} == {"LEAD1", "LEAD2", "CAND"}
+
+
+# --- PHASE-3: fuse_evidence classifies open / responded / opposed ---------
+
+
+def _lag_response_closes(x_recent: list[float]) -> pd.DataFrame:
+    """Two columns, Y (the candidate `X`'s `origin_leader`) and X itself --
+    the minimal shape PHASE-4's halt condition recommends (no other
+    neighbours to entangle with), mirroring `_origin_leader_closes` above
+    and `test_market_scan.py`'s `_reentry_fixture` construction.
+
+    `trail=10`, `move_win=3`, `sigma=2.0`. 12 sessions: session 0 is a
+    throwaway base row (`pct_change` of the first row is always NaN),
+    sessions 1-10 are the `trail=10` baseline window with `as_of` landing
+    on session 10 (so `recent` is the overlapping tail sessions 8-10 --
+    the pre-existing Q-38 baseline/recent overlap, unchanged here, same as
+    `_origin_leader_closes`), and session 11 is the D-16 point-in-time
+    buffer.
+
+    Y is quiet for 7 sessions then jumps +0.05/+0.06/+0.04 over `move_win`
+    -- a large, unambiguous shock in the "up" direction. X is quiet for the
+    same 7 sessions on its own loosely-correlated values (enough that
+    `retrieve_neighbourhood`'s correlation always picks Y as X's one
+    neighbour -- confirmed directly below, `leaders == ["Y"]` in every
+    caller of this fixture); `x_recent` is the 3 values under each test's
+    control. Every z value used below was computed by running the real
+    `retrieve_neighbourhood` -> `leader_state` chain against this fixture
+    before the assertions were written, not assumed.
+    """
+    quiet_y = [0.001, -0.001, 0.0015, -0.0005, 0.001, -0.0015, 0.0005]
+    quiet_x = [0.0009, -0.0011, 0.0013, -0.0006, 0.0011, -0.0016, 0.0004]
+    y = quiet_y + [0.05, 0.06, 0.04]
+    x = quiet_x + list(x_recent)
+    idx = pd.bdate_range("2026-01-01", periods=12, tz="UTC")
+    r = {"Y": [0.0, *y, 0.0], "X": [0.0, *x, 0.0]}
+    return pd.DataFrame(
+        {k: 100 * np.cumprod([1 + v for v in vals]) for k, vals in r.items()}, index=idx
+    )
+
+
+def _run_lag_response_chain(closes: pd.DataFrame, cand: Candidate) -> dict:
+    """`retrieve_neighbourhood` -> `leader_state` -> `fuse_evidence`, the
+    real chain every PHASE-3 test below runs, over `_lag_response_closes`'s
+    `trail=10`/`move_win=3`/`sigma=2.0` context."""
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=closes, signal_universe=set(), trail=10, topk=20, move_win=3, sigma=2.0
+        )
+    )
+    edges = retrieve_neighbourhood({"candidates": [cand]}, rt)["lag_edges"]
+    shocks = leader_state({"candidates": [cand], "lag_edges": edges}, rt)["leader_shocks"]
+    return fuse_evidence({"candidates": [cand], "lag_edges": edges, "leader_shocks": shocks}, rt)
+
+
+def test_lag_response_open_when_candidate_has_not_moved():
+    """D3 "open", boundary case: `X` truly unmoved (`x_component == 0`) ->
+    `room_by_key[key] == 1.0`, `origin_status_by_key[key] == "open"`, one
+    `Evidence(kind="lag_response", symbol="Y", supports=True, weight=1.0)`.
+
+    Computed directly against `_lag_response_closes([0.0, 0.0, 0.0])`
+    (`retrieve_neighbourhood` -> `leader_state`) before writing this
+    assertion: `leaders == ["Y"]` (the correlation edge that keeps
+    `fuse_evidence`'s existing `if not leaders: continue` guard from
+    skipping this candidate), Y's z (`y_component`, `want=+1` for "up") is
+    `3.526436`, X's z is exactly `0.0` -- three genuinely zero returns in
+    the `move_win` window, not a near-zero float (a `[0.001, -0.002,
+    0.001]`-style offsetting fixture was tried first and left an
+    IEEE-noise residual of `-1.03e-13`, which is `< 0` and would have
+    misclassified as "opposed"; using literal zero returns avoids that
+    trap). `x_component == 0.0` is therefore safely `>= 0` and `<
+    y_component`, landing in "open" with `room == round(1 -
+    0/3.526436, 4) == 1.0` exactly.
+
+    Falsifies if: `room_by_key`/`origin_status_by_key` are absent (the keys
+    TASK-3.2 must add), `room` is anything other than exactly `1.0`, or no
+    `lag_response` `Evidence` is emitted with `supports=True`/`weight=1.0`.
+    """
+    closes = _lag_response_closes([0.0, 0.0, 0.0])
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+
+    fused = _run_lag_response_chain(closes, cand)
+
+    assert fused["room_by_key"][key] == 1.0
+    assert fused["origin_status_by_key"][key] == "open"
+    lag_ev = [e for e in fused["evidence"] if e.kind == "lag_response"]
+    assert len(lag_ev) == 1
+    assert lag_ev[0].symbol == "Y"
+    assert lag_ev[0].supports is True
+    assert lag_ev[0].weight == 1.0
+
+
+def test_lag_response_open_with_partial_room_when_candidate_partly_moved():
+    """D3 "open", interior case: `X` has moved partway (`0 < x_component <
+    y_component`) -> `0 < room < 1`, `origin_status == "open"`, same
+    `Evidence` shape as the unmoved case (`supports=True`).
+
+    Computed directly against `_lag_response_closes([0.005, 0.006, 0.004])`
+    before writing this assertion: `leaders == ["Y"]`, `y_component ==
+    3.526436`, `x_component == 3.318779`, giving `room == round(1 -
+    3.318779/3.526436, 4) == 0.0589` -- comfortably inside `(0, 1)`, not a
+    boundary value.
+
+    Falsifies if: `room` is `<= 0`, `>= 1`, or `origin_status` is anything
+    other than `"open"`; or the `lag_response` `Evidence` is missing or has
+    `supports=False`.
+    """
+    closes = _lag_response_closes([0.005, 0.006, 0.004])
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+
+    fused = _run_lag_response_chain(closes, cand)
+
+    room = fused["room_by_key"][key]
+    assert 0 < room < 1
+    assert fused["origin_status_by_key"][key] == "open"
+    lag_ev = [e for e in fused["evidence"] if e.kind == "lag_response"]
+    assert len(lag_ev) == 1
+    assert lag_ev[0].symbol == "Y"
+    assert lag_ev[0].supports is True
+    assert lag_ev[0].weight == 1.0
+
+
+def test_lag_response_responded_emits_no_evidence():
+    """D3 "responded": `X` has moved at least as much as `Y`, same
+    direction (`x_component >= y_component`) -> `origin_status ==
+    "responded"`, `room == 0.0`, and **no** `Evidence` with `kind ==
+    "lag_response"` anywhere in `evidence` -- the user's core distinction
+    (D2): "already responded" must not be able to manufacture a
+    corroborating or contradicting unit of its own.
+
+    Computed directly against `_lag_response_closes([0.06, 0.07, 0.05])`
+    before writing this assertion: `leaders == ["Y"]`, `y_component ==
+    3.526436`, `x_component == 3.540641` -- `x_component >= y_component` by
+    a clear margin (a deliberately non-identical raw jump, not a contrived
+    exact tie, since `X`'s own quiet baseline differs from `Y`'s and an
+    identical raw jump does not land exactly on the tie), landing in
+    "responded".
+
+    Falsifies if: `origin_status` is not `"responded"`, `room` is not
+    exactly `0.0`, or any `Evidence` in `fused["evidence"]` has `kind ==
+    "lag_response"` (whether `supports=True` or `False` -- either would be
+    the exact conflation D2 exists to prevent).
+    """
+    closes = _lag_response_closes([0.06, 0.07, 0.05])
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+
+    fused = _run_lag_response_chain(closes, cand)
+
+    assert fused["origin_status_by_key"][key] == "responded"
+    assert fused["room_by_key"][key] == 0.0
+    assert not any(e.kind == "lag_response" for e in fused["evidence"])
+
+
+def test_lag_response_opposed_when_candidate_moved_the_other_way():
+    """D3 "opposed": `X` moved against the thesis (`x_component < 0`) ->
+    `origin_status == "opposed"`, `room is None` (not "zero room" -- the
+    thesis is refuted, not merely spent, so no room figure applies), one
+    `Evidence(kind="lag_response", symbol="Y", supports=False, weight=1.0)`.
+
+    Computed directly against `_lag_response_closes([-0.05, -0.06, -0.04])`
+    before writing this assertion: `leaders == ["Y"]`, `y_component ==
+    3.526436`, `x_component == -3.512844` -- clearly negative, landing in
+    "opposed".
+
+    Falsifies if: `room_by_key[key]` is anything other than `None` (e.g. a
+    numeric `0.0`, collapsing "opposed" into "responded"), `origin_status`
+    is not `"opposed"`, or the `lag_response` `Evidence` is missing or has
+    `supports=True`.
+    """
+    closes = _lag_response_closes([-0.05, -0.06, -0.04])
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+
+    fused = _run_lag_response_chain(closes, cand)
+
+    assert fused["origin_status_by_key"][key] == "opposed"
+    assert fused["room_by_key"][key] is None
+    lag_ev = [e for e in fused["evidence"] if e.kind == "lag_response"]
+    assert len(lag_ev) == 1
+    assert lag_ev[0].symbol == "Y"
+    assert lag_ev[0].supports is False
+    assert lag_ev[0].weight == 1.0
+
+
+def test_lag_response_absent_when_origin_leader_is_unset():
+    """Corroboration-mode invariance guard (D2/D3): an `origin="external"`
+    candidate never sets `origin_leader` (PHASE-1 -- `None` by default), so
+    the whole PHASE-3 mechanism must be a no-op for it: no `room_by_key`/
+    `origin_status_by_key` entry for its key, and no `lag_response`
+    `Evidence` anywhere.
+
+    Reuses `_shocked_closes()`/`_candidate()` (default `origin_leader=None`,
+    `origin="external"`) -- the same fixture
+    `test_correlation_only_evidence_is_unchanged_by_the_supply_edge_fix`
+    already pins for the ordinary `leader_move` evidence, so this test also
+    confirms the new mechanism does not disturb that pre-existing,
+    unrelated evidence (the PHASE-3 halt condition's concern).
+
+    Falsifies if: `room_by_key`/`origin_status_by_key` gain a non-`None`
+    entry for this candidate's key (e.g. `None` being matched against a
+    literal column, per PHASE-2's analogous guard), or any `Evidence` with
+    `kind == "lag_response"` appears.
+    """
+    closes = _shocked_closes()
+    cand = _candidate(d=date(2026, 3, 26))
+    key = candidate_key(cand)
+    rt = _runtime(closes)
+    edges = retrieve_neighbourhood({"candidates": [cand]}, rt)["lag_edges"]
+    shocks = leader_state({"candidates": [cand], "lag_edges": edges}, rt)["leader_shocks"]
+
+    fused = fuse_evidence({"candidates": [cand], "lag_edges": edges, "leader_shocks": shocks}, rt)
+
+    assert fused["room_by_key"].get(key) is None
+    assert fused["origin_status_by_key"].get(key) is None
+    assert not any(e.kind == "lag_response" for e in fused["evidence"])

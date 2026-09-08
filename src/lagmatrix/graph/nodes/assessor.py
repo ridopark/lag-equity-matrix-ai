@@ -19,6 +19,8 @@ MIN_EFFECTIVE = 1.0
 def assess(state: LagMatrixState) -> dict:
     evidence_by_key = state.get("evidence_by_key", {})
     effective_by_key = state.get("effective_evidence_by_key", {})
+    room_by_key = state.get("room_by_key", {})
+    origin_status_by_key = state.get("origin_status_by_key", {})
     out: list[Assessment] = []
 
     for c in state.get("candidates", []):
@@ -57,6 +59,15 @@ def assess(state: LagMatrixState) -> dict:
                     f"powered test supports a probability (D-34)."
                 ),
                 ts=datetime.now(UTC),
+                origin_status=origin_status_by_key.get(key),
+                room=room_by_key.get(key),
             )
         )
     return {"assessments": out}
+
+
+def rank_by_room(assessments: list[Assessment]) -> list[Assessment]:
+    """Order by lag-response state: open (most room first), responded,
+    opposed, then None (corroboration mode / degenerate skip) — D-84."""
+    priority = {"open": 0, "responded": 1, "opposed": 2, None: 3}
+    return sorted(assessments, key=lambda a: (priority[a.origin_status], -(a.room or 0.0)))

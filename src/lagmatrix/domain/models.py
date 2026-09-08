@@ -65,7 +65,7 @@ class Candidate(BaseModel):
 class Evidence(BaseModel):
     """One corroborating or contradicting observation from the neighbourhood."""
 
-    kind: str  # "leader_move" | "co_mention" | ...
+    kind: str  # "leader_move" | "co_mention" | "lag_response" | ...
     symbol: str  # the neighbour it came from
     supports: bool  # False = contradicts (D-19: the layer must be able to disagree)
     weight: float  # independence-discounted, not 1.0 per neighbour (Q-12)
@@ -87,3 +87,11 @@ class Assessment(BaseModel):
     contradicting: list[Evidence]
     rationale: str
     ts: datetime
+    # "open" | "responded" | "opposed" | None — the lag-response classification
+    # of the candidate against its origin_leader; None for corroboration-mode
+    # candidates and the degenerate skip (D-84).
+    origin_status: str | None = None
+    # how much of the origin_leader's move is still ahead of the candidate, in
+    # (0, 1], or 0.0 ("responded"); None when opposed (refuted, not merely
+    # spent) or when origin_status is None (D-84).
+    room: float | None = None

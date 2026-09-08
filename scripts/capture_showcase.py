@@ -411,7 +411,8 @@ def main() -> None:
         "assessments": [
             {"symbol": a.candidate.symbol, "direction": a.candidate.direction,
              "verdict": a.verdict, "effective_evidence": round(a.effective_evidence, 3),
-             "n_supporting": len(a.supporting), "n_contradicting": len(a.contradicting)}
+             "n_supporting": len(a.supporting), "n_contradicting": len(a.contradicting),
+             "origin_status": a.origin_status, "room": a.room}
             for a in assessments
         ],
     }

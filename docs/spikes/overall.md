@@ -2256,11 +2256,29 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   project measured and did not find. It orders candidates against each other
   and is never shown as an expected return, target, or bp/% figure. This also
   keeps the change clear of `LagEdge.beta` entirely (Q-39).
-- **Outcome:** pending — the classification is green on synthetic fixtures
-  (five in `tests/test_nodes.py`), including the falsifying case where `X` has
-  already outrun `Y`; whether it changes what a reader would act on is unknown
-  until it is exercised on a real scan.
-- **Status:** Accepted
+- **Outcome:** **Built, and it does change verdicts — but not in the way the
+  design expected.** Exercised on the real 2026-05-11 scan (3,204 symbols swept,
+  255 movers, 19 candidates): the new input changed the verdict for **11 of 19**,
+  because those 11 had *no* correlated-neighbour evidence at all and were
+  previously unassessable — that is D-85's gate change doing the work, not the
+  classification. Where both inputs existed, all **8 of 8** agreed, which is
+  weak reassurance since both read the candidate's own move (Q-40).
+  Two findings against the design:
+  **(1) the `responded` bucket was empty — 0 of 19.** `x_component >= y_component`
+  means "the candidate moved at least as far as a company that just moved ≥2σ",
+  which almost nothing clears in a 3-session window. The state the user actually
+  asked for ("we don't care much about candidates that moved too much already")
+  therefore never fires. Logged as Q-41.
+  **(2) `origin_status` is perfectly collinear with `verdict` on this data** —
+  8 `open` → all `corroborated`, 11 `opposed` → all `contradicted`, exactly. The
+  label carries no information the verdict does not. The only genuinely new
+  quantity is `room`'s *magnitude*, which does spread (0.9859 … 0.3896, median
+  0.7453) and does order the open names against each other.
+  The falsifiability check the plan cared about still holds in the code
+  (`test_lag_response_already_responded_does_not_read_as_contradicted`); it just
+  has no real-data instance yet to exercise it.
+- **Status:** Accepted — but see Q-41; the three-way split is currently a
+  two-way sign test in practice
 
 ### D-85 — `fuse_evidence`'s `if not leaders: continue` gate now admits the origin-leader path
 - **When:** 2026-09-08T18:22:00-05:00
@@ -2289,6 +2307,7 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-41 | The `responded` bucket never fires — is `x >= y` the wrong bar for "already moved too much to enter"? | D-84, `graph/nodes/context_fusion.py`, `graph/nodes/assessor.py` | On the real 2026-05-11 scan, 0 of 19 candidates landed in `responded`, and none came close: the largest same-direction echo was HST at `room=0.3896`. D-84's threshold asks the candidate to have moved *at least as far as a ≥2σ shock* in the same 3-session window, which is a far higher bar than the one the feature exists to enforce — the user's ask was "candidates that moved too much would mean we would chase", i.e. *enough* of the move is gone that entry is unattractive, not *all* of it. In practice the working signal is a low `room`, and the three-way classification collapses to the sign of the candidate's own move. Answered by deciding what "too much" is — and that is exactly the kind of free parameter this project does not tune to make a story come out, so it needs either a stated prior (e.g. "half the leader's move is gone") owned as a judgement call, or a measurement of realised forward return conditioned on `room`, which needs the forward window D-74 already showed is a null. Not fixed inline: any threshold picked now would be picked to make the bucket non-empty. |
 | Q-40 | Are `lag_response` and correlation `leader_move` evidence independent enough to sit in one weighted sum? | D-84, `graph/nodes/context_fusion.py`, Q-12 | `Y` itself never double-counts — Q-37's `signal_universe` fix keeps the originating leader out of `X`'s own correlation pool — but a *third* symbol highly correlated with `Y` still contributes an ordinary `leader_move` unit alongside the `lag_response` unit, and the two are not weighted against each other. The independence discount (Q-12) operates within the correlation bloc only; it does not see `lag_response` at all, so a candidate discovered from `Y` and also neighboured by `Y`'s bloc can reach `MIN_EFFECTIVE` on what is arguably one observation counted twice. Mirrors Q-12's general unresolved question rather than worsening it. Answered by extending the cluster-size discount to cover the origin leader's bloc, or by measuring how often the two sources actually overlap on a real scan. |
 | Q-39 | `LagEdge.beta` carries two incompatible quantities, and the correlation one looks inverted — which is right? | `graph/nodes/graph_retriever.py:62`, `adapters/arango.py:63`, PLAN-2026-09-08-unresponded-lag | Two defects, both currently latent. **(a)** On a correlation edge `beta = corr * std(leader) / std(cand)`; on a supply edge it is `pct_revenue / 100`, an accounting ratio. One field, a volatility ratio and a revenue share, distinguished only by `relation`. **(b)** The correlation form is the reciprocal of the conventional beta for predicting the candidate from the leader (`corr * std(cand) / std(leader)`), so it appears inverted for the direction the pipeline cares about. Neither bites today: `grep -rn '\.beta\b' src/ tests/ scripts/` finds exactly one reader, a test asserting the supply edge's `pct_revenue`. Nothing in production reads it. The unresponded-lag work deliberately computes `room` from z-scores alone so it never touches `beta` — which is why this is logged rather than fixed inline. Answered by deciding what `beta` is *for*: if it is the transfer coefficient the lag hypothesis would want, it needs one meaning, the right orientation, and a test; if nothing will read it, it should be removed rather than left as a trap. |
 | Q-37 | Does `pipeline/runner.py` have the same leader re-entry hole as the live UI did? | D-23, `pipeline/runner.py`, REQ-7 | `runner.py:80` builds `signal_universe = {c.symbol for c in signals.candidates()}` — the identical pattern `serve.py` had before PHASE-5 fixed it. It is not a live bug today, because `runner.py` type-hints `signals: ExternalSignals | None` and no caller passes a `MarketScan`. It becomes one the moment scan mode is wired into the batch runner. Answered by either unioning `shocked_leaders()` there too, or by making the runner refuse a `MarketScan` until it does. **Answered 2026-09-08 by unioning.** It was worse than latent: line 80

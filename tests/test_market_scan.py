@@ -237,7 +237,16 @@ def _lag_edge(leader: str, lagger: str) -> LagEdge:
 def test_candidates_emits_one_per_lagger_with_scan_origin():
     """Falsifies if: `direction` is wrong, `origin` is not `"scan"`, or
     `SUP1` is missing/duplicated -- i.e. if traversal or candidate
-    construction from a shocked leader's reached lagger is broken.
+    construction from a shocked leader's reached lagger is broken. Also
+    falsifies if `origin_leader` is not `"LEADUP"` -- PHASE-1's field must be
+    populated with the claiming leader, not left at its `None` default.
+
+    The explicit `.origin_leader` assertion is load-bearing, not redundant
+    with the equality check below: pydantic's default `extra="ignore"`
+    silently drops an undeclared `origin_leader=` kwarg on *both* sides of
+    the equality before the field exists on `Candidate`, so the equality
+    alone would pass vacuously today regardless of what this test is meant
+    to pin.
     """
     closes, as_of = _shock_fixture()
     fake = FakeArangoTopology({"LEADUP": [_lag_edge("LEADUP", "SUP1")], "LEADDOWN": []})
@@ -245,7 +254,54 @@ def test_candidates_emits_one_per_lagger_with_scan_origin():
 
     result = scan.candidates(as_of)
 
-    assert result == [Candidate(symbol="SUP1", direction="up", as_of=as_of, origin="scan")]
+    assert result[0].origin_leader == "LEADUP"
+    assert result == [
+        Candidate(
+            symbol="SUP1", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
+        )
+    ]
+
+
+def test_candidates_records_the_claiming_leader_as_origin_leader():
+    """PHASE-1/TASK-1.1: `origin_leader` must name the specific leader whose
+    move produced this candidate (D1) -- the relationship the later
+    `lag_response` evidence (PHASE-3) will check, not merely a truthy
+    provenance flag.
+
+    Falsifies if: `origin_leader` is `None`, or is any symbol other than
+    `"LEADUP"` (e.g. the lagger's own symbol, or a hardcoded placeholder).
+    """
+    closes, as_of = _shock_fixture()
+    fake = FakeArangoTopology({"LEADUP": [_lag_edge("LEADUP", "SUP1")], "LEADDOWN": []})
+    scan = MarketScan(closes, fake, trail=TRAIL, move_win=MOVE_WIN, sigma=SIGMA)
+
+    result = scan.candidates(as_of)
+
+    assert result[0].origin_leader == "LEADUP"
+
+
+def test_external_signals_never_sets_origin_leader(tmp_path):
+    """D1/PHASE-1: corroboration mode must be untouched by this field --
+    `ExternalSignals.candidates()` never learns of a claiming leader, so
+    `origin_leader` must stay at its `None` default for every candidate it
+    emits.
+
+    Falsifies if: `origin_leader` is anything other than `None` for an
+    `ExternalSignals`-sourced candidate (e.g. a future refactor accidentally
+    threading a leader-shaped value, such as the row's own ticker, through
+    the shared `Candidate` constructor).
+    """
+    from lagmatrix.adapters.candidates import ExternalSignals
+
+    path = tmp_path / "fires.csv"
+    with path.open("w") as fh:
+        fh.write("ticker,posted_at,direction\n")
+        fh.write("SYNA,2026-05-29,up\n")
+
+    [cand] = ExternalSignals(path).candidates()
+
+    assert cand.origin == "external"
+    assert cand.origin_leader is None
 
 
 def test_candidates_reads_max_hops_and_as_of_from_self():
@@ -278,7 +334,14 @@ def test_candidates_dedups_by_larger_abs_z_leader():
     """Falsifies if: two `Candidate("SHARED", ...)` appear in the result, or
     the surviving one's direction comes from the smaller-`|z|` leader
     (`LEADDOWN`) instead of the larger one (`LEADUP`) -- and falsifies if the
-    winner flips depending on the fake's internal dict insertion order.
+    winner flips depending on the fake's internal dict insertion order. Also
+    falsifies if `origin_leader` names the loser (`LEADDOWN`) instead of the
+    larger-`|z|` winner (`LEADUP`) in either edge-map ordering.
+
+    The explicit `.origin_leader` assertion is load-bearing for the same
+    reason noted in `test_candidates_emits_one_per_lagger_with_scan_origin`:
+    pydantic silently drops the undeclared kwarg on both sides of the
+    equality before the field exists, so the equality alone cannot pin this.
     """
     closes, as_of = _shock_fixture()
     edges = {
@@ -286,7 +349,11 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         "LEADDOWN": [_lag_edge("LEADDOWN", "SHARED")],
     }
     reversed_edges = {"LEADDOWN": edges["LEADDOWN"], "LEADUP": edges["LEADUP"]}
-    expected = [Candidate(symbol="SHARED", direction="up", as_of=as_of, origin="scan")]
+    expected = [
+        Candidate(
+            symbol="SHARED", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
+        )
+    ]
 
     for edge_map in (edges, reversed_edges):
         fake = FakeArangoTopology(edge_map)
@@ -300,6 +367,7 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         )
         result = scan.candidates(as_of)
 
+        assert result[0].origin_leader == "LEADUP"
         assert result == expected
         assert len([c for c in result if c.symbol == "SHARED"]) == 1
 

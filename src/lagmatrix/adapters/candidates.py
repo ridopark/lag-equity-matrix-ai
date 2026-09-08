@@ -130,5 +130,6 @@ class MarketScan:
                     direction="up" if z > 0 else "down",
                     as_of=as_of,
                     origin="scan",
+                    origin_leader=leader,
                 )
         return sorted(claims.values(), key=lambda c: c.symbol)

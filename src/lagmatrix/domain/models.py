@@ -57,6 +57,9 @@ class Candidate(BaseModel):
     # intraday work but not yet read by any node (D-59/D-60)
     as_of_ts: datetime | None = None
     origin: str  # "external" | "scan" — provenance, kept so evaluation can slice on it
+    # the shocked leader this candidate was discovered from (`MarketScan` only);
+    # `None` for alert-fed (`origin="external"`) candidates
+    origin_leader: str | None = None
 
 
 class Evidence(BaseModel):

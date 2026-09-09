@@ -2996,6 +2996,39 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — not yet run at the time of writing
 - **Status:** Accepted
 
+### D-100 — Eleven corrupt returns inflated D-95's headline from 0.586 to 0.640
+- **When:** 2026-09-09T12:30:00-05:00
+- **Decision:** Correct the record: co-movement's out-of-sample replication is
+  **0.586**, not the 0.640 published today, and screen implausible returns inside
+  `comovement_edges` rather than only in one-off analysis.
+- **Why:** `data/bars-10y.parquet` holds **11 returns with `|pct_change| > 10`** —
+  GPOR +526x (2021-05-18), LINE +448x (2024-07-25), SN +116x, DBD +81x, VAL +71x,
+  CORZ +45x, and five smaller. Every one is a bankruptcy emergence, reverse split
+  or ticker reuse: a price-series discontinuity, not a return. They are not
+  outliers to respect, they are wrong numbers.
+  Found while debugging D-99, whose first run produced mean responses of
+  **11,612σ** — a 526x return divided by a 2% volatility. That absurdity was the
+  symptom; the same rows had been sitting quietly inside every other measurement
+  taken today.
+  Re-running D-95's exact procedure with those 11 rows masked:
+
+      as measured today (D-95)        1,236,371 pairs   corr(disc,val) = 0.640
+      with corrupt returns removed    1,236,372 pairs   corr(disc,val) = 0.586
+
+  **The conclusion is unchanged and still comfortable** — 0.586 against 0.03 for
+  the lagged version is the same qualitative gap, and every sector result
+  (PANW→CRWD/FTNT, PFG→MET/LNC/PRU) is unaffected because none of the 11 rows
+  falls in a recent 250-session window. But the number quoted on the live page
+  and in D-95 is inflated by data errors and must be corrected rather than
+  quietly left.
+  The alternative was fixing it only in the experiment scripts. Rejected: the
+  production `comovement_edges` reads the same file, so any `as_of` whose
+  trailing window spans one of those dates would carry the same distortion into
+  a stored edge. The screen belongs in the module.
+- **Outcome:** pending — screen being added to `comovement.py` under TDD; page
+  and D-95 to be corrected to 0.586 once it lands.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

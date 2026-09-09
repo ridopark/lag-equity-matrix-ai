@@ -93,3 +93,11 @@ class Assessment(BaseModel):
     # candidate's own move is unknown — recorded in `errors` rather than
     # guessed (D-86).
     description: str | None = None
+    # how many price-correlated neighbours fuse_evidence found for this
+    # candidate (D-91) -- a fact about what the pipeline looked at, not a
+    # claim about the market. Carries no weight and is never summed into
+    # `effective_evidence`; it exists only so a reader can tell "no
+    # neighbourhood to examine" (0) from "examined, and none of them moved"
+    # (>0, with `supporting` and `contradicting` both empty) -- the two
+    # were byte-identical before this field existed.
+    neighbours: int

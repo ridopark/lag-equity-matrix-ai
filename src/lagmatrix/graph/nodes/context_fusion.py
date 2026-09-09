@@ -5,6 +5,11 @@ several times, so a raw count of corroborating names overstates the evidence —
 and it overstates it most when the graph is working best, because the graph
 selects for correlation. Weight is 1/(cluster size) at a correlation threshold,
 so twenty names moving as one bloc contribute about one unit, not twenty.
+
+`neighbours_by_key` (D-91) is a different kind of count: how many
+price-correlated neighbours were considered at all, not weighted evidence
+about any of them. It exists so a reader can tell "looked and found nothing"
+from "didn't look" and never enters the weighting above.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
     evidence_by_key: dict[str, list[Evidence]] = {}
     effective_by_key: dict[str, float] = {}
     description_by_key: dict[str, str] = {}
+    neighbours_by_key: dict[str, int] = {}
     errors: list[str] = []
 
     for c in state.get("candidates", []):
@@ -96,6 +102,7 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
 
         evidence_by_key[key] = c_evidence
         effective_by_key[key] = round(c_effective, 3)
+        neighbours_by_key[key] = len(leaders)
         evidence.extend(c_evidence)
         effective += c_effective
 
@@ -105,5 +112,6 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
         "evidence_by_key": evidence_by_key,
         "effective_evidence_by_key": effective_by_key,
         "description_by_key": description_by_key,
+        "neighbours_by_key": neighbours_by_key,
         "errors": errors,
     }

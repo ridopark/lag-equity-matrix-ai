@@ -864,3 +864,129 @@ def test_description_never_emits_evidence():
     _, rt, state = _candidate_without_own_shock()
     missing = fuse_evidence(state, rt)
     assert not any(e.kind == "lag_response" for e in missing["evidence"])
+
+
+def test_neighbours_by_key_counts_correlation_leaders_regardless_of_whether_they_moved(closes):
+    """D-91: `neighbours_by_key` must count every price-correlated leader in
+    the neighbourhood -- `len(leaders)` -- not `len(movers)`. Three
+    correlation edges point at CAND (LEAD1/LEAD2/LEAD3 as `leader`, CAND as
+    `lagger`, the same shape as `corr_edge` above), but only LEAD1 gets a
+    `Shock`, so `movers == ["LEAD1"]` while `leaders` holds all three -- a
+    reader who wants "how many did we check" needs the former, not the
+    latter, which the card already shows via `n_supporting`/`n_contradicting`.
+
+    Falsifies if: `neighbours_by_key` is absent (`KeyError`), or its value
+    for this key is `1` -- that would mean movers, not leaders, are being
+    counted.
+    """
+    cand = _candidate(sym="CAND", d=date(2026, 6, 1))
+    key = candidate_key(cand)
+    edges = [
+        LagEdge(leader="LEAD1", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+        LagEdge(leader="LEAD2", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+        LagEdge(leader="LEAD3", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+    ]
+    state = {
+        "candidates": [cand],
+        "lag_edges_by_key": {key: edges},
+        "leader_shocks": {
+            key: [Shock(symbol="LEAD1", pct_change=0.05, sigma=3.0,
+                        lookback_days=60, date=cand.as_of)]
+        },
+    }
+    rt = _runtime(closes)
+
+    out = fuse_evidence(state, rt)
+
+    assert out["neighbours_by_key"][key] == 3
+
+
+def test_neighbours_by_key_is_zero_when_only_a_supply_edge_admits_the_candidate(closes):
+    """This is the defensive `leaders == []` code path (D-85/D-87's admit
+    gate exists for exactly it), reusing the exact fixture from
+    `test_fuse_evidence_admits_candidate_with_origin_leader_and_no_
+    correlation_leaders` verbatim. It is a unit case that guards the
+    counting logic, not the shape a real scan produces: on the real
+    2026-05-11 scan, `MarketScan`'s default `topk=20` against a
+    ~3,204-symbol universe gave every one of 19 candidates exactly 20
+    correlation leaders, so `leaders == []` never actually occurred there
+    (D-85's corrected Outcome). The common real-data null result is
+    `neighbours > 0` with zero movers, covered separately below.
+
+    `CAND` has `origin_leader="LEADUP"` and a `lag_edges_by_key` entry
+    containing only a supply edge (`leader="CAND"`, `lagger="SUPPLIER1"`),
+    so the `e.lagger == c.symbol` filter that builds `leaders` yields
+    nothing -- zero correlation-filtered neighbours -- even though the
+    candidate is still admitted to fusion via `origin_leader`.
+
+    Falsifies if: the count is anything other than `0`, or the key is
+    absent from `neighbours_by_key`.
+    """
+    cand = Candidate(
+        symbol="CAND", direction="up", as_of=date(2026, 6, 1), origin="scan",
+        origin_leader="LEADUP",
+    )
+    key = candidate_key(cand)
+    leader_shocks = {
+        key: [Shock(symbol="CAND", pct_change=0.001, sigma=0.1, lookback_days=60, date=cand.as_of)]
+    }
+    state = {
+        "candidates": [cand],
+        "lag_edges_by_key": {key: [_supply_edge("SUPPLIER1")]},
+        "leader_shocks": leader_shocks,
+    }
+    rt = _runtime(closes)
+
+    out = fuse_evidence(state, rt)
+
+    assert out["neighbours_by_key"][key] == 0
+
+
+def test_neighbours_count_never_affects_effective_evidence(closes):
+    """D-91's invariant, pinned exactly: `neighbours_by_key` carries no
+    weight and must never move `effective_evidence_by_key`. Same LEAD1
+    mover as the first test above, run twice -- once with all three
+    leaders present, once with only LEAD1 -- so the neighbour count
+    differs (3 vs 1) while the single mover and its `Shock` are identical
+    in both runs. In both cases `sub.shape[1] == 1` (a lone mover has no
+    cluster to discount against), so `rho is None`, `bloc = 1`, `w = 1.0`,
+    unaffected by how many other leaders exist and never moved.
+
+    Falsifies if: the two runs' `effective_evidence_by_key[key]` disagree,
+    or either is not exactly `1.0` -- either would mean a neighbour that
+    never moved is changing the weighted evidence, which is exactly how
+    `room` went wrong (D-87).
+    """
+    cand = _candidate(sym="CAND", d=date(2026, 6, 1))
+    key = candidate_key(cand)
+    all_three = [
+        LagEdge(leader="LEAD1", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+        LagEdge(leader="LEAD2", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+        LagEdge(leader="LEAD3", lagger="CAND", correlation=0.5, lag_days=0,
+                beta=0.3, relation="correlation"),
+    ]
+    only_lead1 = [all_three[0]]
+    leader_shocks = {
+        key: [Shock(symbol="LEAD1", pct_change=0.05, sigma=3.0,
+                    lookback_days=60, date=cand.as_of)]
+    }
+    rt = _runtime(closes)
+
+    out_three = fuse_evidence(
+        {"candidates": [cand], "lag_edges_by_key": {key: all_three}, "leader_shocks": leader_shocks},
+        rt,
+    )
+    out_one = fuse_evidence(
+        {"candidates": [cand], "lag_edges_by_key": {key: only_lead1}, "leader_shocks": leader_shocks},
+        rt,
+    )
+
+    assert out_three["neighbours_by_key"][key] == 3
+    assert out_one["neighbours_by_key"][key] == 1
+    assert out_three["effective_evidence_by_key"][key] == 1.0
+    assert out_one["effective_evidence_by_key"][key] == 1.0

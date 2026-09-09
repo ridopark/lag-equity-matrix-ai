@@ -135,6 +135,7 @@ def test_description_flows_through_to_assessment_without_affecting_verdict():
     assert "Y" in a.description
     assert a.verdict == "corroborated"
     assert a.effective_evidence == 1.0
+    assert a.neighbours == 1
 
 
 def test_description_reflects_a_move_against_the_thesis_end_to_end():
@@ -176,4 +177,60 @@ def test_description_is_none_for_corroboration_mode_candidates():
     out = _run_full_chain(closes, cand)
     a = out["assessments"][0]
 
+    assert a.description is None
+
+
+def _single_symbol_closes() -> pd.DataFrame:
+    """One column (`X`) only -- `_origin_move_closes`'s `X` column, same
+    quiet values and 12-session shape, with `Y` dropped entirely. Once `X`'s
+    own column is dropped from its own correlation pool (Q-26),
+    `retrieve_neighbourhood` has nothing left to rank, so `leaders == []`
+    genuinely -- not merely filtered out by weak correlation. This is the
+    real single-name shape behind the 11-of-19 candidates the 2026-05-11
+    scan admitted via `origin_leader` alone (D-85's corrected Outcome).
+    """
+    quiet_x = [0.0009, -0.0011, 0.0013, -0.0006, 0.0011, -0.0016, 0.0004]
+    x = quiet_x + [0.0, 0.0, 0.0]
+    idx = pd.bdate_range("2026-01-01", periods=12, tz="UTC")
+    vals = [0.0, *x, 0.0]
+    return pd.DataFrame({"X": 100 * np.cumprod([1 + v for v in vals])}, index=idx)
+
+
+def test_neighbours_is_zero_end_to_end_when_only_the_origin_leader_admits_the_candidate():
+    """D-91 end to end, the real `leaders == []` shape: `X`'s only neighbour
+    `Y` does not exist in the closes universe at all, so `retrieve_
+    neighbourhood` finds zero edges of any kind, yet the candidate still
+    reaches fusion because `origin_leader="Y"` alone admits it (D-85/D-87).
+
+    Correction to the plan's own assumption, verified directly against the
+    unmodified source before writing this assertion: `leader_state` only
+    computes *any* shock -- including the candidate's own -- when
+    `edges_for(state, c)` is non-empty (`leaders = [e.leader for e in
+    edges_for(state, c)]; if not leaders: continue`, `leader_state.py`).
+    With zero edges of any kind, `X`'s own move is never measured, so
+    `fuse_evidence`'s D-86 guard skips `description` for this key entirely
+    (and records the miss in `errors`, not visible from `assess()`'s return,
+    which carries only `assessments`). So `a.description` is `None` here,
+    unlike the two-column `_origin_move_closes` fixture used by
+    `test_description_names_the_origin_leader_and_signed_move_toward_the_
+    thesis` above, where `Y` is present and genuinely correlates, giving
+    `leaders != []` at both `retrieve_neighbourhood` and `leader_state`.
+    `a.neighbours == 0` and `a.description is None` together are the
+    genuine "nothing to look at, nothing to say" case.
+
+    Falsifies if: `a.neighbours` is anything other than `0`; `a.verdict`/
+    `a.effective_evidence` show any sign of manufactured evidence; or
+    `a.description` is not `None` (would mean a shock is being fabricated
+    for a candidate whose own move was never measured).
+    """
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+
+    out = _run_full_chain(_single_symbol_closes(), cand, trail=10, topk=20, move_win=3, sigma=2.0)
+    a = out["assessments"][0]
+
+    assert a.neighbours == 0
+    assert a.verdict == "neutral"
+    assert a.effective_evidence == 0.0
     assert a.description is None

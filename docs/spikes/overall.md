@@ -3330,11 +3330,39 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `Jan 1 2019` return a clean error instead of 8 and 13.
 - **Status:** Accepted
 
+### D-108 — Errors detectable before the response begins are a 400, answering Q-47
+- **When:** 2026-09-09T18:50:00-05:00
+- **Decision:** `/graph` and `/movers` catch `ValueError` and `send_error(400)`
+  before their general handler, matching what `/followers` and `/network`
+  already did.
+- **Why:** the rule, stated once so it stops being re-derived per endpoint:
+  **an error detectable before `send_response` is called is a 400.** `/graph`
+  and `/movers` build their whole body in memory first, so a `ValueError` there
+  can still choose its status — they were routing it through `_json`, which
+  hardcodes `send_response(200)`, so D-107's new malformed-`as_of` error came
+  back as 200 carrying an error body and a status-only client could not tell bad
+  input from a clean run.
+  `/run` is **not** an exception to this rule, which is the part I had wrong
+  when I framed the cycle. `red-status` corrected it: `/run`'s `limit` check
+  already 400s *because* it runs before the SSE headers are flushed, and only
+  what `stream()` discovers afterwards is structurally stuck in the body. One
+  rule, no carve-out.
+  The catch is deliberately narrow — `ValueError`, not `Exception`. An ArangoDB
+  outage or a missing parquet file is not bad input and must keep its existing
+  path. Verified by exercising a genuine non-input failure: a server started
+  without `--allow-real` raises `PermissionError` from `movers()`, and that
+  still returns 200 with an error body, unchanged.
+- **Outcome:** 216 passed. Live: `/graph?as_of=2019-1-1` and `/movers?as_of=zzzz`
+  both 400; `/graph?as_of=2019-01-01` returns its real 2 edges (HRL, TSN) with
+  disclosure sentences and 7 two-hop entries; `/movers?as_of=2026-09-04` returns
+  44 movers found from 3,201 swept.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-47 | `/graph` and `/movers` answer errors with HTTP 200 | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |
+| Q-47 | ~~`/graph` and `/movers` answer errors with HTTP 200~~ **ANSWERED by D-108** | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |
 | Q-46 | ~~The live tests share fixed database names, so two concurrent suites collide~~ **ANSWERED by D-106** — fixed in `tests/conftest.py` alone, and the two grounds given below for not fixing it were both wrong: it *is* reproducible on demand, and it touched one file, not five. | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |
 | Q-45 | Can the supply graph be deepened enough to test hop-dependent propagation at all? | D-92, D-88, D-78, `src/lagmatrix/edgar/relations.py` | D-92 could not answer its own question: only **4 of 105 suppliers (4%)** are themselves customers with suppliers, giving **6 hop-2 pairs** and a realised MDE of 0.39 against a 0.25 threshold. The graph is 76 depth-1 stars because only customers' 10-K concentration disclosures were ingested. Answered by ingesting the same disclosures for the 105 suppliers — the `edgar/relations.py` classifier and its migration script already exist and were audited at D-78, so this is acquisition, not new method — then re-running `scripts/experiment_hops_days.py` unchanged and re-reading its realised MDE. **Pre-commit before collecting:** the D-92 design, threshold and decision rule are re-used verbatim; deepening the graph must not be an excuse to re-specify the test. Worth knowing the ceiling first: if the second ingest still yields under ~50 hop-2 pairs, the MDE will stay above 0.25 and the question should be closed as unanswerable with 10-K-derived structure rather than pursued further. |
 | Q-44 | Should the graph be reshaped so retrieval that has no data dependency can actually run concurrently? | D-89, D-35, `graph/builder.py` | D-89 establishes that `vector_retriever`'s position after `graph_retriever` is a scheduling artefact — it needs only `c.symbol` (D-83) — but that it cannot simply be moved, because `context_fusion`'s join fires once per superstep in which any in-edge fires, and `evidence`/`errors` use concatenating reducers. So the pipeline serialises two independent lookups and the live page's own latency numbers understate what the design could do. Answered by one of: making `fuse_evidence` idempotent so a double firing is harmless (the honest general fix, and the one that would also make the graph robust to future joins); reconsidering `defer=True`, which D-35 declined for reasons that predate this evidence; or deciding the serialisation is acceptable and saying so on the page rather than leaving the diagram to imply a dependency that does not exist. Not urgent: the measured cost is one superstep of wall-clock on runs that complete in ~3 seconds. |

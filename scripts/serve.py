@@ -572,6 +572,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._json(movers((q.get("as_of") or [default_as_of()])[0],
                                   int((q.get("top_n") or ["25"])[0])))
+            except ValueError as e:
+                self.send_error(400, str(e))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return
@@ -623,6 +625,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 self._json(neighbourhood(sym, as_of))
+            except ValueError as e:
+                self.send_error(400, str(e))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return

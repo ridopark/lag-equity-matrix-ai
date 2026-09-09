@@ -2557,6 +2557,72 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending
 - **Status:** Accepted
 
+### D-92 — Pre-registration: does a shock propagate along the supply chain with a hop-dependent delay?
+- **When:** 2026-09-09T06:05:00-05:00
+- **Decision:** Run one test, specified in full **before any result is seen**,
+  of the project's central and still-untested claim. D-73/D-74 tested exactly
+  one cell of the relevant grid — hop 1, t+1, pooled, `b = −0.0015`. This tests
+  the *shape* across hops and horizons instead.
+
+  **Population.** The 818 `supplies_to` edges: 76 customers, 105 suppliers.
+  Hop 1 = a direct supplier of the leader; hop 2 = a supplier of one of those.
+  A (leader, follower, episode) triple is admitted only when the linking
+  filing's `filing_date <= ` the episode date (D-16 point-in-time, the same
+  guard `laggers_of` applies). Measured before writing this: **741 hop-1 pairs,
+  14,416 triples**, 67 leaders with ≥2σ episodes, median 18 episodes per pair
+  over 2016-09-06..2026-09-04. Hop-2 counts are not yet measured and are part
+  of the run.
+
+  **Episode.** A leader's non-overlapping 3-session window with `|z| >= 2.0`
+  on `shocks.standardised_moves` against a 60-session baseline — the same
+  definition `MarketScan.shocked_leaders` already uses, so the test measures the
+  thing the product actually keys on.
+
+  **Response.** For each follower, thesis-signed market-excess return over
+  `h ∈ {1, 2, 3, 5, 10}` sessions after the episode window, normalised by that
+  follower's own trailing volatility, market-excess against the equal-weighted
+  universe — matching D-73/D-74's construction so results are comparable.
+
+  **Primary test, one only.** Pooled OLS
+
+      excess(F, h) = a + b1·hop2 + b2·late + b3·(hop2 × late)
+
+  where `late = 1` for `h ∈ {5, 10}` and `0` for `h ∈ {1, 2}`. The propagation
+  story predicts **b3 > 0**: a hop-2 follower's response is relatively more
+  concentrated at longer horizons than a hop-1 follower's. This is a single
+  prediction about *ordering*, deliberately chosen over testing 20 grid cells
+  separately, where roughly one would clear α=.05 by chance.
+
+  **Economic threshold, declared now: b3 >= 0.25σ.** Chosen for cost, not for
+  significance: below roughly 0.25 of a follower's own sigma (~0.5%) a timing
+  differential cannot survive a round trip, whatever its p-value.
+
+  **Errors clustered by date** — every chain shares one market shock on a given
+  session. D-71's lesson, applied in advance rather than discovered afterwards.
+
+  **Mandatory secondary, from D-71:** the same interaction estimated per year,
+  with Cochran's Q and I². A pooled estimate resting on one regime is reported
+  as such.
+
+  **Decision rule, pre-committed.** Claim hop-dependent propagation only if
+  `b3 >= 0.25` **and** `z >= 2` with date-clustered errors **and** I² < 75%.
+  Any other outcome — including a large but heterogeneous estimate, or the right
+  sign below threshold — is reported as a null and closes the question.
+
+  **Power, stated before running.** D-88 established the binding constraint is
+  chains, not dates: 105 suppliers co-move, so effective independent information
+  is far below 14,416. The run reports its own realised MDE alongside the
+  estimate; if MDE exceeds the 0.25 threshold the test could not have detected
+  the effect it was looking for and is reported as **underpowered, not null** —
+  the distinction D-73 got wrong and D-74 existed to fix.
+- **Why:** the alternative was looking at the grid first and pre-registering
+  only if it looked promising. Rejected: D-59's own record notes that silently
+  amending a design after seeing the result "would be choosing the analysis
+  after seeing the result", and this project's credibility rests on not having
+  done that. Registering costs one commit.
+- **Outcome:** pending — not yet run at the time of writing
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -533,3 +533,83 @@ def test_comovement_edges_does_not_screen_out_a_genuine_large_move():
     xy = {frozenset((e.a, e.b)): e for e in edges}[frozenset(("X", "Y"))]
     assert xy.corr == pytest.approx(expected_xy, abs=1e-9)
     assert xy.n_sessions == n
+
+
+# --- min_abs_corr resource-exhaustion guard ----------------------------------
+#
+# `min_abs_corr=0` (or lower, or non-finite) makes `comovement_edges` compute
+# and return the full pairwise matrix: measured on the real 2,183-symbol data
+# this is ~2.38 million edges from ~100s of CPU and ~3.5GB RSS, versus 23,855
+# edges in 3.9s at the live UI's own default of 0.5. `abs(c) < nan` is always
+# `False` in Python, so a NaN threshold is not merely "a bad request" -- it
+# silently behaves exactly like 0, with no exception anywhere to catch. This
+# runs on a single-node cluster that also carries the owner's real-money
+# trading system, so driving it to OOM is not a local slowdown, it degrades
+# a neighbour. A floor of 0.1 is pinned below -- matching the live UI
+# slider's own minimum (`scripts/serve_index.html:268`, `min="0.1"`), so
+# every value the UI can ever send survives unclamped.
+
+
+def test_comovement_edges_clamps_non_positive_min_abs_corr_to_the_floor():
+    """`min_abs_corr=0.0` must be clamped up to the 0.1 floor, not left to
+    match every pair whose |corr| is merely non-negative. This fixture's
+    cross-bloc pairs all correlate below 0.1 in magnitude (verified above
+    with numpy: |corr(A,C)|=0.040, |corr(A,D)|=0.025, |corr(B,C)|=0.043,
+    |corr(B,D)|=0.009), so an unclamped call would return all 6 pairs while
+    a floor-respecting call returns only the 2 intra-bloc pairs -- exactly
+    matching an explicit `min_abs_corr=0.1` call.
+
+    Falsifies if: `min_abs_corr=0.0` returns more than 2 edges, or an edge
+    set/values that differ from calling with `min_abs_corr=0.1` explicitly --
+    either would mean 0.0 reached the correlation loop unclamped.
+    """
+    closes, as_of, expected = _two_bloc_closes()
+    for cols in [("A", "C"), ("A", "D"), ("B", "C"), ("B", "D")]:
+        c = float(np.corrcoef(expected[cols[0]], expected[cols[1]])[0, 1])
+        assert abs(c) < 0.1, f"fixture's {cols} pair must sit below the floor to test clamping"
+
+    unclamped = comovement_edges(closes, as_of, trail=60, min_abs_corr=0.0)
+    floored = comovement_edges(closes, as_of, trail=60, min_abs_corr=0.1)
+
+    assert len(unclamped) == 2, "min_abs_corr=0.0 must be clamped, not left to match every pair"
+    pairs_unclamped = {frozenset((e.a, e.b)): (e.corr, e.n_sessions) for e in unclamped}
+    pairs_floored = {frozenset((e.a, e.b)): (e.corr, e.n_sessions) for e in floored}
+    assert pairs_unclamped == pairs_floored
+
+
+def test_comovement_edges_clamps_negative_min_abs_corr_to_the_floor():
+    """A negative `min_abs_corr` is nonsensical -- it is a threshold on
+    `|corr|`, which is never negative -- and must be clamped exactly like
+    0.0, not treated as an even-looser-than-zero threshold that still lets
+    every pair through.
+
+    Falsifies if: `min_abs_corr=-1.0` returns a different edge count or edge
+    set than `min_abs_corr=0.1` (proving the floor only holds at exactly
+    0.0, not below it).
+    """
+    closes, as_of, _ = _two_bloc_closes()
+
+    negative = comovement_edges(closes, as_of, trail=60, min_abs_corr=-1.0)
+    floored = comovement_edges(closes, as_of, trail=60, min_abs_corr=0.1)
+
+    assert len(negative) == 2
+    pairs_negative = {frozenset((e.a, e.b)): (e.corr, e.n_sessions) for e in negative}
+    pairs_floored = {frozenset((e.a, e.b)): (e.corr, e.n_sessions) for e in floored}
+    assert pairs_negative == pairs_floored
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_comovement_edges_rejects_non_finite_min_abs_corr(bad):
+    """`abs(c) < nan` is always `False`, so a naive comparison lets a NaN
+    threshold silently compute the entire pairwise matrix -- worse than 0.0,
+    since there is no numeric ordering to clamp against. `+-inf` is equally
+    never a legitimate request (the UI's slider is bounded 0.1-0.95). Both
+    must be rejected outright, not silently reinterpreted as some other
+    number.
+
+    Falsifies if: this does not raise `ValueError`.
+    """
+    closes, as_of, _ = _two_bloc_closes()
+
+    with pytest.raises(ValueError):
+        comovement_edges(closes, as_of, trail=60, min_abs_corr=bad)

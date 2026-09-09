@@ -6,6 +6,14 @@ needs a real instance and seeds its own throwaway database — never the real
 `lagmatrix`. The connection helpers for those live here rather than being
 copy-pasted into three files, which is how they drifted out of sync with the
 application in the first place (Q-43).
+
+Those throwaway databases are per-process (Q-46). They used to be fixed names,
+so two suites running at once — routine here, with several agents working the
+same checkout — truncated each other's collections mid-test. Measured before
+the fix: two concurrent runs produced `6 failed, 8 errors` and `3 failed`,
+every failure in a live-ArangoDB file, while either run alone was green. A
+shared name made the suite report failures that had nothing to do with the
+code under test, which is worse than slow: it teaches you to distrust red.
 """
 
 from __future__ import annotations
@@ -47,6 +55,12 @@ def arango_password() -> str:
         return ""
 
 
+# Per-process, so concurrent runs cannot truncate each other (Q-46). The xdist
+# worker id is preferred when present; the pid covers plain concurrent runs.
+_RUN_ID = os.environ.get("PYTEST_XDIST_WORKER") or str(os.getpid())
+_CREATED: set[str] = set()
+
+
 def _unavailable(reason: str):
     """Fail when a live instance was promised, skip when it was not."""
     if REQUIRE_LIVE:
@@ -68,15 +82,45 @@ def arango_db_or_skip(db_name: str):
             pass
     except OSError as exc:
         _unavailable(str(exc))
+    if not db_name.startswith("test_"):
+        raise ValueError(
+            f"throwaway database names must start with 'test_', got {db_name!r} "
+            "— this guard exists so a typo can never point the suite at `lagmatrix`")
+    scoped = f"{db_name}_{_RUN_ID}"
     pw = arango_password()
     try:
         client = arango.ArangoClient(hosts=ARANGO_URL)
         sys_db = client.db("_system", username=ARANGO_USER, password=pw, verify=True)
-        if not sys_db.has_database(db_name):
-            sys_db.create_database(db_name)
-        return client.db(db_name, username=ARANGO_USER, password=pw)
+        if not sys_db.has_database(scoped):
+            sys_db.create_database(scoped)
+        _CREATED.add(scoped)
+        return client.db(scoped, username=ARANGO_USER, password=pw)
     except Exception as exc:
         _unavailable(str(exc))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop this process's throwaway databases, so they do not accumulate.
+
+    Only names this process actually created, and only ones carrying this run's
+    id — `lagmatrix` can never be reached from here.
+    """
+    if not _CREATED:
+        return
+    import arango
+
+    pw = arango_password()
+    try:
+        sys_db = arango.ArangoClient(hosts=ARANGO_URL).db(
+            "_system", username=ARANGO_USER, password=pw, verify=True)
+    except Exception:
+        return
+    for name in sorted(_CREATED):
+        assert name.startswith("test_") and name.endswith(f"_{_RUN_ID}"), name
+        try:
+            sys_db.delete_database(name)
+        except Exception:
+            pass
 
 
 

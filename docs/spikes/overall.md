@@ -3194,11 +3194,94 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `arangodb.lagmatrix:8529`.
 - **Status:** Accepted
 
+### D-104 — An unknown `source` returned invented data instead of an error
+- **When:** 2026-09-09T18:20:00-05:00
+- **Decision:** `load()` names `synthetic` explicitly and raises `ValueError` at
+  the end of the function. A `leader:` symbol is checked for shape and for
+  presence in the price file before it reaches pandas.
+- **Why:** `scripts/serve.py` ended `load()` with an unguarded
+  `return closes, ExternalSignals(SYNTHETIC_FIRES).candidates(), frozenset()`.
+  There was **no `if source == "synthetic"` anywhere** — synthetic data was
+  reached only by falling off the end, so `'nonsense'`, `'leader'` without a
+  colon, and `''` each returned six synthetic candidates as though the caller
+  had got what they asked for. Measured, not inferred, before any test was
+  written. Separately, `'leader:ZZZZZZ'` and `'leader:A B'` reached a pandas
+  column lookup and raised `KeyError: "None of [Index(['ZZZZZZ'], ...)] are in
+  the [columns]"` — an internal leaking out as a generic failure. Two failure
+  shapes, and the silent one is the worse: a typo in `?source=` produced a
+  plausible-looking run over data nobody asked for. Same class as D-100 and
+  Q-43 — a wrong answer delivered quietly instead of an error delivered loudly.
+  The alternative that lost was blocklisting the known-bad strings while keeping
+  the fallback; a test probing `'synthetic '` with one trailing space forecloses
+  it, since that matches no branch either and would have kept returning
+  synthetic data. The leader shape check reuses the `.isalnum()` rule
+  `/followers`, `/network` and `/graph` already applied (`serve.py:553-554`,
+  `:565-566`, `:578-579`); `/run` was the one entry point without it, and that
+  inconsistency is what started the cycle.
+- **Outcome:** 198 passed. Verified against a live server rather than by
+  reading: `/run?source=nonsense` and `?source=leader:ZZZZZZ` and
+  `?source=leader:AB;DROP` each return a clean SSE `event: error` naming the bad
+  value, with no traceback and no pandas internals; `?limit=99999` returns 400;
+  `?source=leader:PANW&as_of=2026-09-04` still streams CRWD/FTNT/OKTA over 36
+  events with zero errors.
+- **Status:** Accepted
+
+### D-105 — `/network`'s `top_n` is deliberately not readable from the query
+- **When:** 2026-09-09T18:22:00-05:00
+- **Decision:** Reverted, hours after adding it. `/network` keeps its default of
+  40 and ignores `top_n` in the query string; the parameter stays wired on
+  `/followers`, where a client actually sends it.
+- **Why:** my own brief for D-102 listed `top_n (1, 500)` under `/network`
+  without checking whether the handler read it. It did not — it silently used
+  the function default. Wiring it made a previously unreachable parameter
+  reachable. Checked against the actual client afterwards:
+  `serve_index.html:1091` sends `top_n` to `/followers`, `:1292` sends it to
+  `/movers`, and `:1274` sends `/network` only `symbol`, `as_of` and
+  `min_abs_corr`. So nothing wanted it, and exposing it hands an
+  unauthenticated caller a lever to make an endpoint that does real correlation
+  work build a 500-node graph where it could previously build 40 — widening
+  surface in the same week the exposure of this service is under review. The
+  alternative that lost was keeping it because it was already bounded and
+  tested. Bounded is not the same as warranted.
+- **Outcome:** Reverted with a comment at the call site saying why, so it is not
+  re-added by someone reading the other two handlers. 198 passed.
+- **Status:** Accepted
+
+### D-106 — Throwaway test databases are per-process, answering Q-46
+- **When:** 2026-09-09T18:24:00-05:00
+- **Decision:** `arango_db_or_skip` suffixes every throwaway database with the
+  xdist worker id or the pid, and a `pytest_sessionfinish` hook drops the ones
+  this process created.
+- **Why:** Q-46 logged this as real but declined to fix it, on two grounds that
+  both turned out to be wrong. It said the collision was "**not** reproducible
+  in normal use" — it reproduces on demand. Two suites started together gave
+  `6 failed, 184 passed, 8 errors` and `3 failed, 195 passed`, every failure in
+  a live-ArangoDB file, while either run alone was green. And it estimated "the
+  fix touches five files"; it touches one, because the per-process suffix
+  belongs in the shared helper rather than in each file's `ARANGO_DB_NAME`.
+  The five files hardcoded `test_comovement_store`, `test_arango_topology`,
+  `test_vector_index`, `test_market_scan`, `test_loader_idempotency`, and each
+  fixture truncates its collection per test — so a second process's truncate
+  lands in the middle of the first's test. Found by running the suite while an
+  agent was running it too, getting one failure that passed in isolation, and
+  reproducing it deliberately instead of writing it off as a flake. That is the
+  cost being paid: a shared name makes the suite report failures unrelated to
+  the code under test, which teaches you to distrust red. Q-43 fixed the mirror
+  image — tests green while verifying nothing.
+- **Outcome:** Three concurrent suites: 198, 198, 198, zero failures. Teardown
+  confirmed against the live instance — the 15 scoped databases those runs
+  created are gone, `lagmatrix` untouched. A guard rejects any name not starting
+  with `test_`, so a typo can never point the suite at the real database. The
+  five old fixed-name databases are now orphaned and were left in place rather
+  than dropped unasked.
+- **Status:** Accepted
+
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-46 | The live tests share fixed database names, so two concurrent suites collide | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |
+| Q-46 | ~~The live tests share fixed database names, so two concurrent suites collide~~ **ANSWERED by D-106** — fixed in `tests/conftest.py` alone, and the two grounds given below for not fixing it were both wrong: it *is* reproducible on demand, and it touched one file, not five. | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |
 | Q-45 | Can the supply graph be deepened enough to test hop-dependent propagation at all? | D-92, D-88, D-78, `src/lagmatrix/edgar/relations.py` | D-92 could not answer its own question: only **4 of 105 suppliers (4%)** are themselves customers with suppliers, giving **6 hop-2 pairs** and a realised MDE of 0.39 against a 0.25 threshold. The graph is 76 depth-1 stars because only customers' 10-K concentration disclosures were ingested. Answered by ingesting the same disclosures for the 105 suppliers — the `edgar/relations.py` classifier and its migration script already exist and were audited at D-78, so this is acquisition, not new method — then re-running `scripts/experiment_hops_days.py` unchanged and re-reading its realised MDE. **Pre-commit before collecting:** the D-92 design, threshold and decision rule are re-used verbatim; deepening the graph must not be an excuse to re-specify the test. Worth knowing the ceiling first: if the second ingest still yields under ~50 hop-2 pairs, the MDE will stay above 0.25 and the question should be closed as unanswerable with 10-K-derived structure rather than pursued further. |
 | Q-44 | Should the graph be reshaped so retrieval that has no data dependency can actually run concurrently? | D-89, D-35, `graph/builder.py` | D-89 establishes that `vector_retriever`'s position after `graph_retriever` is a scheduling artefact — it needs only `c.symbol` (D-83) — but that it cannot simply be moved, because `context_fusion`'s join fires once per superstep in which any in-edge fires, and `evidence`/`errors` use concatenating reducers. So the pipeline serialises two independent lookups and the live page's own latency numbers understate what the design could do. Answered by one of: making `fuse_evidence` idempotent so a double firing is harmless (the honest general fix, and the one that would also make the graph robust to future joins); reconsidering `defer=True`, which D-35 declined for reasons that predate this evidence; or deciding the serialisation is acceptable and saying so on the page rather than leaving the diagram to imply a dependency that does not exist. Not urgent: the measured cost is one superstep of wall-clock on runs that complete in ~3 seconds. |
 | Q-43 | The 9 ArangoDB-dependent tests cannot pass in this environment and skip silently — how should live tests fail loudly instead? | `tests/test_arango_topology.py`, `tests/test_vector_index.py`, `tests/test_market_scan.py`, `scripts/serve.py:52` | Measured 2026-09-09, two independent faults, both rendering as a clean `skip`: **(a)** the tests default to `http://localhost:8529` (`test_arango_topology.py:57`) while the app defaults to `http://localhost:19999` (`serve.py:52`) — 8529 is closed, 19999 is the live tunnel; **(b)** pointed at the correct URL they get `[HTTP 401][ERR 11] bad username/password`, because the tests do not read the credential from `~/.lagmatrix-arango-pw` the way `serve.py:72` does. So the whole graph layer — `ArangoTopology`, `MarketScan`'s live path, `NewsIndex` — has never been exercised by a passing test here, while the suite reports `111 passed, 9 skipped` and looks healthy. This is the same pathology already seen once in this project (a stale listener made live tests skip rather than fail); the skip-if-unreachable guard is doing exactly what it was written to do, which is the problem. Related but distinct: **nothing under `tests/` imports `scripts/serve.py` or `scripts/capture_showcase.py` at all**, so a broken import there leaves the suite fully green — demonstrated 2026-09-09 when deleting `rank_by_room` broke `serve.py`'s import and the suite still reported 111 passed. Answered by deciding what a live test should do when the dependency is absent: skip is right for a laptop with no tunnel, but there is currently no mode in which its absence is an error, so nobody ever learns the tests are dead. Options: an opt-in `LAGMATRIX_REQUIRE_LIVE=1` that converts skip to failure, aligning the default URL and credential lookup with `serve.py`'s, and a one-line import smoke test for the two scripts. |

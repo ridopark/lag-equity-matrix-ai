@@ -41,6 +41,18 @@ _DUPLICATE_MATCH_THRESHOLD = 0.5
 # cutoff is set where D-100 measured the actual break, not tuned against it.
 _IMPLAUSIBLE_RETURN_CUTOFF = 10.0
 
+# D-102: `min_abs_corr=0` (or lower, or non-finite) makes this function compute
+# and return the full pairwise matrix -- measured on the real 2,183-symbol data,
+# ~2.38 million edges from ~100s of CPU and ~3.5GB RSS, versus 23,855 edges in
+# 3.9s at the live UI's own default of 0.5. `abs(c) < nan` is always `False` in
+# Python, so a NaN threshold silently behaves exactly like 0 with no exception
+# to catch it. This is a guard against a resource-exhaustion request, not a
+# tuning knob: the floor matches the live UI slider's own minimum
+# (`scripts/serve_index.html:268`, `min="0.1"`), so no legitimate value is ever
+# clamped. Non-finite input is rejected outright rather than clamped, since
+# there is no numeric ordering to clamp a NaN against.
+_MIN_ABS_CORR_FLOOR = 0.1
+
 
 def comovement_edges(
     closes: pd.DataFrame,
@@ -53,6 +65,10 @@ def comovement_edges(
     measured over the `trail` sessions strictly before `as_of` (D-16: `as_of`'s
     own session is never in the window).
     """
+    if not math.isfinite(min_abs_corr):
+        raise ValueError(f"min_abs_corr must be finite, got {min_abs_corr!r}")
+    min_abs_corr = max(min_abs_corr, _MIN_ABS_CORR_FLOOR)
+
     session_dates = closes.index.date
     matches = np.where(session_dates == as_of)[0]
     if len(matches) == 0:

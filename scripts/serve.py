@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import io
 import json
+import math
 import os
 import pathlib
 import socket
@@ -153,7 +154,13 @@ def load(source: str, db=None, as_of: str | None = None
         from lagmatrix.adapters.candidates import CoMovementFollowers
 
         leader = source.split(":", 1)[1].upper()
+        # Same alnum check /followers, /network and /graph already apply to a
+        # symbol before using it — one malformed-input rule, not a fourth one.
+        if not leader.isalnum():
+            raise ValueError(f"leader symbol {leader!r} must be alphanumeric")
         closes = COMOVE_CLOSES()
+        if closes is None or leader not in closes.columns:
+            raise ValueError(f"leader symbol {leader!r} not in the price file")
         excluded = frozenset(
             ln.split(",")[0] for ln in
             pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
@@ -171,8 +178,10 @@ def load(source: str, db=None, as_of: str | None = None
         bars = pd.read_parquet("data/bars.parquet")
         closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
         return closes, ExternalSignals().candidates(), frozenset()
-    closes = pd.read_parquet(SYNTHETIC_CLOSES)
-    return closes, ExternalSignals(SYNTHETIC_FIRES).candidates(), frozenset()
+    if source == "synthetic":
+        closes = pd.read_parquet(SYNTHETIC_CLOSES)
+        return closes, ExternalSignals(SYNTHETIC_FIRES).candidates(), frozenset()
+    raise ValueError(f"unrecognised source: {source!r}")
 
 
 async def stream(source: str, limit: int | None, emit, *,
@@ -518,6 +527,21 @@ def neighbourhood(symbol: str, as_of: str) -> dict:
     return {"symbol": symbol, "as_of": as_of, "edges": rows, "twohop": two}
 
 
+def parse_bounded(raw: str, cast, lo, hi):
+    """Parse `raw` with `cast`, rejecting malformed, non-finite or out-of-
+    bounds values (D-102). A bare `float()`/`int()` on an attacker-controlled
+    query parameter puts no ceiling on the result and lets `nan`/`inf`
+    through silently -- `do_GET` turns this function's `ValueError` into a
+    400 instead.
+    """
+    value = cast(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{raw!r} is not finite")
+    if not lo <= value <= hi:
+        raise ValueError(f"{raw!r} is out of bounds [{lo}, {hi}]")
+    return value
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -553,8 +577,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, "symbol must be alphanumeric")
                 return
             try:
+                top_n = parse_bounded((q.get("top_n") or ["25"])[0], int, 1, 500)
+            except ValueError as e:
+                self.send_error(400, str(e))
+                return
+            try:
                 self._json(followers(s, (q.get("as_of") or [default_as_of()])[0],
-                                     top_n=int((q.get("top_n") or ["25"])[0])))
+                                     top_n=top_n))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return
@@ -565,8 +594,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, "symbol must be alphanumeric")
                 return
             try:
+                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.5"])[0], float, 0.1, 1.0)
+            except ValueError as e:
+                self.send_error(400, str(e))
+                return
+            try:
+                # `top_n` is deliberately NOT read from the query here. No client
+                # sends it (serve_index.html sends symbol/as_of/min_abs_corr only),
+                # and wiring it would hand an unauthenticated caller a lever to
+                # make this endpoint build a 500-node graph where it can only
+                # build 40 -- a wider surface for a parameter nobody asked for.
                 self._json(network(s, (q.get("as_of") or [default_as_of()])[0],
-                                   min_abs_corr=float((q.get("min_abs_corr") or ["0.5"])[0])))
+                                   min_abs_corr=min_abs_corr))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return
@@ -598,7 +637,14 @@ class Handler(BaseHTTPRequestHandler):
     def _run(self, q):
         source = (q.get("source") or ["synthetic"])[0]
         raw = (q.get("limit") or [""])[0]
-        limit = int(raw) if raw.isdigit() and int(raw) > 0 else None
+        if raw:
+            try:
+                limit = parse_bounded(raw, int, 1, 1000)
+            except ValueError as e:
+                self.send_error(400, str(e))
+                return
+        else:
+            limit = None
         as_of_str = (q.get("as_of") or [default_as_of()])[0]
 
         self.send_response(200)

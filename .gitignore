@@ -49,3 +49,6 @@ data/*
 
 
 # ArangoDB credentials live outside the repo (~/.lagmatrix-arango-pw)
+
+# stray scratch file, not part of the project
+src/hello.py

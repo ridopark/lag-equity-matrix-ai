@@ -246,6 +246,55 @@ async def stream(source: str, limit: int | None, emit, *,
     })
 
 
+def movers(as_of: str, top_n: int = 25) -> dict:
+    """Step 1 of the UI: what moved on this date, and which of those the graph covers.
+
+    Not a pipeline run — no LangGraph, no candidates, no verdicts. Just
+    `MarketScan.shocked_leaders`, which the scan already computes, plus a
+    follower count per mover so a reader can see what the graph does and does
+    not reach.
+
+    Coverage is the honest headline here and is always reported, not only when
+    it is bad: measured across 8 dates, 973 movers had 34 with any disclosed
+    supplier (3.5%), and two of those dates had none at all. Movers sort
+    covered-first then by |z|, so every covered name on a date is visible; the
+    rest fill the remaining slots as context rather than being hidden.
+    """
+    if not ALLOW_REAL:
+        raise PermissionError("movers needs real market data; start with --allow-real")
+    db = arango_db()
+    bars = pd.read_parquet("data/bars.parquet")
+    closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
+    excluded = frozenset(
+        ln.split(",")[0] for ln in
+        pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
+    )
+    d = date.fromisoformat(as_of or default_as_of())
+    topo = None
+    if db is not None:
+        from lagmatrix.adapters.arango import ArangoTopology
+        topo = ArangoTopology(db)
+    scan = MarketScan(closes, topo, excluded_symbols=excluded)
+    shocked = scan.shocked_leaders(d)
+    counts = {}
+    if topo is not None:
+        for sym in shocked:
+            try:
+                counts[sym] = len(topo.laggers_of(sym, 1, d))
+            except Exception:
+                counts[sym] = 0
+    rows = [{"symbol": s, "z": round(z, 3), "followers": counts.get(s, 0)}
+            for s, z in shocked.items()]
+    rows.sort(key=lambda r: (-(r["followers"] > 0), -abs(r["z"]), r["symbol"]))
+    return {
+        "as_of": str(d),
+        "swept": int(closes.shape[1]),
+        "movers_found": len(rows),
+        "customers_covered": sum(1 for r in rows if r["followers"] > 0),
+        "movers": rows[:top_n],
+    }
+
+
 def neighbourhood(symbol: str, as_of: str) -> dict:
     """Supply edges with their filing sentences, plus real two-hop co-mention.
 
@@ -292,6 +341,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/config":
             self._json({"allow_real": ALLOW_REAL, "graphrag": arango_db() is not None,
                         "arango_url": ARANGO_URL, "default_as_of": default_as_of()})
+            return
+        if url.path == "/movers":
+            q = parse_qs(url.query)
+            try:
+                self._json(movers((q.get("as_of") or [default_as_of()])[0],
+                                  int((q.get("top_n") or ["25"])[0])))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"})
             return
         if url.path == "/graph":
             q = parse_qs(url.query)

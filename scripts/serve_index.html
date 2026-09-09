@@ -98,6 +98,15 @@ line.gl{stroke:var(--line2);stroke-width:1}
 .legend span{font:400 .7rem/1 var(--mono);color:var(--ink3);display:flex;align-items:center;gap:.3rem}
 .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
 
+.story{margin:1.1rem 0 0;padding:0;list-style:none;counter-reset:st;
+  display:grid;gap:.75rem}
+.story li{counter-increment:st;position:relative;padding-left:2.1rem;
+  font-size:.88rem;line-height:1.55;color:var(--ink3)}
+.story li::before{content:counter(st);position:absolute;left:0;top:.05rem;
+  width:1.45rem;height:1.45rem;border-radius:50%;background:var(--panel2);
+  color:var(--ink2);font:500 .74rem/1.45rem var(--mono);text-align:center}
+.story li b{color:var(--ink);font-weight:500}
+.story .cnt{color:var(--graph);font:400 .78rem var(--mono)}
 .steps{margin:1rem 0 0;display:grid;grid-template-columns:auto 1fr;gap:.55rem 1.2rem;
   align-items:baseline}
 .steps dt{font:500 .86rem/1.4 var(--body);color:var(--ink);white-space:nowrap}
@@ -232,22 +241,32 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 
 <section>
   <p class="eyebrow">The run</p>
-  <h2>Execution graph</h2>
-  <p class="sub" id="ordernote" hidden><b>Scan-first changes what comes before this diagram, not
-    what is inside it.</b> Steps 1 and 2 at the top ran before the graph was entered: the market
-    was swept for companies that moved, and the graph was traversed to find who supplies them.
-    Only then does the pipeline below run, on the companies that search produced. In the other two
-    sources those first two steps do not exist — a company arrives from an alert feed and the
-    pipeline starts at <code>START</code>.</p>
-  <p class="sub"><b>In plain terms:</b> the work splits into one lane per company. Each lane does
-    two lookups — one in the graph, one in the news — then all the lanes merge back together
-    before any verdict is written. A box lights up only once that step has actually finished, so
-    what you see is the run, not a diagram of it.</p>
-  <p class="sub" style="margin-top:.5rem">The dashed line is a route the code offers but this run
-    didn't take: if a company had no neighbours at all, its lane would stop there instead of
-    continuing. <span style="color:var(--ink3)">(In LangGraph terms: <code>Send</code> fan-out per
-    candidate, parallel retrieval rejoining at <code>context_fusion</code>, and a conditional edge
-    to <code>END</code>.)</span></p>
+  <h2>How a company ends up on this list</h2>
+  <p class="sub">Four steps. The first two decide <i>which</i> companies are worth looking at; the
+    last two decide <i>what to think</i> about each one. Everything below is drawn from the run
+    itself — a box lights up only once that step has actually finished.</p>
+  <ol class="story">
+    <li><b>Find out what moved.</b> Sweep every company in the price file and keep the ones that
+      moved by an unusual amount in the last three sessions. Nothing about the graph is consulted
+      yet. <span id="s1n"></span></li>
+    <li><b>Ask who is connected to them.</b> For each of those movers, walk the supply graph to the
+      companies that named it as a customer in an annual report. Those become the candidates.
+      <span id="s2n"></span></li>
+    <li><b>Gather what is known about each candidate.</b> One lane per candidate, all running at
+      once. Each lane looks up the company's price-correlated neighbours and checks whether any of
+      them moved, and — at the same time — searches the news for the company itself.</li>
+    <li><b>Weigh it and answer.</b> The lanes merge, related companies that always move together
+      are discounted so one sector-wide wobble is not counted five times, and each candidate gets
+      one of three answers.</li>
+  </ol>
+  <p class="sub" style="margin-top:.8rem" id="ordernote"><b>Steps 1 and 2 only exist in
+    scan mode.</b> With an alert feed as the source, a company arrives already chosen and the run
+    starts at step 3 — the diagram below begins at <code>START</code> with nothing above it.</p>
+  <p class="sub" style="margin-top:.8rem">The dashed line is a route the code offers but this run
+    didn't take: a company with no related companies at all stops there instead of continuing.
+    <span style="color:var(--ink3)">(In LangGraph terms: <code>Send</code> fan-out per candidate,
+    parallel retrieval rejoining at <code>context_fusion</code>, and a conditional edge to
+    <code>END</code>.)</span></p>
   <div class="dia zoomable">
     <div class="zctl">
       <button data-z="out" title="Zoom out (−)" aria-label="Zoom out">−</button>
@@ -264,45 +283,54 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     <span><i style="background:var(--warn)"></i>interrupt gate</span>
   </div>
 
-  <h2 style="margin-top:2rem">What each step does</h2>
+  <h2 style="margin-top:2rem">The same four steps, in detail</h2>
+  <p class="sub">The name in grey under each one is the pipeline node, if you want to read the
+    code.</p>
   <dl class="steps">
-    <dt>find related companies <code>graph_retriever</code></dt>
-    <dd>Looks up the companies connected to this one — suppliers that named it as a customer in
-      an annual report, plus companies whose share price has historically moved with it.</dd>
+    <dt>1 · find out what moved <code>MarketScan.shocked_leaders</code></dt>
+    <dd>Sweeps every company in the price file and keeps those whose last three sessions are large
+      relative to their own recent volatility. This is where a run starts: no company is proposed
+      until something has actually happened to it.</dd>
 
-    <dt>see how they moved <code>leader_state</code></dt>
-    <dd>Checks whether any of those related companies actually moved by an unusual amount in the
-      days before. On most days, most of them did not — which is why so many runs come back
-      "neutral".</dd>
+    <dt>2 · ask who is connected <code>MarketScan.candidates</code></dt>
+    <dd>Walks the supply graph from each mover to the companies that named it as a customer in an
+      annual report, using only filings dated before the day being assessed. Each candidate
+      remembers which mover surfaced it.</dd>
 
-    <dt>search the news <code>vector_retriever</code></dt>
+    <dt>3a · see how neighbours moved <code>graph_retriever → leader_state</code></dt>
+    <dd>Looks up the companies whose share price has historically moved with this one, then checks
+      whether any of them moved unusually in the days before. On most days most of them did not,
+      which is why so many runs come back "neutral". The lookup has to come first here — you
+      cannot ask how a company's neighbours moved before knowing who they are.</dd>
+
+    <dt>3b · search the news <code>vector_retriever</code></dt>
     <dd>Searches 47,640 real headlines for the ones closest in meaning to this company's
-      situation. Runs at the same time as the step above, not after it.</dd>
+      situation. It needs only the company's ticker, so it runs at the same time as 3a rather than
+      after it. (It is still dispatched after the neighbour lookup, for a scheduling reason rather
+      than a real dependency — see <code>D-89</code>.)</dd>
 
-    <dt>weigh the evidence <code>context_fusion</code></dt>
-    <dd>Merges the two lanes back together and decides how much each moving company counts for.
-      Companies that always move together are discounted, so one sector-wide wobble is not
-      counted five times as five independent signals. <b>Only the price movements are counted
-      here.</b> The news is attached to the result and shown to you, but carries a weight of
-      exactly zero — see the note under the verdicts.</dd>
+    <dt>4 · weigh it <code>context_fusion</code></dt>
+    <dd>Merges the lanes and decides how much each moving company counts for. Companies that always
+      move together are discounted, so one sector-wide wobble is not counted five times as five
+      independent signals. <b>Only the price movements are counted here.</b> The news is attached
+      and shown to you, but carries a weight of exactly zero — see the note under the verdicts.</dd>
 
-    <dt>reach a verdict <code>assessor</code></dt>
-    <dd>Turns that weighted evidence into one of three answers: <b>corroborated</b>,
-      <b>contradicted</b>, or <b>neutral</b>.</dd>
+    <dt>4 · answer <code>assessor</code></dt>
+    <dd>Turns that weighted evidence into <b>corroborated</b>, <b>contradicted</b>, or
+      <b>neutral</b>.</dd>
 
     <dt>pause if contradicted <code>review</code></dt>
-    <dd>If any verdict came back contradicted, the run stops here and waits for confirmation
-      before anything is published. This is the step that makes the whole pipeline resumable —
-      it can halt mid-run and pick up later from a saved snapshot.</dd>
+    <dd>If any verdict came back contradicted, the run stops and waits for confirmation before
+      anything is published. This is the step that makes the pipeline resumable — it can halt
+      mid-run and pick up later from a saved snapshot.</dd>
 
     <dt>write the results <code>publisher</code></dt>
     <dd>Writes the finished assessments out. Nothing reaches this step until the pause above has
       been cleared.</dd>
 
     <dt>stop early <code>END</code></dt>
-    <dd>The dashed route. If a company turns out to have no related companies at all, there is
-      nothing to assess, so that branch stops instead of continuing. No branch took it this
-      run.</dd>
+    <dd>The dashed route. A company with no related companies at all has nothing to assess, so
+      that branch stops instead of continuing.</dd>
   </dl>
 
   <h2 style="margin-top:2.2rem">Where the work overlapped</h2>
@@ -489,7 +517,7 @@ fetch("/config").then(r => r.json()).then(c => {
   }
   // the note is what keeps the diagram from overclaiming, so it shows whenever
   // scan-first is selected — including at rest, before any run
-  $("#ordernote").hidden = $("#src").value !== "scan";
+  $("#s1n").textContent = ""; $("#s2n").textContent = "";
   drawTopo();
   $("#rag").className = "dot " + (c.graphrag ? "on" : "off");
   $("#ragtxt").textContent = c.graphrag
@@ -784,7 +812,7 @@ $("#src").addEventListener("change", () => {
   // the previous run's origination stages describe the source that produced
   // them, not the one now selected — drop them rather than show them stale
   SCAN = null;
-  $("#ordernote").hidden = $("#src").value !== "scan";
+  $("#s1n").textContent = ""; $("#s2n").textContent = "";
   drawTopo();
 });
 $("#go").addEventListener("click", () => {
@@ -805,7 +833,11 @@ $("#go").addEventListener("click", () => {
   es.addEventListener("start", ev => {
     const d = JSON.parse(ev.data);
     SCAN = d.scan || null;
-    $("#ordernote").hidden = !SCAN;
+    if (SCAN) {
+      $("#s1n").innerHTML = `<span class="cnt">this run: ${
+        SCAN.swept.toLocaleString()} swept → ${SCAN.movers} moved</span>`;
+      $("#s2n").innerHTML = `<span class="cnt">this run: → ${SCAN.found} candidates</span>`;
+    }
     drawTopo();
     startClock(`${d.candidates} candidate${d.candidates === 1 ? "" : "s"} · working`);
     if (d.candidates > 8) {

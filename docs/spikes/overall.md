@@ -2848,6 +2848,11 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   76. Face validity on real data is the strongest evidence it works: PANW returns
   CRWD/FTNT/OKTA/TENB/ZS, PFG returns MET/LNC/PRU/VOYA/CNO/AMP, JBL returns
   AEIS/BHE/LRCX/KN/FN — sectors nobody encoded anywhere.
+  **Corrected by D-100:** every `0.640` above is the figure as measured on
+  2026-09-09 and is wrong. Eleven corrupt returns (>1000%) inflated it; the
+  replication coefficient is **0.586**. The conclusion — co-movement replicates
+  out of sample, next-day prediction does not — is unchanged. Read D-100 before
+  quoting any number from this entry.
 - **Status:** Accepted
 
 ### D-96 — A shocked symbol's own next move is a coin flip; show the distribution, not a direction

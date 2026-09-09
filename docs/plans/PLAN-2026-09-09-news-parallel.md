@@ -1,5 +1,7 @@
 # PLAN-2026-09-09-news-parallel
 
+**Status: done.** `leader_state` and `vector_retriever` are drawn as siblings at the same rank in `scripts/serve_index.html`; `context_fusion`'s join is intact.
+
 **Goal:** Stop the live diagram implying `vector_retriever` depends on
 `graph_retriever`'s output — it doesn't, since D-83 — without breaking
 `context_fusion`'s exactly-once join, which the literal "Send it from `START`"

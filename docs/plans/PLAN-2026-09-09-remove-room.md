@@ -1,5 +1,7 @@
 # PLAN-2026-09-09-remove-room
 
+**Status: done.** `room` and `origin_status` are gone from `src/` and `scripts/`.
+
 **Goal:** Delete `room`, `origin_status`, `rank_by_room` and the `opposed`
 `lag_response` `Evidence` unit (D-87), and replace them with a single
 non-voting `description` field naming the candidate's own thesis-signed move

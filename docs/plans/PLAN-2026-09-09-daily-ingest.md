@@ -1,9 +1,18 @@
 # PLAN-2026-09-09-daily-ingest
 
+**Status: built, never run for real.** `scripts/daily_ingest.py` exists and its dry run passes. It has not executed a live ingest: that needs `ALPACA_API_KEY` / `ALPACA_SECRET_KEY`, and the data still ends 2026-09-04. See also the correction banner above.
+
 **Goal:** Give the project a daily, idempotent ingest pipeline for new bars and
 new news, and a new co-movement graph in ArangoDB — built and orchestrated so
 that running it twice is a no-op and a crashed run resumes rather than
 restarting.
+
+**Correction, after this plan was executed:** every `0.640` below is wrong.
+D-100 found eleven corrupt returns (>1000%) inflating D-95's headline; the
+replication coefficient is **0.586**. This matters most at the halt condition
+near the end of the file, which as written would halt on the *correct* number —
+TASK-4.3 reproduces 0.586, not 0.640. Nothing else in the plan changes: the
+pipeline it describes was built and is what runs.
 
 **Decisions this depends on:** D-97 (the loaders drop collections; nothing may
 run daily until they upsert — this plan's PHASE-1 exists solely to satisfy

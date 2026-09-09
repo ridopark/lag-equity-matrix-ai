@@ -1,5 +1,7 @@
 # PLAN-2026-09-08-unresponded-lag
 
+**Status: built, measured, then reversed.** The `room` measure was implemented and run; its `responded` bucket fired 0 of 19 times. D-87 deleted `room` and `origin_status` rather than keep an unfiring branch. Read this plan as a record of a measurement, not of shipped behaviour — nothing it describes is in the code.
+
 **Goal:** Judge a `MarketScan` candidate `X` by whether it still has room to
 follow the leader `Y` that produced it — corroborating while the gap is open,
 contradicting only when `X` has genuinely moved the wrong way, and ranking

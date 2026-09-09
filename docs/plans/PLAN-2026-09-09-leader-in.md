@@ -1,5 +1,7 @@
 # PLAN-2026-09-09-leader-in
 
+**Status: shipped, but by a different mechanism than planned.** The user-facing feature exists — pick a date, see what shocked, pick a leader, see its followers. Followers come from the measured co-movement graph (D-95), not from the supply graph this plan assumed; the filings graph covers 76 customers against co-movement's 1,709 symbols. Read the goal, not the mechanism.
+
 **Goal:** Let a user pick a date, see which companies moved by an unusual
 amount, choose one as a leader, and be shown its followers (from the supply
 graph), the filing sentence and news behind each, and each follower's

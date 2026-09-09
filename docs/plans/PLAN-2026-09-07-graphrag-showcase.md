@@ -1,5 +1,7 @@
 # PLAN-2026-09-07-graphrag-showcase
 
+**Status: done.** Both adapters are real (`adapters/arango.py`, `adapters/vector.py`), wired as retrieval nodes, and visible in the live UI.
+
 **Goal:** Turn `adapters/arango.py` and `adapters/vector.py` from two 21-line
 stubs into a real ArangoDB-backed multi-hop directed point-in-time graph
 traversal and a real CPU-embedded semantic search over the news corpus, wire

@@ -1,5 +1,7 @@
 # PLAN-2026-09-09-looked-vs-found
 
+**Status: not implemented.** `Assessment` still has no `neighbours` field, so a scan card still cannot distinguish "nothing to look at" from "looked, found nothing". Still open.
+
 **Goal:** Add a single, inert `neighbours` count to `Assessment` so a scan
 card's reader can tell "20 neighbours checked, none moved unusually" from a
 bare `0 supporting · 0 contradicting · effective evidence 0` that today reads

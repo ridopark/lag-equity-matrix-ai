@@ -1,5 +1,7 @@
 # PLAN-2026-09-08-market-scan
 
+**Status: done.** `MarketScan` exists in `src/lagmatrix/adapters/candidates.py` and is a gated source in `scripts/serve.py`.
+
 **Goal:** Implement `MarketScan` (`src/lagmatrix/adapters/candidates.py`) —
 the deferred scan-first `CandidateSource` — so candidate origination inverts
 from "an alert arrives, then the graph looks up its neighbours" to "the

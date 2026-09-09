@@ -1,5 +1,7 @@
 # PLAN-2026-09-03-langgraph-idioms
 
+**Status: done.** The refactor landed — `Send` fan-out, `RetryPolicy`, `CachePolicy` and `AsyncSqliteSaver` are what the pipeline runs on today.
+
 **Goal:** Refactor the LagMatrix graph onto LangGraph v1 idioms — `Send` fan-out,
 `Runtime` dependency injection, a durable checkpointer, `CachePolicy`,
 `RetryPolicy` + `timeout`, and `interrupt()` on a contradicted verdict — without

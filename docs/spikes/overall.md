@@ -2472,6 +2472,43 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   leader list.
 - **Status:** Accepted
 
+### D-90 — The pipeline has no lag in it, and the premise it is named for has been tested twice and failed
+- **When:** 2026-09-09T05:40:00-05:00
+- **Decision:** State plainly, in the log and on the page, that the shipped
+  pipeline is a **contemporaneous co-movement detector with a supply-chain
+  overlay** — not a lead-lag engine — and build the symbol-in mode the project's
+  stated purpose implies as a **descriptive** feature: relationships and
+  history, never a prediction.
+- **Why:** the user restated the goal as "given a leader, find followers it
+  affected historically, and show how the leader might move them." Checked
+  against the code, none of that is implemented as stated:
+  `graph_retriever.py:61` creates every correlation edge with
+  `lag_days=0,  # contemporaneous correlation; lag estimation is future work`,
+  and `lag_days` on a supply edge is graph *hops*, not time. Nothing in
+  `src/` computes a lagged relationship at all; the only shifted-series code is
+  in one-off `scripts/` experiments.
+  The premise itself is not merely unbuilt — it is measured null at both scales
+  anyone has tried, each pre-registered before the data was seen:
+  **D-59/D-60** (intraday, 1,174,267 minute bars, 83 candidate-dates, funds
+  excluded): 89.2% of dates peak at **lag 0**, sign test 16 up / 25 down,
+  **p = 1.000**; and **D-73/D-74** (daily, `supplier_excess(t+1) = a + b ·
+  customer_excess(t)`, threshold |b| >= 0.02): pooled **b = −0.0015**, z = +0.43.
+  D-88 then showed the contemporaneous supply co-move is explained by trailing
+  correlation with a *negative* residual. D-60's own words: "Genuine non-fund
+  peers move **with** the candidate at minute resolution, not before it, so the
+  condition the pipeline looks for — neighbours moved while the candidate has
+  not — barely occurs."
+  The alternative that lost was building the propagation estimate anyway, in
+  some softened form. Rejected for the same reason D-87 deleted `room`: it
+  would assert the one quantity this project has now gone looking for three
+  times and not found. What is left, and is genuinely worth building, is the
+  half that needs no forecast — a symbol-in front door (absent today; there is
+  no way to ask "given AAPL, show me its followers") and a per-pair track record
+  drawn from history, with its `n` stated, whose most likely honest reading is
+  "nothing consistent here".
+- **Outcome:** pending — planned in `docs/plans/PLAN-2026-09-09-leader-in.md`.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

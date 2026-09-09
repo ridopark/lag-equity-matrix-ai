@@ -3107,6 +3107,44 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the module imports.
 - **Status:** Accepted
 
+### D-102 — One unauthenticated GET can exhaust the node; request parameters get clamped
+- **When:** 2026-09-09T23:40:00-05:00
+- **Decision:** Clamp `min_abs_corr`, `top_n` and `limit` at the HTTP handlers,
+  **and** enforce a floor inside `comovement_edges` itself so no caller — not
+  just no HTTP caller — can request the full pairwise matrix. Reject non-finite
+  input rather than clamping it.
+- **Why:** found by a security review of the deployment, and verified directly.
+  `serve.py:569` passes `min_abs_corr` through a bare `float()` with no bound.
+  `comovement.py:88` filters on `abs(c) < min_abs_corr`, so:
+
+      min_abs_corr=0.5  ->     23,855 edges,   3.9s
+      min_abs_corr=0    ->  2,381,653 edges, 100.5s, peak RSS 3,560 MB
+
+  and **`min_abs_corr=nan` is identical to 0**, because `abs(c) < nan` is always
+  `False` — confirmed against `corr=0.0001`, where `0.0`, `-1.0` and `nan` all
+  keep the edge and only `0.5` drops it. `ThreadingHTTPServer` spawns a thread
+  per connection, so concurrent requests multiply it linearly.
+  **The reason this is not merely a performance bug:** the target is a
+  single-node cluster that also runs the owner's real-money trading system in
+  namespace `copytrade`. A namespace is not a memory or CPU boundary — driving
+  the node to OOM-kill degrades or evicts the trading pods regardless. The
+  comment at `infra/k8s/10-arangodb.yaml:5` claiming its own namespace means
+  "nothing here can touch the trading workloads" is **false for CPU and memory**,
+  and should be corrected when that manifest is next touched.
+  Two mitigating facts, recorded so the risk is not overstated: nothing is
+  exposed today (the server binds localhost and no Service exists yet), and the
+  HTTP surface never writes to ArangoDB — `upsert_comovement` is reachable only
+  from `daily_ingest.py`. What raises the stakes is `serve.py:116-117`: the
+  process holds the ArangoDB **root** password and connects as root, so anything
+  achieving code execution in the pod gets root on the database.
+  The alternative was relying on k8s `limits` alone. Rejected as insufficient on
+  its own: a limit converts node-wide exhaustion into a pod OOM-kill, which is
+  better but still a self-inflicted outage on every request, and it does nothing
+  for a caller who is merely careless rather than hostile. Both layers, not one.
+- **Outcome:** pending — TDD in flight; the test must assert the edge *count*
+  stays bounded, since that is the property under attack.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

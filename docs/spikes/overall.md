@@ -3109,7 +3109,25 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   reasons is a live question for the deployment plan, not settled here.
 - **Outcome:** pending — verified compatible, not yet implemented; TDD, and the
   red test must pin agreement with the *stored* vectors rather than merely that
-  the module imports.
+  the module imports. Confirmed still unimplemented on 2026-09-09: `uv.lock` has
+  zero `fastembed` entries and two `torch` ones, `pyproject.toml:22` still pins
+  `sentence-transformers>=6.0.1`, and `adapters/vector.py:16` still imports
+  `SentenceTransformer` at module scope. **Consequence for deployment:** the
+  homelab plan's halt condition — stop if `torch` is in `sys.modules` after
+  importing `lagmatrix.adapters.vector` — fires on the first image build. The
+  guard is working as designed; the point is that the build blocks on this,
+  and that is better known now than at build time.
+- **Correction to the reasoning above,** on two points others measured after
+  this entry was written. (1) "The constraint is the node's memory, not the
+  registry's disk" is **backwards**. torch costs about **104 MiB resident**, not
+  1.2 GB — the 1.2 GB is on-disk venv weight. The case for dropping it is image
+  size and pull time on a home-network-connected node, plus the roughly 7x cut
+  in dependency weight; it is not a memory argument. (2) The cited "~87% on
+  limits" from the sibling repo's manifest is **stale**. Measured directly:
+  memory limits sum to **114% of the node**, actual usage 79%, about **3.2 GiB
+  genuinely free**, on a single-node k3s box carrying 41 pods across 10
+  namespaces. The conclusion — drop torch — survives both corrections; the
+  argument for it does not.
 - **Status:** Accepted
 
 ### D-102 — One unauthenticated GET can exhaust the node; request parameters get clamped

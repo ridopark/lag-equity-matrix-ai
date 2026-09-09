@@ -2756,6 +2756,45 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   move anticipates a follower's.
 - **Status:** Accepted — the premise is answered, negatively and with power
 
+### D-94 — Two-hop chains beat a coin flip on direction and carry no magnitude; the hops idea closes
+- **When:** 2026-09-09T06:55:00-05:00
+- **Decision:** Close the multi-hop propagation line. Chains are not a route to
+  a prediction, and the product will not claim one.
+- **Why:** D-93 tested every *direct* pair and found nothing that replicates,
+  which already implies most of this — a chain is built from links, and a
+  two-hop path X→Y→Z with delays k1, k2 implies a direct X→Z relationship at
+  lag k1+k2, itself one of the 2.47M pairs D-93 nulled. But that argument does
+  not exclude a *conditional* effect: X predicting Z only when Y also moved, in
+  a way that cancels out of the marginal. That is a genuinely different
+  hypothesis, so it was tested rather than argued away
+  (`scripts/experiment_chains.py`, same windows, same market-excess
+  construction, same out-of-sample discipline).
+  890 chains formed from the 300 strongest links per leg, X-(1)->Y-(2)->Z,
+  evaluated as X→Z at lag 3:
+
+      chained X->Z             disc |c| 0.1113   val |c| 0.0250   sign 57.6%
+      random pairs, same lag   disc |c| 0.0265   val |c| 0.0248   sign 52.9%
+      binomial p vs 50%: 2.9e-06        lift over random: +4.7pp
+
+  **The sign effect is real and the magnitude effect is absent.** Chained pairs
+  agree on direction 57.6% of the time out of sample, p = 2.9e-06 — not noise.
+  But their validation `|corr|` is 0.0250 against random pairs' 0.0248: the same
+  number. Knowing the direction 57.6% of the time on an expected move of 0.025σ
+  (~0.05%) is not tradeable and is not a basis for any claim on the page.
+  Note also that random pairs score 52.9%, not 50% — the same procedural bias
+  D-93's shuffled control exposed at four of five lags. Measured against that
+  honest baseline the chain lift is **+4.7pp, not +7.6pp**, which is the number
+  that would have been reported by anyone comparing to a theoretical 50%.
+  Recorded as a null by the pre-committed standard (sign >= 60%, p < 0.01,
+  lift > 5pp): it fails the sign threshold and the lift threshold, and has no
+  magnitude at all.
+- **Outcome:** Verified. Together with D-93 this closes the premise: no direct
+  lagged structure, and no conditional structure via chains beyond a
+  sign-only effect with no size. What remains defensible is descriptive —
+  relationships, filings, news, contemporaneous co-movement — none of it
+  predictive.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

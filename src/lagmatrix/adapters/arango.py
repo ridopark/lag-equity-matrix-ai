@@ -18,7 +18,7 @@ from datetime import date
 
 from arango.database import StandardDatabase
 
-from lagmatrix.domain.models import LagEdge
+from lagmatrix.domain.models import ComovementEdge, LagEdge
 
 # Per-path (not per-edge) point-in-time guard: `ALL` requires every filing_date
 # on the path to be <= as_of, so a path is only traversable once every hop on
@@ -68,3 +68,76 @@ class ArangoTopology:
 
     def upsert_edge(self, edge: LagEdge) -> None:
         raise NotImplementedError
+
+
+# Point-in-time (D-16, D-82): filtered on `as_of`, not just symbol. Matches on
+# `a`/`b` directly rather than `_from`/`_to`, since only one direction per
+# pair is stored (D-95) and `movers_with` must find a symbol on either side.
+_MOVERS_WITH_AQL = """
+FOR e IN moves_with
+  FILTER e.as_of == @as_of
+  FILTER e.a == @symbol OR e.b == @symbol
+  FILTER ABS(e.corr) >= @min_abs_corr
+  RETURN e
+"""
+
+
+def upsert_comovement(
+    db: StandardDatabase, edges: list[ComovementEdge], as_of: date
+) -> None:
+    """Write co-movement edges into `moves_with`, creating it if absent and
+    never dropping it (D-97). Keyed deterministically on (a, b, as_of) so a
+    re-run for the same date replaces the existing document instead of
+    duplicating it.
+    """
+    if not db.has_collection("moves_with"):
+        db.create_collection("moves_with", edge=True)
+    collection = db.collection("moves_with")
+    for edge in edges:
+        collection.insert(
+            {
+                "_key": f"{edge.a}_{edge.b}_{as_of.isoformat()}",
+                "_from": f"equity/{edge.a}",
+                "_to": f"equity/{edge.b}",
+                "a": edge.a,
+                "b": edge.b,
+                "corr": edge.corr,
+                "n_sessions": edge.n_sessions,
+                "ci_low": edge.ci_low,
+                "ci_high": edge.ci_high,
+                "flag": edge.flag,
+                "as_of": as_of.isoformat(),
+            },
+            overwrite=True,
+        )
+
+
+def movers_with(
+    db: StandardDatabase, symbol: str, as_of: date, min_abs_corr: float = 0.5
+) -> list[ComovementEdge]:
+    """Co-movement edges involving `symbol` as measured `as_of` that date,
+    filtered on `abs(corr) >= min_abs_corr`. Empty list, not an error, if
+    `symbol` has no stored edges.
+    """
+    if not db.has_collection("moves_with"):
+        return []
+    cursor = db.aql.execute(
+        _MOVERS_WITH_AQL,
+        bind_vars={
+            "symbol": symbol,
+            "as_of": as_of.isoformat(),
+            "min_abs_corr": min_abs_corr,
+        },
+    )
+    return [
+        ComovementEdge(
+            a=row["a"],
+            b=row["b"],
+            corr=row["corr"],
+            n_sessions=row["n_sessions"],
+            ci_low=row["ci_low"],
+            ci_high=row["ci_high"],
+            flag=row["flag"],
+        )
+        for row in cursor
+    ]

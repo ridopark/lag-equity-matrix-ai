@@ -506,6 +506,11 @@ def neighbourhood(symbol: str, as_of: str) -> dict:
     Served on demand so clicking a node in the page is a live query, not a
     lookup into something baked in at build time.
     """
+    # Every sibling endpoint (movers/followers/network/load) parses as_of
+    # with date.fromisoformat before it reaches a query; this one didn't,
+    # so a malformed as_of compared as a raw string and silently leaked
+    # future filings into the traversal (D-16, D-82).
+    date.fromisoformat(as_of)
     db = arango_db()
     if db is None:
         return {"error": "ArangoDB not reachable"}

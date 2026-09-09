@@ -46,6 +46,22 @@ def arango_js(js: str, database: str = DB) -> str:
     return r.stdout
 
 
+def ensure_article_js() -> str:
+    """JS that creates the `article` collection if absent -- never drops it.
+
+    D-97: the two lines this replaces were
+    `if (db._collection("article")) { db._drop("article"); } db._create("article");`
+    and re-running them destroyed 47,640 embeddings and their vector index once
+    already. Documents are upserted by their stable Alpaca id below
+    (`overwriteMode:'replace'`), so a re-run refreshes what it re-embeds and
+    leaves everything else in place -- which is what makes a nightly job safe.
+    """
+    return """
+      if (!db._collection("article")) { db._create("article"); }
+      print("article collection ready");
+    """
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", default="2025-01-01")
@@ -80,11 +96,7 @@ def main() -> None:
                         normalize_embeddings=True)
     print(f"  {vecs.shape[0]:,} x {vecs.shape[1]} embeddings")
 
-    arango_js("""
-      if (db._collection("article")) { db._drop("article"); }
-      db._create("article");
-      print("article collection reset");
-    """)
+    arango_js(ensure_article_js())
     for i in range(0, len(df), CHUNK):
         part = df.iloc[i:i + CHUNK]
         docs = [{"_key": str(row.id), "date": row.date, "headline": row.headline[:300],

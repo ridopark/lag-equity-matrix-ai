@@ -264,9 +264,8 @@ def test_candidates_emits_one_per_lagger_with_scan_origin():
 
 def test_candidates_records_the_claiming_leader_as_origin_leader():
     """PHASE-1/TASK-1.1: `origin_leader` must name the specific leader whose
-    move produced this candidate (D1) -- the relationship the later
-    `lag_response` evidence (PHASE-3) will check, not merely a truthy
-    provenance flag.
+    move produced this candidate (D1) -- the relationship the `description`
+    mechanism (D-87) reads, not merely a truthy provenance flag.
 
     Falsifies if: `origin_leader` is `None`, or is any symbol other than
     `"LEADUP"` (e.g. the lagger's own symbol, or a hardcoded placeholder).

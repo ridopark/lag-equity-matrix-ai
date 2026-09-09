@@ -74,8 +74,7 @@ class LagMatrixState(TypedDict, total=False):
     effective_evidence: float
     evidence_by_key: Annotated[dict[str, list[Evidence]], _merge]
     effective_evidence_by_key: dict[str, float]
-    room_by_key: dict[str, float | None]
-    origin_status_by_key: dict[str, str | None]
+    description_by_key: dict[str, str]
 
     # assessor
     assessments: list[Assessment]

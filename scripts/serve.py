@@ -43,7 +43,6 @@ from capture_trace import detail  # noqa: E402
 from lagmatrix.adapters.candidates import ExternalSignals, MarketScan  # noqa: E402
 from lagmatrix.graph.builder import build_graph  # noqa: E402
 from lagmatrix.graph.context import LagMatrixContext  # noqa: E402
-from lagmatrix.graph.nodes.assessor import rank_by_room  # noqa: E402
 
 SYNTHETIC_CLOSES = "tests/fixtures/synthetic-closes.parquet"
 SYNTHETIC_FIRES = "tests/fixtures/synthetic-fires.csv"
@@ -218,14 +217,9 @@ async def stream(source: str, limit: int | None, emit, *,
                 "n_supporting": len(a.supporting),
                 "n_contradicting": len(a.contradicting),
                 "rationale": a.rationale,
-                "origin_status": a.origin_status,
-                "room": a.room,
+                "description": a.description,
             }
-            # Ranked unconditionally rather than gated on `source == "scan"`:
-            # every corroboration-mode `Assessment` has `origin_status=None`,
-            # so they all share one priority bucket and `sorted` is stable —
-            # the identity permutation, verified rather than assumed (D-84).
-            for a in rank_by_room(snap.values.get("assessments", []))
+            for a in snap.values.get("assessments", [])
         ],
     })
 

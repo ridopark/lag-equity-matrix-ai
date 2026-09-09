@@ -119,18 +119,14 @@ blockquote.rat{margin:.9rem 0 0;padding:.85rem 1rem;background:var(--panel);
 .card>header{padding:.75rem 1rem;border-bottom:1px solid var(--line);display:flex;
   align-items:baseline;gap:.5rem}
 .card>header b{font:500 .96rem/1 var(--mono)}
-.card>header span:not(.verdict):not(.room){font-size:.7rem;color:var(--ink3)}
-/* the meta span above must not swallow the badges: at (0,1,2) it outranks
-   .v-* / .r-* and was silently greying out every verdict pill. */
+.card>header span:not(.verdict){font-size:.7rem;color:var(--ink3)}
+/* the meta span above must not swallow the verdict pill: at (0,1,2) it
+   outranks .v-* and was silently greying every one of them out. */
 .lane{padding:.8rem 1rem}
 .verdict{font:500 .68rem/1 var(--mono);padding:.24rem .45rem;border-radius:3px;margin-left:auto}
 .v-corroborated{background:rgba(79,227,193,.13);color:var(--graph)}
 .v-contradicted{background:rgba(242,114,107,.13);color:var(--bad)}
 .v-neutral{background:var(--panel2);color:var(--ink3)}
-.room{font:500 .68rem/1 var(--mono);padding:.24rem .45rem;border-radius:3px;
-  background:var(--panel2);color:var(--ink3);margin-left:.35rem}
-.r-open{background:rgba(183,138,255,.14);color:var(--vector)}
-.r-opposed{background:rgba(242,114,107,.13);color:var(--bad)}
 .hl{font-size:.82rem;color:var(--ink2);margin:0}
 .hl+.hl{margin-top:.4rem;padding-top:.4rem;border-top:1px dotted var(--line2)}
 .score{font:400 .7rem/1 var(--mono);color:var(--ink3);margin-left:.3rem}
@@ -329,35 +325,32 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     moved, and asks whether that supports the idea that this company is about to move the same
     way. Three outcomes: <b>corroborated</b> (the neighbours agree), <b>contradicted</b> (they
     point the other way), or <b>neutral</b> (not enough moved to say).</p>
-  <p class="sub" style="margin-top:.6rem"><b>What actually decides it — and on scan runs it is
-    mostly one new thing.</b> Two inputs move the verdict. The first is <b>how price-correlated
-    neighbours moved</b>, unchanged, and measured to be worth nothing on its own: −4.6&nbsp;bp,
-    z&nbsp;=&nbsp;−0.72. The second exists only when the scan found the company itself — then
-    <b>whether the shocked company that surfaced it has already been echoed</b> counts too. On the
-    most recent full scan (19 candidates) that second input changed the verdict for
-    <b>11 of them</b>, because 11 had <i>no</i> correlated-neighbour evidence at all and were
-    previously dropped as unassessable. Where both inputs existed, all 8 agreed — which is less
-    reassuring than it sounds, since both read the candidate's own move, and how far they are
-    genuinely independent is an open question, not a settled one.</p>
-  <p class="sub" style="margin-top:.6rem"><b>Already moved is not the same as wrong.</b> A
-    candidate that has caught up with the company that surfaced it is marked
-    <b>already&nbsp;moved</b> and sorted toward the bottom, contributing no evidence in either
-    direction — the opportunity is spent, not refuted, and collapsing those two into one verdict
-    would bury good names among disproved ones. <b>Worth knowing: on that same scan, no candidate
-    landed in that bucket.</b> The bar is "moved at least as far as a company that just moved
-    two-plus standard deviations", which almost nothing clears in three sessions. So the state
-    label currently tells you nothing the verdict does not — every "open" name is corroborated and
-    every "moved against" name is contradicted, exactly. The one genuinely new number on a card is
-    <b>room</b>, and only its size distinguishes the open names from one another: on that scan it
-    ran from 0.99 down to 0.39.</p>
-  <p class="sub" style="margin-top:.6rem"><b>Room is a place to look, not a forecast.</b> It is a
-    comparison between candidates in each company's own volatility units, and nothing more. It is
-    deliberately not multiplied by any transfer coefficient, because we measured that coefficient
-    for this exact customer&nbsp;→&nbsp;supplier relationship and it came back
-    <code>b&nbsp;=&nbsp;−0.0015</code> against a pre-registered <code>0.02</code> threshold — a
-    null, on the wrong side of zero. So no expected move, no target, no figure in bp or per cent
-    appears on any card. Assuming some fraction of the leader's move must reappear in the
-    candidate would be asserting the one number this project went looking for and did not find.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What actually decides it — and it is one thing, in
+    every mode.</b> Of everything retrieved above, the verdict turns on a single input: <b>how
+    price-correlated neighbours moved</b>. Measured on its own, that input is worth nothing —
+    −4.6&nbsp;bp, z&nbsp;=&nbsp;−0.72. A card from a scan run also carries a one-line
+    <b>description</b> of what the company itself has already done and who surfaced it. Like the
+    news below, it is shown because a person judging the verdict should see it, and it is not
+    allowed to change it.</p>
+  <p class="sub" style="margin-top:.6rem"><b>There used to be a second input here. We measured it
+    and removed it.</b> It scored each scan candidate by how much of its leader's move was still
+    ahead of it — a ratio, sorted, with the least-moved names on top. Two independent measurements
+    killed it: a study over <b>432 scan dates and 13,063 supplier-events</b>, and a separate
+    rebuild over 30 dates and 209 linked events using different data and different code. Dividing
+    one company's move by another's quietly assumes the first should travel the second's full
+    distance; measured, that pass-through is <b>+0.18 the same day and about zero forward</b>, and
+    it does not grow with the size of the leader's shock in either sample. The ordering it existed
+    to produce was flat against forward returns in both. And the names it called "still has room"
+    earned <b>exactly what the names it called "moved against" earned</b> (+0.084 vs +0.084 in one
+    sample, −0.206 vs −0.206 in the other) — the split carried nothing the correlation vote above
+    did not already have. The co-movement it treated as a supply-chain effect turns out to be the
+    same trailing price correlation that vote already uses.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What replaced it is deliberately inert.</b> A sentence:
+    how far this company has already moved, in its own volatility units, and which shocked company
+    surfaced it. No threshold, no category, no ratio, no ranking — a fact about what already
+    happened, not a claim about what happens next. Removing a number is cheaper than defending one
+    that a measurement says is noise, and the finding is kept on the page rather than quietly
+    deleted with the code.</p>
   <p class="sub" style="margin-top:.6rem"><b>What still does not vote.</b> The news is fetched,
     scored, attached to the result and displayed, and then given a weight of <code>0.0</code> — it
     is context for a human reading the output. The supply-chain links do not vote either: those
@@ -835,23 +828,6 @@ $("#go").addEventListener("click", () => {
   es.addEventListener("interrupt", ev => {
     INTERRUPT = JSON.parse(ev.data).payload; drawTopo();
   });
-  /* Lag-response state, shown only when the scan discovered the candidate.
-     `room` is null for "opposed" (refuted, not merely spent) and for
-     corroboration-mode candidates, so null is handled explicitly rather than
-     printed. */
-  function roomBadge(a) {
-    if (a.origin_status === "open") {
-      const r = (a.room == null) ? "" : ` ${a.room.toFixed(2)}`;
-      return `<span class="room r-open" title="how much of the leader's move has not shown up in this name yet — a comparison between candidates, not a forecast">room${r}</span>`;
-    }
-    if (a.origin_status === "responded") {
-      return `<span class="room" title="this name has already matched the leader's move — the opportunity is spent, which is not the same as the idea being wrong">already moved</span>`;
-    }
-    if (a.origin_status === "opposed") {
-      return `<span class="room r-opposed" title="this name moved the other way — a genuine reversal, the one case that counts against the idea">moved against</span>`;
-    }
-    return "";
-  }
   es.addEventListener("done", ev => {
     const d = JSON.parse(ev.data);
     stopClock();
@@ -860,10 +836,11 @@ $("#go").addEventListener("click", () => {
       ${d.total_ms.toFixed(0)} ms · thread ${esc(d.thread_id || "")}`;
     $("#verdicts").innerHTML = d.assessments.length ? d.assessments.map(a => `<div class="card">
         <header><b>${esc(a.symbol)}</b><span>${esc(a.direction)} · ${esc(a.as_of)}</span>
-          <span class="verdict v-${esc(a.verdict)}">${esc(a.verdict)}</span>${roomBadge(a)}</header>
+          <span class="verdict v-${esc(a.verdict)}">${esc(a.verdict)}</span></header>
         <div class="lane"><p class="hl">${a.n_supporting} supporting ·
           ${a.n_contradicting} contradicting · effective evidence
-          ${a.effective_evidence}</p></div></div>`).join("")
+          ${a.effective_evidence}</p>${a.description ? `<p class="hl">${esc(a.description)}</p>` : ""}
+          </div></div>`).join("")
       : '<p class="empty">No assessments.</p>';
     const bad = d.assessments.find(a => a.verdict === "contradicted" && a.rationale);
     if (bad) {

@@ -285,6 +285,7 @@ async def stream(source: str, limit: int | None, emit, *,
                 "n_contradicting": len(a.contradicting),
                 "rationale": a.rationale,
                 "description": a.description,
+                "neighbours": a.neighbours,
             }
             for a in snap.values.get("assessments", [])
         ],

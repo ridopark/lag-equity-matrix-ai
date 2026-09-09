@@ -2554,7 +2554,13 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   neighbour count is a fact about what the pipeline did, and must stay that.
   Pinned by a test asserting `effective_evidence` is unchanged across two runs
   whose neighbour counts differ.
-- **Outcome:** pending
+- **Outcome:** Done. The count reaches the card, which was the whole point and
+  was missing until now — the field shipped in `889a3f2` but was never put in the
+  SSE payload, so it existed and nobody could see it. A scan card now reads
+  `0 supporting · 0 contradicting · effective evidence 0 · 20 related companies
+  checked, none moved unusually` instead of trailing off after the zero. The
+  invariant holds: `test_neighbours_count_never_affects_effective_evidence`
+  still requires 1.0 with three leaders and with one.
 - **Status:** Accepted
 
 ### D-92 — Pre-registration: does a shock propagate along the supply chain with a hop-dependent delay?
@@ -2835,7 +2841,13 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   Coverage, which blocked everything else: **1,573 symbols** with measurable
   relationships against **76 customers** in the filings graph — about 20x — and
   it needs no new data collection, which is what Q-45 would have required.
-- **Outcome:** pending — measured, not yet built into the pipeline
+- **Outcome:** Built and in production use. `src/lagmatrix/comovement.py`
+  (14 tests), persisted via `upsert_comovement` into `moves_with` (23,857 edges
+  as of 2026-09-04), read by `/followers`, and driving `CoMovementFollowers` as a
+  third `CandidateSource`. Coverage is 1,709 symbols against the filings graph's
+  76. Face validity on real data is the strongest evidence it works: PANW returns
+  CRWD/FTNT/OKTA/TENB/ZS, PFG returns MET/LNC/PRU/VOYA/CNO/AMP, JBL returns
+  AEIS/BHE/LRCX/KN/FN — sectors nobody encoded anywhere.
 - **Status:** Accepted
 
 ### D-96 — A shocked symbol's own next move is a coin flip; show the distribution, not a direction
@@ -2861,7 +2873,9 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   within ±1.4σ, continuing 48% of the time." That tells a reader not to chase,
   which is real information, and it is the only probabilistic statement about a
   single symbol this data supports.
-- **Outcome:** pending — measured, not yet on the page
+- **Outcome:** Done. Shown in the explorer beneath the follower list, as a
+  distribution rather than a direction: "it continued in the same direction 48.7%
+  of the time — a coin flip — with a spread of ±1.43σ around zero".
 - **Status:** Accepted
 
 ### D-97 — The loaders drop collections; nothing may run daily until they upsert

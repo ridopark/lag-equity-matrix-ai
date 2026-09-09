@@ -943,6 +943,16 @@ $("#go").addEventListener("click", () => {
   es.addEventListener("interrupt", ev => {
     INTERRUPT = JSON.parse(ev.data).payload; drawTopo();
   });
+  /* D-91. "0 supporting - 0 contradicting" reads like nothing happened. Usually
+     twenty companies were checked and none of them moved, which is a result. The
+     count is a fact about what was examined and never touches the verdict. */
+  function checked(a) {
+    if (a.neighbours == null) return "";
+    if (!a.neighbours) return " · no related companies to check";
+    const none = !a.n_supporting && !a.n_contradicting;
+    return ` · ${a.neighbours} related companies checked${none ? ", none moved unusually" : ""}`;
+  }
+
   es.addEventListener("done", ev => {
     const d = JSON.parse(ev.data);
     stopClock();
@@ -954,7 +964,7 @@ $("#go").addEventListener("click", () => {
           <span class="verdict v-${esc(a.verdict)}">${esc(a.verdict)}</span></header>
         <div class="lane"><p class="hl">${a.n_supporting} supporting ·
           ${a.n_contradicting} contradicting · effective evidence
-          ${a.effective_evidence}</p>${a.description ? `<p class="hl">${esc(a.description)}</p>` : ""}
+          ${a.effective_evidence}${checked(a)}</p>${a.description ? `<p class="hl">${esc(a.description)}</p>` : ""}
           </div></div>`).join("")
       : '<p class="empty">No assessments.</p>';
     const bad = d.assessments.find(a => a.verdict === "contradicted" && a.rationale);

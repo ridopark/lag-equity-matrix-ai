@@ -978,11 +978,13 @@ def test_neighbours_count_never_affects_effective_evidence(closes):
     rt = _runtime(closes)
 
     out_three = fuse_evidence(
-        {"candidates": [cand], "lag_edges_by_key": {key: all_three}, "leader_shocks": leader_shocks},
+        {"candidates": [cand], "lag_edges_by_key": {key: all_three},
+         "leader_shocks": leader_shocks},
         rt,
     )
     out_one = fuse_evidence(
-        {"candidates": [cand], "lag_edges_by_key": {key: only_lead1}, "leader_shocks": leader_shocks},
+        {"candidates": [cand], "lag_edges_by_key": {key: only_lead1},
+         "leader_shocks": leader_shocks},
         rt,
     )
 

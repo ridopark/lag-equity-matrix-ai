@@ -2656,6 +2656,70 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   data-acquisition task with a known method, not a modelling problem.
 - **Status:** Accepted — result is *underpowered*, question remains open; see Q-45
 
+### D-93 — Pre-registration: does ANY lagged pairwise structure survive out-of-sample, across the whole history?
+- **When:** 2026-09-09T06:30:00-05:00
+- **Decision:** Test the project's premise at full scale and in its most general
+  form, specified **before any result is seen**. Not news-anchored, not
+  supply-graph-restricted: every pair of symbols, every lag, ten years.
+
+  **Data.** `data/bars-10y.parquet` — 2,183 symbols, 2,514 sessions
+  (2016-09-06..2026-09-04). Returns are **market-excess** (each session's
+  equal-weighted universe mean subtracted) before anything else. Without this
+  every pair correlates through market beta and the exercise measures the index.
+
+  **Split, by time, no shuffling.** Discovery = the first 60% of sessions.
+  Validation = the last 40%. A pair selected in discovery is tested only on
+  validation. This is the entire defence against 4.8M pairs per lag: at α=.05,
+  roughly 240,000 pairs would clear on noise alone, so in-sample significance
+  is worthless and is not used as a criterion anywhere.
+
+  **Lags.** `k ∈ {1, 2, 3, 5, 10}` sessions. For each k, the full pairwise
+  lagged correlation `corr(X_t, Y_{t+k})` over the discovery window.
+
+  **Selection.** The top 1,000 pairs by `|lagged corr|` in discovery, per lag.
+  Self-pairs excluded. Both directions of a pair are distinct (X leads Y is not
+  Y leads X).
+
+  **Primary test, one only.** Of those selected pairs, what fraction show the
+  **same sign** of lagged correlation in the validation window? Under the null
+  that discovery found only noise, this is 50%. Binomial test against 0.5.
+
+  **Economic threshold, declared now: sign-agreement >= 60%, AND mean
+  |lagged corr| in validation >= 0.03.** The second condition matters
+  independently: a 58% sign rate on correlations of 0.004 is statistically
+  detectable at n=1,000 and economically nothing. Both must hold.
+
+  **Decision rule, pre-committed.** Claim exploitable lagged structure only if
+  a lag `k` shows sign-agreement >= 60% **and** validation mean
+  `|corr| >= 0.03` **and** binomial p < 0.01. Anything else — including a
+  significant sign rate on trivial magnitudes — is a null for that lag, and a
+  null at every lag closes the question.
+
+  **Mandatory secondary.** Report the same statistics for a **shuffled control**:
+  the identical procedure with validation-window dates randomly permuted, which
+  destroys any real lead-lag while preserving each series' own distribution. If
+  the control shows a comparable sign-agreement rate, the primary result is an
+  artefact of the procedure rather than of the market, and is reported as such
+  regardless of what the primary number was.
+
+  **Power.** n=1,000 selected pairs per lag gives a standard error on the sign
+  rate of ~1.6pp, so 60% vs 50% is detectable with wide margin. Unlike D-92,
+  this test is not sample-limited — if it returns a null, that null is real.
+- **Why:** the alternative was scanning for pairs and reporting the best ones,
+  which is what almost every version of this idea does and is exactly how
+  240,000 false positives get published as a signal. Out-of-sample validation
+  costs one extra window and makes the answer trustworthy either way. The
+  shuffled control was added because a time-split alone does not protect against
+  a procedural artefact (e.g. persistent volatility clustering producing sign
+  agreement with no lead-lag content at all).
+  Also rejected: restricting to the supply graph or to news-anchored events.
+  Both are strict subsets of this test, both are coverage-limited (76 customers;
+  20 months of articles), and both have already returned nulls or underpowered
+  results (D-74, D-88, D-92). If general lagged structure does not exist, no
+  subset of it will.
+- **Outcome:** pending — not yet run at the time of writing
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

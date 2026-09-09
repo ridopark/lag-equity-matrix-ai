@@ -14,7 +14,7 @@ discover/validate split as D-93/D-94 across 1,236,371 pairs:
 A pair measured at 0.6-0.7 lands at 0.587 +/- 0.167 four years later with its
 sign intact 98% of the time — mild, consistent shrinkage. That replication is
 about the *relationship*, not a forecast: same-day co-movement replicates at
-0.640, next-day prediction replicates at 0.028 (D-93, D-94, both null). Nothing
+0.586, next-day prediction replicates at 0.028 (D-93, D-94, both null). Nothing
 here may be read as one name anticipating the other.
 
 Same-company artefacts (GOOGL/GOOG, Z/ZG, FOX/FOXA, NWS/NWSA) are genuine,

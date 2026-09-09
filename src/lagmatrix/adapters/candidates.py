@@ -142,7 +142,7 @@ class CoMovementFollowers:
     leader, emit its co-movement followers with a direction inherited from
     the leader's own shock sign, flipped for a negatively correlated edge.
 
-    This claims only same-day co-movement, which replicates at 0.640 out of
+    This claims only same-day co-movement, which replicates at 0.586 out of
     sample (D-95). It asserts nothing about what a follower does next --
     D-93/D-94 nulled lagged prediction across 2.47M pairs.
     """

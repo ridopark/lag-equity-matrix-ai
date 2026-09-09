@@ -352,7 +352,8 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     The interval says how precisely the co-movement is measured. It is **not** a
     probability about what happens next: D-93 nulled lagged prediction across
     2.47M pairs and D-94 showed chains carry sign without magnitude, while
-    contemporaneous co-movement replicates at 0.640 (D-95). Same-day, not
+    contemporaneous co-movement replicates at 0.586 (D-95, corrected by D-100).
+    Same-day, not
     next-day.
 
     The leader's own forward distribution is included (D-96) because a reader
@@ -366,7 +367,7 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     # Co-movement needs history, and the two price files serve different jobs:
     # `bars.parquet` sweeps wider (3,204 symbols) but reaches back only 159
     # sessions, which is fewer than `trail`, so it yields no edges at all.
-    # `bars-10y.parquet` has 2,514 sessions, is what D-95's 0.640 replication
+    # `bars-10y.parquet` has 2,514 sessions, is what D-95's 0.586 replication
     # was measured on, and contained every one of the 43 movers on 2026-09-04.
     closes = COMOVE_CLOSES()
     excluded = frozenset(

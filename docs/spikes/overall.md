@@ -3050,8 +3050,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   production `comovement_edges` reads the same file, so any `as_of` whose
   trailing window spans one of those dates would carry the same distortion into
   a stored edge. The screen belongs in the module.
-- **Outcome:** pending — screen being added to `comovement.py` under TDD; page
-  and D-95 to be corrected to 0.586 once it lands.
+- **Outcome:** Done. The screen is in `comovement_edges` (`8a843f2`), and the
+  figure is corrected to **0.586** everywhere it was published — `serve.py`,
+  `comovement.py`, `adapters/candidates.py` and three places on the live page.
+  The plan documents keep the old number, since they are a record of what was
+  believed when they were written.
+  The page also now *explains* the correction rather than silently swapping the
+  digit: a showcase built on measurement discipline should show its own number
+  moving. Verified in the browser — the only two remaining "0.64" mentions are
+  inside that explanation.
+  Production impact was small and checked: 23,855 edges against 23,857, 3.8s,
+  and PANW/PFG return the same sectors.
+  A second data fault was found in the same investigation and is recorded under
+  D-99's Outcome rather than here: symbols whose trailing volatility is
+  effectively zero (`EVER` at 3.67e-11), where market-excess subtraction alone
+  produced a 593-million-sigma "response". That one bites any volatility-
+  normalised statistic and is **not** screened inside `comovement.py`, because
+  correlation is scale-invariant and therefore immune to it — but any future
+  code that divides by a trailing sigma needs a floor, not a `> 0` check.
 - **Status:** Accepted
 
 ## Open Questions

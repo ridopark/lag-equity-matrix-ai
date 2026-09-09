@@ -232,7 +232,7 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     tests, all null.</p>
   <p class="sub" style="margin-top:.5rem"><b>What is there instead, and it is not small.</b> The
     <i>same-day</i> version of the same measurement survives that test almost intact:
-    <b>0.64</b>. Companies that have moved together reliably keep moving together, and that holds
+    <b>0.59</b>. Companies that have moved together reliably keep moving together, and that holds
     up across four years of data the measurement never saw. So this page shows you that, and
     stops there. It will tell you Palo Alto Networks moves with CrowdStrike and Fortinet; it will
     not tell you which one moves first, because we looked and nothing does.</p>
@@ -259,7 +259,7 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     correlation: how reliably these two have moved <i>together</i>, same day. It is not a forecast.
     We tested whether one company's move anticipates another's — every pair in the universe, five
     lags, ten years, out of sample — and it does not: the relationship that looks like 0.21 in one
-    window is worth 0.03 in the next. Same-day co-movement is the opposite: it holds up at 0.64.
+    window is worth 0.03 in the next. Same-day co-movement is the opposite: it holds up at 0.59.
     So the bars below say "these move together", never "this one moves next".</p>
   <div class="bar" style="margin-top:1rem">
     <label for="xdate">date</label>
@@ -557,7 +557,17 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     added nothing: they beat a coin flip on direction and carried no size at all.
     <b>That null is the well-powered one</b> — a real effect of the size worth trading could not
     have been missed at that sample. The same measurement done <i>same-day</i> instead of
-    next-day survives the identical test at 0.64, which is what the top of this page shows you.
+    next-day survives the identical test at 0.59, which is what the top of this page shows you.</p>
+  <p class="note" style="margin-top:.6rem"><b>That 0.59 was 0.64 earlier today, and the correction
+    is worth showing.</b> A separate test returned an average move of eleven thousand standard
+    deviations — obviously impossible, and chasing it found two faults in the price file. Eleven
+    "returns" above 1000%: bankruptcy emergences, reverse splits and reused tickers, where a company
+    ends and a different one inherits the symbol. And a handful of names whose price never moved for
+    months, so dividing by their volatility divided by almost zero — one produced a "move" of 593
+    million sigma. Neither is a market event; both are the data being wrong. Removing them lowers the
+    headline from 0.64 to 0.59. The conclusion does not change — 0.59 against 0.03 for the
+    next-day version is the same gap — but the number was wrong while it was on this page, and the
+    honest thing is to say so rather than quietly swap it.
     <b>Nothing here is a trading signal.</b>
     <span style="color:var(--ink3)">(b = &minus;0.0015 against a pre-registered threshold of
     0.02, I&sup2; = 44%, re-run on the cleaned graph rather than inherited from the dirty

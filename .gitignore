@@ -52,3 +52,10 @@ data/*
 
 # stray scratch file, not part of the project
 src/hello.py
+
+# Deliberately unpublished: this plan maps the homelab cluster in detail --
+# host, namespaces, Secret and PVC names -- and states plainly which box runs
+# real-money trading and where authentication is absent. This repo is public.
+# Kept locally, held out of history on purpose (2026-09-09). Removing this line
+# republishes it.
+docs/plans/PLAN-2026-09-09-homelab-deploy.md

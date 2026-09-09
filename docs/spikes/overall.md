@@ -2371,7 +2371,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   **unfounded** (assumes a contradicted coefficient); the open/opposed sign
   test is **sound in construction but non-predictive in fact** — it never
   divides, so it assumes no pass-through; it is deleted on (3), not on (1).
-- **Outcome:** pending
+- **Outcome:** Done, in `b4fa3d7`. `room`, `origin_status`, `rank_by_room` and
+  the `lag_response` `Evidence` unit are gone (`grep -rn 'lag_response' src/`
+  returns nothing); each scan card now carries one inert sentence, e.g.
+  "COHR has moved +0.03σ toward the thesis; surfaced by DELL." Verified on a
+  live scan: descriptions render, no card prints `null`, and the pre-existing
+  verdict pills still colour correctly. 111 passed / 9 skipped (from 118),
+  `check_baseline.py --synthetic` unchanged at 6 identical rows at every phase
+  boundary. The falsifiable pin that `description` never votes is
+  `test_description_flows_through_to_assessment_without_affecting_verdict`'s
+  exact `effective_evidence == 1.0`.
+  Two side effects worth recording: Q-40 became moot (nothing left to collide
+  with), which in turn let the replacement tests call `retrieve_neighbourhood`
+  for real — closing the old suite's caveat that its "end-to-end" only held
+  from `leader_state` onward. And the D-85 admit gate was kept in simplified
+  form (`if not leaders and not c.origin_leader`), so the 11-of-19 candidates
+  it made visible stay visible as neutral cards carrying a description; D-27
+  governs evidence *sourcing*, not display, and a description cannot
+  manufacture confluence because it is not evidence.
 - **Status:** Accepted — supersedes D-84
 
 ### D-88 — The supply graph's contemporaneous effect is a selection artefact, not a supply-chain effect

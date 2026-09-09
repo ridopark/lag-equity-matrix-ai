@@ -48,6 +48,29 @@ SYNTHETIC_CLOSES = "tests/fixtures/synthetic-closes.parquet"
 SYNTHETIC_FALLBACK_DATE = "2026-05-11"  # only when no price file can be read
 
 
+_COMOVE_CACHE: dict[str, object] = {}
+
+
+def COMOVE_CLOSES():
+    """Closes for co-movement: the long file, read once per process.
+
+    Falls back to the wide file so a machine without the 10-year extract still
+    starts — it will simply find no edges, which `comovement_edges` reports as
+    an empty list rather than an error.
+    """
+    if "closes" not in _COMOVE_CACHE:
+        for path in ("data/bars-10y.parquet", "data/bars.parquet", SYNTHETIC_CLOSES):
+            try:
+                bars = pd.read_parquet(path)
+            except Exception:
+                continue
+            _COMOVE_CACHE["closes"] = (
+                bars.pivot_table(index="timestamp", columns="symbol", values="close")
+                if "timestamp" in bars.columns else bars)
+            break
+    return _COMOVE_CACHE.get("closes")
+
+
 def default_as_of() -> str:
     """The last session actually present in the data, not a baked-in constant.
 
@@ -295,6 +318,76 @@ def movers(as_of: str, top_n: int = 25) -> dict:
     }
 
 
+def followers(symbol: str, as_of: str, trail: int = 250,
+              min_abs_corr: float = 0.5, top_n: int = 25) -> dict:
+    """Step 2 of the UI: given a leader, the names that move with it.
+
+    Edges come from `lagmatrix.comovement` — measured pairwise correlation of
+    market-excess returns over the `trail` sessions ending strictly before
+    `as_of` — each with a Fisher confidence interval.
+
+    The interval says how precisely the co-movement is measured. It is **not** a
+    probability about what happens next: D-93 nulled lagged prediction across
+    2.47M pairs and D-94 showed chains carry sign without magnitude, while
+    contemporaneous co-movement replicates at 0.640 (D-95). Same-day, not
+    next-day.
+
+    The leader's own forward distribution is included (D-96) because a reader
+    asked for it, and it is honestly a coin flip: after a >= 2 sigma move, a
+    symbol has historically gone nowhere in particular.
+    """
+    if not ALLOW_REAL:
+        raise PermissionError("followers needs real market data; start with --allow-real")
+    from lagmatrix.comovement import comovement_edges
+
+    # Co-movement needs history, and the two price files serve different jobs:
+    # `bars.parquet` sweeps wider (3,204 symbols) but reaches back only 159
+    # sessions, which is fewer than `trail`, so it yields no edges at all.
+    # `bars-10y.parquet` has 2,514 sessions, is what D-95's 0.640 replication
+    # was measured on, and contained every one of the 43 movers on 2026-09-04.
+    closes = COMOVE_CLOSES()
+    excluded = frozenset(
+        ln.split(",")[0] for ln in
+        pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
+    )
+    d = date.fromisoformat(as_of or default_as_of())
+    sym = symbol.upper()
+    if sym not in closes.columns:
+        return {"error": f"{sym} not in the price file"}
+
+    edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
+                             exclude=excluded)
+    mine = [e for e in edges if sym in (e.a, e.b)]
+    rows = [{
+        "symbol": e.b if e.a == sym else e.a,
+        "corr": round(e.corr, 4),
+        "ci_low": round(e.ci_low, 4),
+        "ci_high": round(e.ci_high, 4),
+        "n_sessions": e.n_sessions,
+        "flag": e.flag,
+    } for e in mine]
+    rows.sort(key=lambda r: -abs(r["corr"]))
+
+    scan = MarketScan(closes, None, excluded_symbols=excluded)
+    z = scan.shocked_leaders(d).get(sym)
+    return {
+        "leader": sym,
+        "as_of": str(d),
+        "leader_z": round(z, 3) if z is not None else None,
+        "trail": trail,
+        "min_abs_corr": min_abs_corr,
+        "followers_found": len(rows),
+        "followers": rows[:top_n],
+        # D-96, measured on 40,545 held-out episodes across 2,153 symbols
+        "own_move": {
+            "note": "after a >= 2 sigma move this symbol has historically gone "
+                    "nowhere in particular",
+            "continued_pct": 48.7,
+            "sd_sigma": 1.43,
+        },
+    }
+
+
 def neighbourhood(symbol: str, as_of: str) -> dict:
     """Supply edges with their filing sentences, plus real two-hop co-mention.
 
@@ -347,6 +440,18 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._json(movers((q.get("as_of") or [default_as_of()])[0],
                                   int((q.get("top_n") or ["25"])[0])))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"})
+            return
+        if url.path == "/followers":
+            q = parse_qs(url.query)
+            s = (q.get("symbol") or [""])[0].upper()
+            if not s.isalnum():
+                self.send_error(400, "symbol must be alphanumeric")
+                return
+            try:
+                self._json(followers(s, (q.get("as_of") or [default_as_of()])[0],
+                                     top_n=int((q.get("top_n") or ["25"])[0])))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return

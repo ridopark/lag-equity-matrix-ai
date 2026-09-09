@@ -2945,6 +2945,57 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   and `/followers` is unaffected because co-movement reads parquet.
 - **Status:** Accepted
 
+### D-99 — Pre-registration: after a shock, do the shocked name's co-movement partners move the next day?
+- **When:** 2026-09-09T12:10:00-05:00
+- **Decision:** Test the one form of the lag hypothesis the earlier tests did not
+  cover, specified **before any result is seen**.
+
+  **Why this is not already answered.** D-93 tested lagged correlation
+  *unconditionally* over all 2.47M pairs and found nothing. D-96 tested what the
+  *shocked symbol itself* does next and found a coin flip. Neither tested the
+  conditional, partner-directed version: *given X moved >= 2σ on day t, do the
+  names that reliably move WITH X move on day t+1?* An unconditional null can
+  coexist with a tail effect that only fires after large moves, so this is a
+  distinct hypothesis and worth one test.
+
+  **Population.** Every shock episode in `data/bars-10y.parquet` (2,183 symbols,
+  2,514 sessions): a non-overlapping 3-session window with `|z| >= 2.0` against a
+  60-session baseline — the same definition `MarketScan.shocked_leaders` uses.
+  Partners are that symbol's co-movement edges at `|corr| >= 0.5` measured over
+  the 250 sessions ending **strictly before** the episode (D-16; the partner set
+  is chosen on past data only, so nothing is selected on the outcome).
+
+  **Response.** Each partner's market-excess return on the **single session after
+  the episode window**, normalised by its own trailing volatility, and signed to
+  the thesis: `sign(z_X) * sign(corr)` — a negatively correlated partner is
+  expected to move the other way, and gets the opposite sign.
+
+  **Control.** For every episode, an equal number of symbols drawn at random from
+  the same session's universe that are **not** partners of X, measured
+  identically. This is the D-88 lesson: without a control, any market-wide day
+  looks like an effect.
+
+  **Primary test, one only.** Mean partner response minus mean control response,
+  errors **clustered by date** (D-71 — every chain shares one market shock).
+
+  **Economic threshold, declared now: >= 0.10σ.** Below roughly a tenth of a
+  partner's own sigma (~0.2%) the move cannot survive a round trip, whatever the
+  p-value.
+
+  **Decision rule, pre-committed.** Claim next-day propagation only if the
+  partner-minus-control difference is `>= 0.10σ` **and** `z >= 2`. Anything else
+  is a null, including the right sign below threshold.
+
+  **Power, reported with the result.** The run states its realised MDE. If the
+  MDE exceeds 0.10 the test could not have found what it sought and is reported
+  as underpowered rather than null — the distinction D-92 had to make and D-93
+  was designed to avoid.
+- **Why:** the alternative was answering from the earlier nulls by analogy. That
+  would have been wrong: the conditional hypothesis is genuinely untested, the
+  machinery to test it already exists, and the cost is one script.
+- **Outcome:** pending — not yet run at the time of writing
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

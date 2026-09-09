@@ -211,3 +211,106 @@ def test_movers_with_unknown_symbol_returns_empty_not_an_error(db):
     result = movers_with(db, "NONEXISTENT", as_of=AS_OF)
 
     assert result == []
+
+
+# Point-in-time as "the most recent snapshot at or before as_of" (matching
+# ArangoTopology.laggers_of's `<=` convention, D-16), not "the snapshot dated
+# exactly as_of". Dates below are distinct from AS_OF/EARLY/LATE above so
+# these tests don't accidentally share fixtures with the equality-era ones.
+GAP_EARLY = date(2026, 1, 5)
+GAP_QUERY = date(2026, 1, 7)
+GAP_LATE = date(2026, 1, 9)
+
+
+def test_movers_with_falls_back_to_the_latest_snapshot_at_or_before_as_of(db):
+    """A snapshot exists for GAP_EARLY and another for GAP_LATE, but none for
+    the queried date in between. The query must resolve backwards to the
+    nearest snapshot at or before it (GAP_EARLY), not come back empty just
+    because that exact date was never ingested.
+
+    Falsifies if: `movers_with(..., as_of=GAP_QUERY)` returns `[]` -- which is
+    exactly what `FILTER e.as_of == @as_of` produces today, since no edge was
+    ever written with `as_of == GAP_QUERY`.
+    """
+    near = ComovementEdge(a="LEAD1", b="NEARX", corr=0.6, n_sessions=250,
+                           ci_low=0.5, ci_high=0.7, flag=None)
+    far = ComovementEdge(a="LEAD1", b="FARX", corr=0.6, n_sessions=250,
+                          ci_low=0.5, ci_high=0.7, flag=None)
+    upsert_comovement(db, [near], as_of=GAP_EARLY)
+    upsert_comovement(db, [far], as_of=GAP_LATE)
+
+    result = movers_with(db, "LEAD1", as_of=GAP_QUERY)
+
+    assert result != [], "expected the GAP_EARLY snapshot, got nothing"
+    partners = {e.a if e.b == "LEAD1" else e.b for e in result}
+    assert partners == {"NEARX"}, (
+        f"expected only the snapshot at or before {GAP_QUERY}, got partners {partners}")
+
+
+def test_movers_with_never_blends_two_snapshots_of_the_same_pair(db):
+    """The same pair measured twice, at GAP_EARLY and GAP_LATE, with
+    different `corr` each time. A query strictly between the two dates must
+    resolve to exactly the GAP_EARLY snapshot's row -- one edge, carrying
+    GAP_EARLY's `corr`, never GAP_LATE's value and never both rows.
+
+    Falsifies if: the result has 2 edges for this pair (both snapshots
+    returned), or 1 edge whose `corr` is 0.85 (the later, wrong measurement)
+    instead of 0.55.
+    """
+    early_measurement = ComovementEdge(a="LEAD1", b="PARTNER", corr=0.55,
+                                        n_sessions=250, ci_low=0.45, ci_high=0.65,
+                                        flag=None)
+    late_measurement = ComovementEdge(a="LEAD1", b="PARTNER", corr=0.85,
+                                       n_sessions=250, ci_low=0.75, ci_high=0.90,
+                                       flag=None)
+    upsert_comovement(db, [early_measurement], as_of=GAP_EARLY)
+    upsert_comovement(db, [late_measurement], as_of=GAP_LATE)
+
+    result = movers_with(db, "LEAD1", as_of=GAP_QUERY)
+
+    assert len(result) == 1, f"expected exactly one edge for the pair, got {result!r}"
+    assert result[0].corr == pytest.approx(0.55), (
+        f"expected the GAP_EARLY corr (0.55), got {result[0].corr}")
+
+
+def test_movers_with_returns_empty_before_the_earliest_snapshot(db):
+    """A snapshot exists only for GAP_LATE. Querying a date before it must
+    still come back `[]` -- the backwards fallback must not reach into the
+    future, and there is no earlier snapshot to fall back to either.
+
+    Falsifies if: the "most recent as_of <= query" resolution is implemented
+    wrong-way-round (e.g. nearest by absolute distance rather than <=) and
+    ends up returning the GAP_LATE edge for a query dated before it exists.
+    """
+    late = ComovementEdge(a="LEAD1", b="FARX", corr=0.6, n_sessions=250,
+                           ci_low=0.5, ci_high=0.7, flag=None)
+    upsert_comovement(db, [late], as_of=GAP_LATE)
+
+    result = movers_with(db, "LEAD1", as_of=GAP_EARLY)
+
+    assert result == []
+
+
+def test_movers_with_an_exact_snapshot_date_returns_that_snapshot_not_an_earlier_one(db):
+    """Two snapshots exist, GAP_EARLY and GAP_LATE. Querying exactly
+    GAP_LATE -- a date that has its own snapshot -- must return GAP_LATE's
+    edge, not GAP_EARLY's (which is also `<= as_of` and so must not be
+    picked instead), and must not blend the two.
+
+    Falsifies if: the fallback logic ignores an exact match and always walks
+    back to the earliest available snapshot, or returns both snapshots' rows
+    for a symbol that appears in each.
+    """
+    early = ComovementEdge(a="LEAD1", b="NEARX", corr=0.6, n_sessions=250,
+                            ci_low=0.5, ci_high=0.7, flag=None)
+    late = ComovementEdge(a="LEAD1", b="FARX", corr=0.6, n_sessions=250,
+                           ci_low=0.5, ci_high=0.7, flag=None)
+    upsert_comovement(db, [early], as_of=GAP_EARLY)
+    upsert_comovement(db, [late], as_of=GAP_LATE)
+
+    result = movers_with(db, "LEAD1", as_of=GAP_LATE)
+
+    assert result != [], "expected the GAP_LATE snapshot, got nothing"
+    partners = {e.a if e.b == "LEAD1" else e.b for e in result}
+    assert partners == {"FARX"}, (
+        f"expected only the exact-date snapshot, got partners {partners}")

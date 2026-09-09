@@ -70,12 +70,26 @@ class ArangoTopology:
         raise NotImplementedError
 
 
-# Point-in-time (D-16, D-82): filtered on `as_of`, not just symbol. Matches on
-# `a`/`b` directly rather than `_from`/`_to`, since only one direction per
-# pair is stored (D-95) and `movers_with` must find a symbol on either side.
+# Point-in-time (D-16, D-82): "most recent snapshot at or before as_of", not
+# "the snapshot dated exactly as_of" -- matches ArangoTopology.laggers_of's
+# `<= as_of` convention. `as_of` is stored as an ISO date string (YYYY-MM-DD),
+# which sorts/compares correctly with plain `<=`/`DESC` since lexicographic
+# order matches chronological order for that format. The snapshot is resolved
+# first, then the main query is pinned to that single `as_of` so two
+# snapshots of the same pair are never blended. Matches on `a`/`b` directly
+# rather than `_from`/`_to`, since only one direction per pair is stored
+# (D-95) and `movers_with` must find a symbol on either side.
 _MOVERS_WITH_AQL = """
+LET snapshot = FIRST(
+  FOR e IN moves_with
+    FILTER e.as_of <= @as_of
+    FILTER e.a == @symbol OR e.b == @symbol
+    SORT e.as_of DESC
+    LIMIT 1
+    RETURN e.as_of
+)
 FOR e IN moves_with
-  FILTER e.as_of == @as_of
+  FILTER e.as_of == snapshot
   FILTER e.a == @symbol OR e.b == @symbol
   FILTER ABS(e.corr) >= @min_abs_corr
   RETURN e

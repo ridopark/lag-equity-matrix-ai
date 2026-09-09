@@ -1097,6 +1097,7 @@ function pickLeader(sym) {
     d.min_abs_corr = parseFloat($("#xcorr").value) || d.min_abs_corr;
     drawFollowers(d);
     $("#xrun").hidden = !d.followers.length;
+    loadNet(sym);
   }).catch(e => {
     $("#xfollowers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
   });
@@ -1118,6 +1119,162 @@ $("#xrun").addEventListener("click", () => {
   document.querySelector("#topo").scrollIntoView({behavior: "smooth", block: "center"});
   $("#go").click();
 });
+
+/* ---------- co-movement network ----------
+   A ranked list says "37 followers" and implies 37 independent names. Measured,
+   PFG's 37 carry 500 of their 666 possible edges — one financials bloc wearing
+   37 labels. `context_fusion` already discounts that (Q-12: twenty names moving
+   as one bloc contribute about one unit, not twenty); the list was the only
+   place that pretended otherwise. This draws the structure instead.
+
+   Layout is Fruchterman-Reingold: repulsion between every pair, attraction along
+   edges weighted by |corr|, so distance carries meaning rather than decoration.
+   The leader is pinned at the centre. */
+let NET = null, NETSEL = null, NETBACKBONE = false;
+
+function netLayout(nodes, edges, w, h, iters = 260) {
+  /* Radial-hybrid, not a plain force layout. Distance from the centre is set
+     *exactly* by correlation to the leader — the thing a reader actually wants —
+     rather than left to emerge from a force equilibrium, which in an 83%-dense
+     cluster reduces to a ball that says little. Only the angle is relaxed by
+     force, using the follower-to-follower edges, so names that belong together
+     sit together on the ring. */
+  const by = {};
+  const cx = w / 2, cy = h / 2;
+  const rMin = 46, rMax = Math.min(w, h) / 2 - 30;
+  const fol = nodes.filter(n => !n.leader);
+  const cs = fol.map(n => Math.abs(n.corr || 0));
+  const lo = Math.min(...cs, 1), hi = Math.max(...cs, 0);
+  const span = Math.max(hi - lo, 1e-6);
+
+  nodes.forEach(n => { by[n.symbol] = n; });
+  fol.forEach((n, i) => {
+    n.ang = 2 * Math.PI * i / fol.length;
+    // strongest correlation sits nearest the centre
+    n.rad = rMin + (1 - (Math.abs(n.corr || 0) - lo) / span) * (rMax - rMin);
+  });
+
+  const among = edges.filter(e => by[e.a] && by[e.b] && !by[e.a].leader && !by[e.b].leader);
+  for (let it = 0; it < iters; it++) {
+    const step = (1 - it / iters) * 0.16 + 0.01;
+    const d = {};
+    fol.forEach(n => d[n.symbol] = 0);
+    // angular repulsion keeps labels apart
+    for (let i = 0; i < fol.length; i++) {
+      for (let j = i + 1; j < fol.length; j++) {
+        const a = fol[i], b = fol[j];
+        let s = a.ang - b.ang;
+        while (s > Math.PI) s -= 2 * Math.PI;
+        while (s < -Math.PI) s += 2 * Math.PI;
+        const f = 0.35 / (Math.abs(s) + 0.12);
+        d[a.symbol] += Math.sign(s) * f; d[b.symbol] -= Math.sign(s) * f;
+      }
+    }
+    // angular attraction along real links, so blocs land next to each other
+    among.forEach(e => {
+      const a = by[e.a], b = by[e.b];
+      let s = a.ang - b.ang;
+      while (s > Math.PI) s -= 2 * Math.PI;
+      while (s < -Math.PI) s += 2 * Math.PI;
+      const f = s * Math.abs(e.corr) * 1.4;
+      d[a.symbol] -= f; d[b.symbol] += f;
+    });
+    fol.forEach(n => { n.ang += Math.max(-0.4, Math.min(0.4, d[n.symbol])) * step; });
+  }
+
+  nodes.forEach(n => {
+    if (n.leader) { n.x = cx; n.y = cy; return; }
+    n.x = cx + Math.cos(n.ang) * n.rad;
+    n.y = cy + Math.sin(n.ang) * n.rad * 0.82;   // slight ellipse: the canvas is wide
+  });
+}
+
+function drawNet() {
+  if (!NET) return;
+  const svg = $("#xnet"), W = svg.clientWidth || 560, H = 340;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const nodes = NET.nodes, all = NET.edges;
+  const shown = NETBACKBONE ? all.filter(e => e.backbone) : all;
+  const by = {}; nodes.forEach(n => by[n.symbol] = n);
+
+  let out = "";
+  shown.forEach(e => {
+    const a = by[e.a], b = by[e.b];
+    if (!a || !b) return;
+    const lit = NETSEL && (e.a === NETSEL || e.b === NETSEL);
+    const col = e.corr < 0 ? "var(--bad)" : "var(--graph)";
+    out += `<line class="ne" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
+      x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${col}"
+      stroke-width="${(Math.abs(e.corr) * 2.4).toFixed(2)}"
+      opacity="${NETSEL ? (lit ? 0.85 : 0.07) : (e.backbone ? 0.42 : 0.13)}"></line>`;
+  });
+  nodes.forEach(n => {
+    // radius tracks |corr| to the leader: in a dense bloc every degree is
+    // near-identical, so sizing by degree encoded almost nothing.
+    const r = n.leader ? 10 : 3.5 + Math.abs(n.corr || 0) * 7;
+    const cls = "nn" + (n.leader ? " lead" : "") + (n.symbol === NETSEL ? " sel" : "");
+    const fill = n.leader ? "var(--graph)"
+      : (n.corr < 0 ? "var(--bad)" : "var(--vector)");
+    out += `<g class="${cls}" data-sym="${esc(n.symbol)}">
+      <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}"
+        fill="${fill}" opacity="${NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9}"></circle>
+      <text x="${n.x.toFixed(1)}" y="${(n.y - r - 4).toFixed(1)}"
+        text-anchor="middle">${esc(n.symbol)}</text></g>`;
+  });
+  svg.innerHTML = out;
+  svg.querySelectorAll(".nn").forEach(g =>
+    g.addEventListener("click", () => {
+      NETSEL = NETSEL === g.dataset.sym ? null : g.dataset.sym;
+      drawNet(); netNote();
+    }));
+}
+
+function netNote() {
+  const n = NET.nodes.length - 1, am = NET.among_followers, poss = NET.possible_among_followers;
+  const pct = poss ? Math.round(100 * am / poss) : 0;
+  let s = `<b>${n} companies move with ${esc(NET.leader)}</b> — and with each other:
+    ${am} of their ${poss} possible pairings are themselves linked (${pct}%).
+    ${pct >= 50
+      ? "That is one bloc wearing many names, not independent evidence, which is why the pipeline discounts it rather than counting it."
+      : "Loosely connected, so these carry more independent information than a tightly linked group would."}
+    Distance is correlation; thickness is strength; red moves the other way.`;
+  if (NETSEL) {
+    const nd = NET.nodes.find(x => x.symbol === NETSEL);
+    if (nd && !nd.leader) {
+      s += `<br><b>${esc(NETSEL)}</b> — ${nd.corr.toFixed(2)} with ${esc(NET.leader)}
+        [${nd.ci_low.toFixed(2)}, ${nd.ci_high.toFixed(2)}], and linked to
+        ${nd.degree} of the ${n} names shown${nd.z != null
+          ? `. It also moved ${nd.z > 0 ? "+" : ""}${nd.z}σ itself that day.` : "."}`;
+    } else if (nd) {
+      s += `<br><b>${esc(NETSEL)}</b> is the leader${nd.z != null
+        ? `, and moved ${nd.z > 0 ? "+" : ""}${nd.z}σ that day` : ""}.`;
+    }
+  }
+  $("#xnetnote").innerHTML = s;
+}
+
+$("#xbackbone").addEventListener("click", () => {
+  NETBACKBONE = !NETBACKBONE;
+  $("#xbackbone").setAttribute("aria-pressed", String(NETBACKBONE));
+  drawNet();
+});
+
+function loadNet(sym) {
+  NET = null; NETSEL = null;
+  $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = true;
+  const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
+                                 min_abs_corr: $("#xcorr").value || "0.5"});
+  fetch("/network?" + q).then(r => r.json()).then(d => {
+    if (d.error || !d.nodes || d.nodes.length < 2) return;
+    NET = d;
+    const W = $("#xnet").clientWidth || 560;
+    netLayout(d.nodes, d.edges, W, 340);
+    $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = false;
+    $("#xnetmeta").textContent =
+      `${d.nodes.length - 1} companies · ${d.edges.length} links · click one`;
+    drawNet(); netNote();
+  }).catch(() => {});
+}
 
 $("#xgo").addEventListener("click", () => {
   $("#xstatus").innerHTML = `<span class="dot on"></span>scanning…`;

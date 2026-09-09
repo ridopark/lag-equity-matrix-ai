@@ -2620,13 +2620,47 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   amending a design after seeing the result "would be choosing the analysis
   after seeing the result", and this project's credibility rests on not having
   done that. Registering costs one commit.
-- **Outcome:** pending — not yet run at the time of writing
-- **Status:** Accepted
+- **Outcome:** **Run, and the honest verdict is UNDERPOWERED, not null — the
+  graph is one hop deep.** `scripts/experiment_hops_days.py`, 14,115 triples,
+  67 leaders, 98 followers, 461 dates.
+
+      hop-1 pairs 117      hop-2 pairs 6
+      n per cell: hop 1 -> 2,797     hop 2 -> 26
+
+      PRIMARY (date-clustered)
+        hop2 x late  +0.1232 (0.1387)  z = +0.89
+        realised MDE = 0.3884 sigma    threshold = 0.25   -> UNDERPOWERED
+      SECONDARY  4 yearly estimates, Q = 0.8, I^2 = 0%
+                 per-year b3: +0.34  -0.24  +0.07  +0.24
+
+  `b3` carries the **predicted sign** but the realised MDE (0.39) exceeds the
+  pre-declared threshold (0.25), so by D-92's own rule this cannot be reported
+  as a null: the test could not have detected the effect it was looking for.
+  Recording it as a null would repeat exactly the error D-73 made and D-74 was
+  written to correct.
+
+  **The cause is structural and is the finding worth keeping.** A hop-2 path
+  needs a supplier who is themselves a customer with suppliers. Measured:
+  **4 of 105 suppliers qualify (4%)** — BKR, GEV, HWM, QRVO — which is why only
+  6 hop-2 pairs exist. The graph is 76 stars of median 3 suppliers, not a
+  network, because only the *customers'* 10-K disclosures were ever ingested and
+  their suppliers were left as leaves. The hops dimension the product's whole
+  premise rests on is not testable against this graph at any sample size, and no
+  amount of additional price history changes that (D-88's "chains, not dates",
+  now with a specific cause).
+
+  **What it would take**, stated concretely so it is actionable: ingest the
+  customer-concentration disclosures of the 105 existing suppliers, turning
+  leaves into interior nodes. That is the same `edgar/relations.py` pipeline
+  already built and audited (D-78), pointed at a different set of filers — a
+  data-acquisition task with a known method, not a modelling problem.
+- **Status:** Accepted — result is *underpowered*, question remains open; see Q-45
 
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-45 | Can the supply graph be deepened enough to test hop-dependent propagation at all? | D-92, D-88, D-78, `src/lagmatrix/edgar/relations.py` | D-92 could not answer its own question: only **4 of 105 suppliers (4%)** are themselves customers with suppliers, giving **6 hop-2 pairs** and a realised MDE of 0.39 against a 0.25 threshold. The graph is 76 depth-1 stars because only customers' 10-K concentration disclosures were ingested. Answered by ingesting the same disclosures for the 105 suppliers — the `edgar/relations.py` classifier and its migration script already exist and were audited at D-78, so this is acquisition, not new method — then re-running `scripts/experiment_hops_days.py` unchanged and re-reading its realised MDE. **Pre-commit before collecting:** the D-92 design, threshold and decision rule are re-used verbatim; deepening the graph must not be an excuse to re-specify the test. Worth knowing the ceiling first: if the second ingest still yields under ~50 hop-2 pairs, the MDE will stay above 0.25 and the question should be closed as unanswerable with 10-K-derived structure rather than pursued further. |
 | Q-44 | Should the graph be reshaped so retrieval that has no data dependency can actually run concurrently? | D-89, D-35, `graph/builder.py` | D-89 establishes that `vector_retriever`'s position after `graph_retriever` is a scheduling artefact — it needs only `c.symbol` (D-83) — but that it cannot simply be moved, because `context_fusion`'s join fires once per superstep in which any in-edge fires, and `evidence`/`errors` use concatenating reducers. So the pipeline serialises two independent lookups and the live page's own latency numbers understate what the design could do. Answered by one of: making `fuse_evidence` idempotent so a double firing is harmless (the honest general fix, and the one that would also make the graph robust to future joins); reconsidering `defer=True`, which D-35 declined for reasons that predate this evidence; or deciding the serialisation is acceptable and saying so on the page rather than leaving the diagram to imply a dependency that does not exist. Not urgent: the measured cost is one superstep of wall-clock on runs that complete in ~3 seconds. |
 | Q-43 | The 9 ArangoDB-dependent tests cannot pass in this environment and skip silently — how should live tests fail loudly instead? | `tests/test_arango_topology.py`, `tests/test_vector_index.py`, `tests/test_market_scan.py`, `scripts/serve.py:52` | Measured 2026-09-09, two independent faults, both rendering as a clean `skip`: **(a)** the tests default to `http://localhost:8529` (`test_arango_topology.py:57`) while the app defaults to `http://localhost:19999` (`serve.py:52`) — 8529 is closed, 19999 is the live tunnel; **(b)** pointed at the correct URL they get `[HTTP 401][ERR 11] bad username/password`, because the tests do not read the credential from `~/.lagmatrix-arango-pw` the way `serve.py:72` does. So the whole graph layer — `ArangoTopology`, `MarketScan`'s live path, `NewsIndex` — has never been exercised by a passing test here, while the suite reports `111 passed, 9 skipped` and looks healthy. This is the same pathology already seen once in this project (a stale listener made live tests skip rather than fail); the skip-if-unreachable guard is doing exactly what it was written to do, which is the problem. Related but distinct: **nothing under `tests/` imports `scripts/serve.py` or `scripts/capture_showcase.py` at all**, so a broken import there leaves the suite fully green — demonstrated 2026-09-09 when deleting `rank_by_room` broke `serve.py`'s import and the suite still reported 111 passed. Answered by deciding what a live test should do when the dependency is absent: skip is right for a laptop with no tunnel, but there is currently no mode in which its absence is an error, so nobody ever learns the tests are dead. Options: an opt-in `LAGMATRIX_REQUIRE_LIVE=1` that converts skip to failure, aligning the default URL and credential lookup with `serve.py`'s, and a one-line import smoke test for the two scripts. |
 | Q-42 | If the supply graph is a correlation filter with extra steps, what does the GraphRAG premise actually buy? | D-88, D-74, `adapters/arango.py`, `scripts/serve_index.html` | D-88 shows the contemporaneous linked-vs-control co-move is fully explained by trailing correlation, with a *negative* residual (−0.093, z=−2.98; −0.317, z=−2.54 on replication). The live page presents the supply graph as the thing that finds non-obvious candidates. If a correlation screen selects the same names more cheaply, that framing needs to change or be defended. Three things the graph plausibly still buys, none yet measured: **direction** (the sign of the thesis, which correlation alone does not give), **an interpretable rationale** (a filing sentence a human can check, which is the actual product), and **candidates a correlation screen would rank too low to surface**. Answered by running the scan with the supply traversal replaced by a top-k trailing-correlation screen on the same dates and comparing the candidate sets and their forward returns — if the sets largely coincide and neither predicts, the graph is doing presentational work, which is a legitimate answer but a different claim from the one the page makes. Note the binding constraint from D-88's consult: **chains, not dates** — 105 distinct suppliers across 67 leaders cannot resolve a D-74-sized effect at any date count. |

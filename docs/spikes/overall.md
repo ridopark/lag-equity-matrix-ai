@@ -3070,6 +3070,43 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   code that divides by a trailing sigma needs a floor, not a `> 0` check.
 - **Status:** Accepted
 
+### D-101 — fastembed replaces sentence-transformers: identical vectors, 1.2 GB less image
+- **When:** 2026-09-09T23:10:00-05:00
+- **Decision:** Swap `sentence_transformers` for `fastembed` (ONNX/onnxruntime) in
+  `adapters/vector.py`, `scripts/load_vectors.py` and `scripts/capture_showcase.py`,
+  so the deployable image does not carry torch.
+- **Why:** `adapters/vector.py:16` imports `SentenceTransformer` at module scope,
+  so *any* import of the graph pulls torch — 1.2 GB inside a 6.0 GB venv. The
+  homelab node is shared and memory-tight (the sibling repo's manifest records
+  it at "~87% on limits"), and that repo already solved the same problem the
+  same way, noting the node "may have no egress".
+  The risk that had to be cleared first was **embedding-space compatibility**:
+  the 47,640 stored vectors were produced by
+  `sentence-transformers/all-MiniLM-L6-v2`, and a replacement that embedded into
+  a different space would silently make the corpus unsearchable rather than
+  fail loudly. Verified against the live data rather than assumed — 40 real
+  articles pulled from the `article` collection, each embedded with both
+  encoders and compared to its own stored vector:
+
+      fastembed vs sentence-transformers : min 1.000000  mean 1.000000
+      fastembed vs STORED vectors        : min 1.000000  mean 1.000000
+      sentence-transformers vs STORED    : min 1.000000  mean 1.000000
+
+  Identical to six decimal places: same ONNX weights, same mean pooling, both
+  L2-normalised 384-dim. This is a runtime swap, not a corpus migration, and
+  `APPROX_NEAR_COSINE` results are unchanged because the query vector is
+  bit-comparable.
+  Two alternatives lost. Keeping torch and accepting a ~2 GB image: rejected
+  because the constraint is the node's memory, not the registry's disk.
+  Splitting into a torch-free web image and a torch-carrying ingest image:
+  rejected as unnecessary once the dependency is gone entirely — though whether
+  web and ingest still warrant *separate* images for credential and PVC-write
+  reasons is a live question for the deployment plan, not settled here.
+- **Outcome:** pending — verified compatible, not yet implemented; TDD, and the
+  red test must pin agreement with the *stored* vectors rather than merely that
+  the module imports.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

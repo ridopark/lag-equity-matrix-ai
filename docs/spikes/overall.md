@@ -2424,10 +2424,59 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — see Q-42
 - **Status:** Accepted
 
+### D-89 — A join node whose in-edges land in different supersteps fires twice; the news node stays where it is
+- **When:** 2026-09-09T05:05:00-05:00
+- **Decision:** `vector_retriever` keeps fanning out from `route_on_neighbourhood`,
+  in the same `Send` wave as `leader_state`. The proposal to dispatch it from
+  `START` — so news retrieval runs concurrently with `graph_retriever` rather
+  than after it — is **rejected as unsafe**, not deferred.
+- **Why:** the proposal assumed LangGraph runs a join node once regardless of
+  which superstep each input arrives in. That is false on the installed
+  version. Reproduced twice independently, with a minimal graph mirroring this
+  one's exact shape (`START -Send-> {A,V}`; `A -Send-> L`; `L,V -> J`):
+
+      J fired 2 time(s):
+        a_out=['a:X']         v_out=['v:X']    <- partial, L had not run
+        a_out=['a:X','l:X']   v_out=['v:X']    <- full
+
+  `context_fusion` runs exactly once today *because* both its sources are Sent
+  by the single `route_on_neighbourhood` call and therefore complete in one
+  superstep. Moving `vector_retriever` to `START` would put it a full superstep
+  ahead of `leader_state` (which genuinely depends on `graph_retriever`), so
+  `context_fusion` would fire once on partial state — `leader_shocks` not yet
+  written, every `movers` list empty, and a spurious "no shock for candidate's
+  own move" error appended for `origin_leader` candidates whose shock simply
+  had not arrived — and again on complete state. Because `evidence` and
+  `errors` use `Annotated[..., add]`, the two passes are **concatenated, not
+  replaced**. `evidence_by_key` would self-heal (dict `_merge`, last write
+  wins); the flat channels several tests read directly would not.
+  Two alternatives lost: reopening `defer=True` (declined by D-35, and this is
+  not a strong enough reason to reverse it), and making `fuse_evidence`
+  idempotent (rewrites the well-tested Q-12 cluster-discount logic to buy
+  diagram accuracy — disproportionate).
+  A third, narrower change was offered and also declined: ungating
+  `vector_retriever` from `lag_edges` so dropped candidates still get news.
+  It is safe, but it does **not** move the node in the diagram — which was the
+  entire motivation — and it buys an invisible gap (no surface displays news
+  for an unassessed candidate) at the cost of a vector query per dropped
+  candidate plus a phantom `news_by_key` entry. Declined as work that does not
+  serve its own stated goal.
+  What remains true and is worth stating plainly: `vector_retriever` has **no
+  data dependency** on the graph half (D-83 reduced its query to `c.symbol`
+  alone), so its position is a scheduling artefact, not a requirement. The
+  pipeline is ordered the way it is because of how the join is built, not
+  because news needs the graph. That is now a presentation problem, handled by
+  rewriting the page's narrative rather than the topology.
+- **Outcome:** pending — no code changed; `src/lagmatrix/graph/nodes/vector_retriever.py`'s
+  docstring was corrected in `829d279` to stop claiming the node reads the
+  leader list.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-44 | Should the graph be reshaped so retrieval that has no data dependency can actually run concurrently? | D-89, D-35, `graph/builder.py` | D-89 establishes that `vector_retriever`'s position after `graph_retriever` is a scheduling artefact — it needs only `c.symbol` (D-83) — but that it cannot simply be moved, because `context_fusion`'s join fires once per superstep in which any in-edge fires, and `evidence`/`errors` use concatenating reducers. So the pipeline serialises two independent lookups and the live page's own latency numbers understate what the design could do. Answered by one of: making `fuse_evidence` idempotent so a double firing is harmless (the honest general fix, and the one that would also make the graph robust to future joins); reconsidering `defer=True`, which D-35 declined for reasons that predate this evidence; or deciding the serialisation is acceptable and saying so on the page rather than leaving the diagram to imply a dependency that does not exist. Not urgent: the measured cost is one superstep of wall-clock on runs that complete in ~3 seconds. |
 | Q-43 | The 9 ArangoDB-dependent tests cannot pass in this environment and skip silently — how should live tests fail loudly instead? | `tests/test_arango_topology.py`, `tests/test_vector_index.py`, `tests/test_market_scan.py`, `scripts/serve.py:52` | Measured 2026-09-09, two independent faults, both rendering as a clean `skip`: **(a)** the tests default to `http://localhost:8529` (`test_arango_topology.py:57`) while the app defaults to `http://localhost:19999` (`serve.py:52`) — 8529 is closed, 19999 is the live tunnel; **(b)** pointed at the correct URL they get `[HTTP 401][ERR 11] bad username/password`, because the tests do not read the credential from `~/.lagmatrix-arango-pw` the way `serve.py:72` does. So the whole graph layer — `ArangoTopology`, `MarketScan`'s live path, `NewsIndex` — has never been exercised by a passing test here, while the suite reports `111 passed, 9 skipped` and looks healthy. This is the same pathology already seen once in this project (a stale listener made live tests skip rather than fail); the skip-if-unreachable guard is doing exactly what it was written to do, which is the problem. Related but distinct: **nothing under `tests/` imports `scripts/serve.py` or `scripts/capture_showcase.py` at all**, so a broken import there leaves the suite fully green — demonstrated 2026-09-09 when deleting `rank_by_room` broke `serve.py`'s import and the suite still reported 111 passed. Answered by deciding what a live test should do when the dependency is absent: skip is right for a laptop with no tunnel, but there is currently no mode in which its absence is an error, so nobody ever learns the tests are dead. Options: an opt-in `LAGMATRIX_REQUIRE_LIVE=1` that converts skip to failure, aligning the default URL and credential lookup with `serve.py`'s, and a one-line import smoke test for the two scripts. |
 | Q-42 | If the supply graph is a correlation filter with extra steps, what does the GraphRAG premise actually buy? | D-88, D-74, `adapters/arango.py`, `scripts/serve_index.html` | D-88 shows the contemporaneous linked-vs-control co-move is fully explained by trailing correlation, with a *negative* residual (−0.093, z=−2.98; −0.317, z=−2.54 on replication). The live page presents the supply graph as the thing that finds non-obvious candidates. If a correlation screen selects the same names more cheaply, that framing needs to change or be defended. Three things the graph plausibly still buys, none yet measured: **direction** (the sign of the thesis, which correlation alone does not give), **an interpretable rationale** (a filing sentence a human can check, which is the actual product), and **candidates a correlation screen would rank too low to surface**. Answered by running the scan with the supply traversal replaced by a top-k trailing-correlation screen on the same dates and comparing the candidate sets and their forward returns — if the sets largely coincide and neither predicts, the graph is doing presentational work, which is a legitimate answer but a different claim from the one the page makes. Note the binding constraint from D-88's consult: **chains, not dates** — 105 distinct suppliers across 67 leaders cannot resolve a D-74-sized effect at any date count. |
 | ~~Q-41~~ | The `responded` bucket never fires — is `x >= y` the wrong bar for "already moved too much to enter"? | D-84, D-87 | **The premise was wrong, and the correction matters more than the question.** This was logged from a single scan date (2026-05-11, 0 of 19) and generalised into a structural claim. Measured over 432 dates, `responded` fires on **7.7%** of supplier-events; reproduced on the production code path over 13 sampled dates at **4 of 76 (5.3%)**, firing on 3 of those 13 dates. 69% of dates with >= 8 candidates have zero `responded`, so 0-of-19 is the *modal* outcome, not an anomaly (P = 0.22 under independence), and 40% of dates have a max ratio below that scan's 0.61. The bar was never the problem. Answered by D-87, which deletes the bucket for an entirely different and measured reason — non-predictiveness — not for being unreachable. Lesson worth keeping: one date is not a sample, and this entry asserted a property of the design from n=1. |

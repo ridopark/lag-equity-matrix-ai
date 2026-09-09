@@ -44,19 +44,13 @@ cannot reach the real `equity`/`supplies_to` even by mistake.
 
 from __future__ import annotations
 
-import os
-import socket
 from datetime import date
-from urllib.parse import urlparse
 
 import pytest
 
+from conftest import arango_db_or_skip
 from lagmatrix.adapters.arango import ArangoTopology
 from lagmatrix.domain.models import LagEdge
-
-ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:8529")
-ARANGO_USER = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
-ARANGO_PASSWORD = os.environ.get("LAGMATRIX_ARANGO_PASSWORD", "")
 
 # A disposable database of its own -- never the real `lagmatrix` -- so the
 # collection names below can match production (`equity`/`supplies_to`, which
@@ -92,29 +86,7 @@ def topology():
     only reachable via the homelab's ssh+kubectl route); CI's PHASE-8 service
     container is where this actually runs.
     """
-    arango = pytest.importorskip("arango")
-
-    # Skip fast. python-arango retries internally and takes ~54s to give up on an
-    # unreachable host -- `request_timeout` does not govern that -- so a plain
-    # `verify=True` made every local run without a tunnel cost a minute per file
-    # before skipping. A one-second TCP probe answers the same question.
-    parsed = urlparse(ARANGO_URL)
-    try:
-        with socket.create_connection(
-            (parsed.hostname, parsed.port or 8529), timeout=1
-        ):
-            pass
-    except OSError as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
-    try:
-        client = arango.ArangoClient(hosts=ARANGO_URL)
-        sys_db = client.db("_system", username=ARANGO_USER, password=ARANGO_PASSWORD, verify=True)
-    except Exception as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
-
-    if not sys_db.has_database(ARANGO_DB_NAME):
-        sys_db.create_database(ARANGO_DB_NAME)
-    db = client.db(ARANGO_DB_NAME, username=ARANGO_USER, password=ARANGO_PASSWORD)
+    db = arango_db_or_skip(ARANGO_DB_NAME)
 
     if not db.has_collection(VERTEX):
         db.create_collection(VERTEX)

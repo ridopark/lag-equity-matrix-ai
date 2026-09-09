@@ -48,26 +48,20 @@ weakened one.
 
 from __future__ import annotations
 
-import os
-import socket
 from datetime import date
 from unittest import mock
-from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import arango_db_or_skip
 from lagmatrix.adapters.arango import ArangoTopology
 from lagmatrix.adapters.candidates import MarketScan
 from lagmatrix.domain.models import Candidate, LagEdge
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
 from lagmatrix.shocks import standardised_moves
-
-ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:8529")
-ARANGO_USER = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
-ARANGO_PASSWORD = os.environ.get("LAGMATRIX_ARANGO_PASSWORD", "")
 
 # A disposable database of its own -- never the real `lagmatrix` -- distinct
 # from `test_arango_topology.py`'s own disposable database of the same shape,
@@ -468,25 +462,7 @@ def topology():
     and `LATEFILED` (filed well after) -- in a disposable database. Skips
     cleanly if nothing is reachable, exactly like `test_arango_topology.py`.
     """
-    arango = pytest.importorskip("arango")
-
-    # Fast TCP probe before a real connection attempt -- python-arango's own
-    # retry/backoff on an unreachable host costs ~54s per file otherwise.
-    parsed = urlparse(ARANGO_URL)
-    try:
-        with socket.create_connection((parsed.hostname, parsed.port or 8529), timeout=1):
-            pass
-    except OSError as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
-    try:
-        client = arango.ArangoClient(hosts=ARANGO_URL)
-        sys_db = client.db("_system", username=ARANGO_USER, password=ARANGO_PASSWORD, verify=True)
-    except Exception as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
-
-    if not sys_db.has_database(ARANGO_DB_NAME):
-        sys_db.create_database(ARANGO_DB_NAME)
-    db = client.db(ARANGO_DB_NAME, username=ARANGO_USER, password=ARANGO_PASSWORD)
+    db = arango_db_or_skip(ARANGO_DB_NAME)
 
     if not db.has_collection(VERTEX):
         db.create_collection(VERTEX)

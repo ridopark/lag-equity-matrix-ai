@@ -28,19 +28,13 @@ is where this actually runs.
 
 from __future__ import annotations
 
-import os
-import socket
 from datetime import date
-from urllib.parse import urlparse
 
 import pytest
 
+from conftest import arango_db_or_skip
 from lagmatrix.adapters.vector import NewsIndex
 from lagmatrix.domain.models import NewsChunk
-
-ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:8529")
-ARANGO_USER = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
-ARANGO_PASSWORD = os.environ.get("LAGMATRIX_ARANGO_PASSWORD", "")
 
 # A disposable database of its own -- never the real `lagmatrix` -- so the
 # collection name below can match production (`article`, which NewsIndex
@@ -86,30 +80,8 @@ def index():
     -- the latter two embedded as exact duplicates of the query so a missing
     or ignored `as_of` filter cannot pass by ranking alone.
     """
-    arango = pytest.importorskip("arango")
-
-    # Skip fast. python-arango retries internally and takes ~54s to give up on an
-    # unreachable host -- `request_timeout` does not govern that -- so a plain
-    # `verify=True` made every local run without a tunnel cost a minute per file
-    # before skipping. A one-second TCP probe answers the same question.
-    parsed = urlparse(ARANGO_URL)
-    try:
-        with socket.create_connection(
-            (parsed.hostname, parsed.port or 8529), timeout=1
-        ):
-            pass
-    except OSError as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
+    db = arango_db_or_skip(ARANGO_DB_NAME)
     sentence_transformers = pytest.importorskip("sentence_transformers")
-    try:
-        client = arango.ArangoClient(hosts=ARANGO_URL)
-        sys_db = client.db("_system", username=ARANGO_USER, password=ARANGO_PASSWORD, verify=True)
-    except Exception as exc:
-        pytest.skip(f"ArangoDB not reachable at {ARANGO_URL}: {exc}")
-
-    if not sys_db.has_database(ARANGO_DB_NAME):
-        sys_db.create_database(ARANGO_DB_NAME)
-    db = client.db(ARANGO_DB_NAME, username=ARANGO_USER, password=ARANGO_PASSWORD)
 
     if db.has_collection(ARTICLE):
         db.delete_collection(ARTICLE)

@@ -854,3 +854,119 @@ def test_lag_response_absent_when_origin_leader_is_unset():
     assert fused["room_by_key"].get(key) is None
     assert fused["origin_status_by_key"].get(key) is None
     assert not any(e.kind == "lag_response" for e in fused["evidence"])
+
+
+# --- Fix: candidate's own shock missing must not masquerade as "open" -----
+
+
+def _candidate_without_own_shock() -> tuple[str, Runtime[LagMatrixContext], dict]:
+    """`X`'s `origin_leader` `Y` has a `Shock`; `X` itself does not -- the
+    defect case (`context_fusion.py`'s `cand_z = ... else 0.0` fallback,
+    read together with the `x_component == 0` -> "open"/`room=1.0` branch).
+
+    Built by handing `fuse_evidence` a `leader_shocks` dict directly
+    (`{key: [Shock(symbol="Y", ...)]}`, no `Shock` for `X`) rather than
+    routing through `leader_state`: `leader_state`'s `sym == c.symbol`
+    clause gives the candidate a `Shock` of its own whenever `c.symbol` is a
+    column of `returns`, so there is no ordinary market-data fixture where a
+    normally-trading candidate ends up without one -- only a hand-built
+    `leader_shocks` input reproduces "the shock is missing" honestly, per
+    the assignment. `lag_edges=[]` so `leaders == []` and the pre-existing
+    `leader_move` loop (unrelated, must not move -- see D-84) never runs;
+    `c.origin_leader in shocks` alone is what keeps `fuse_evidence`'s `if
+    not leaders and not (...): continue` guard from skipping the candidate
+    outright, exactly as it does for every other PHASE-3 test above.
+    """
+    closes = pd.DataFrame(
+        {"X": [100.0, 101.0, 102.0], "Y": [50.0, 50.5, 51.0]},
+        index=pd.bdate_range("2026-01-01", periods=3, tz="UTC"),
+    )
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+    shock_y = Shock(symbol="Y", pct_change=0.06, sigma=3.0, lookback_days=3, date=date(2026, 1, 10))
+    rt = _runtime(closes)
+    state = {"candidates": [cand], "lag_edges": [], "leader_shocks": {key: [shock_y]}}
+    return key, rt, state
+
+
+def test_lag_response_skipped_when_candidates_own_shock_is_missing():
+    """The defect: `origin_leader` (`Y`) resolves in `shocks` but the
+    candidate's OWN symbol (`X`) does not, so `cand_z` silently falls back
+    to `0.0`. Under D-84's classification that reads as "candidate moved by
+    exactly zero" -- the strongest possible "open" signal (`room=1.0`) --
+    when the truth is "we don't know if it moved". The whole `lag_response`
+    block must be skipped instead: no `room_by_key`/`origin_status_by_key`
+    entry for this key, and no `lag_response` Evidence anywhere.
+
+    Today this fails: `room_by_key[key] == 1.0` and
+    `origin_status_by_key[key] == "open"` with one `lag_response` Evidence
+    emitted -- identical to the deliberate "truly unmoved" case above,
+    because nothing currently distinguishes "moved by exactly zero" from
+    "unknown".
+
+    Falsifies if: `room_by_key`/`origin_status_by_key` gain any entry for
+    this key, or a `lag_response` Evidence appears in `fused["evidence"]`.
+    """
+    key, rt, state = _candidate_without_own_shock()
+
+    fused = fuse_evidence(state, rt)
+
+    assert key not in fused["room_by_key"]
+    assert key not in fused["origin_status_by_key"]
+    assert not any(e.kind == "lag_response" for e in fused["evidence"])
+
+
+def test_lag_response_missing_candidate_shock_is_reported_in_errors():
+    """The skip above must be observable, not silent -- this repo's
+    CLAUDE.md is explicit that a silent path must be given an explicit
+    outcome. House style: `graph_retriever.retrieve_neighbourhood`'s
+    `errors` list (`f"{c.symbol} {c.as_of}: <reason>"`, collected in a local
+    list and returned under the `"errors"` key) -- `fuse_evidence` does not
+    return that key at all yet.
+
+    Today this fails with `KeyError: 'errors'`.
+
+    Falsifies if: `"errors"` is absent, has a length other than 1, or its
+    one message does not contain the candidate's symbol ("X").
+    """
+    key, rt, state = _candidate_without_own_shock()
+
+    fused = fuse_evidence(state, rt)
+
+    assert len(fused["errors"]) == 1
+    assert "X" in fused["errors"][0]
+
+
+def test_lag_response_ordinary_case_unaffected_by_the_missing_shock_fix():
+    """Invariance guard: when the candidate DOES have its own `Shock` (the
+    ordinary case every PHASE-3 test above exercises), the fix must be a
+    complete no-op -- same `room`/`origin_status`/`lag_response` Evidence as
+    before the fix, and no error reported. Reuses the existing
+    `_lag_response_closes`/`_run_lag_response_chain` fixture (the "open,
+    unmoved" case from `test_lag_response_open_when_candidate_has_not_moved`)
+    rather than a new one, per the assignment. `fused.get("errors", [])` so
+    this passes both before the fix (no `"errors"` key at all) and after
+    (an empty one) -- it is already expected to pass today, not forced red.
+
+    Falsifies if: `room`/`origin_status`/the `lag_response` Evidence differ
+    from `test_lag_response_open_when_candidate_has_not_moved`'s values, or
+    any error is reported for this candidate.
+    """
+    closes = _lag_response_closes([0.0, 0.0, 0.0])
+    cand = Candidate(
+        symbol="X", direction="up", as_of=date(2026, 1, 15), origin="scan", origin_leader="Y"
+    )
+    key = candidate_key(cand)
+
+    fused = _run_lag_response_chain(closes, cand)
+
+    assert fused["room_by_key"][key] == 1.0
+    assert fused["origin_status_by_key"][key] == "open"
+    lag_ev = [e for e in fused["evidence"] if e.kind == "lag_response"]
+    assert len(lag_ev) == 1
+    assert lag_ev[0].symbol == "Y"
+    assert lag_ev[0].supports is True
+    assert lag_ev[0].weight == 1.0
+    assert fused.get("errors", []) == []

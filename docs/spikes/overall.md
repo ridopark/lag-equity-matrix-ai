@@ -2303,6 +2303,34 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `check_baseline.py --synthetic` unchanged at 6 identical rows).
 - **Status:** Accepted
 
+### D-86 — A missing candidate move is an explicit no-result, not `room = 1.0`
+- **When:** 2026-09-08T19:05:00-05:00
+- **Decision:** `fuse_evidence` skips the D-84 lag-response classification
+  entirely when `c.symbol` has no `Shock` — no `Evidence`, no `room_by_key`
+  entry, no `origin_status_by_key` entry — and appends a message to a new
+  `"errors"` list it now returns, in `graph_retriever`'s existing house style
+  (`f"{c.symbol} {c.as_of}: no shock for candidate's own move"`).
+- **Why:** `cand_z = shocks[c.symbol].sigma if c.symbol in shocks else 0.0`
+  fed `x_component`, so an absent candidate shock read as `x_component == 0`,
+  which D-84 classifies as **open with `room = 1.0`** — the maximum. Missing
+  data about the candidate's own move therefore masqueraded as the strongest
+  possible signal and sorted to the *top* of the ranked list, with nothing to
+  indicate anything was wrong. The alternative was leaving it: verified latent
+  (0 of 19 on the real 2026-05-11 scan, no `NaN` rooms), so nothing published
+  is affected. Rejected because the failure mode is silent and inverted —
+  the worst kind — and CLAUDE.md requires a silent path be given an explicit
+  outcome rather than a plausible-looking default.
+  Deliberately **not** widened to the pre-existing `leader_move` loop, which
+  keeps its own `else 0.0` fallback: that branch feeds published
+  corroboration-mode results, and changing it would move them. Scoped to the
+  lag-response block only.
+- **Outcome:** Verified. The real 2026-05-11 scan is byte-identical after the
+  change — same 19 candidates, same 8 open / 11 opposed, same rooms
+  (0.9859 … 0.3896) — with `errors` empty, confirming the guard costs nothing
+  when the data is present. 118 passed, 9 skipped; `check_baseline.py
+  --synthetic` unchanged at 6 identical rows.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

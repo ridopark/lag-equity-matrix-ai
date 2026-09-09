@@ -32,6 +32,7 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
     effective_by_key: dict[str, float] = {}
     room_by_key: dict[str, float | None] = {}
     origin_status_by_key: dict[str, str | None] = {}
+    errors: list[str] = []
 
     for c in state.get("candidates", []):
         key = candidate_key(c)
@@ -76,43 +77,50 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
                 )
 
         if c.origin_leader and c.origin_leader in shocks:
-            y_component = shocks[c.origin_leader].sigma * want
-            x_component = cand_z * want
-
-            if y_component <= 0:
-                pass  # degenerate: no Evidence, no room/status entry
-            elif x_component < 0:
-                origin_status_by_key[key] = "opposed"
-                room_by_key[key] = None
-                c_effective += 1.0
-                c_evidence.append(
-                    Evidence(
-                        kind="lag_response",
-                        symbol=c.origin_leader,
-                        supports=False,
-                        weight=1.0,
-                        detail=(f"{c.origin_leader} moved {y_component:+.2f}σ toward the thesis "
-                                f"while {c.symbol} moved {x_component:+.2f}σ against it"),
-                    )
-                )
-            elif x_component >= y_component:
-                origin_status_by_key[key] = "responded"
-                room_by_key[key] = 0.0
+            if c.symbol not in shocks:
+                errors.append(f"{c.symbol} {c.as_of}: no shock for candidate's own move")
             else:
-                origin_status_by_key[key] = "open"
-                room_by_key[key] = round(1 - x_component / y_component, 4)
-                c_effective += 1.0
-                c_evidence.append(
-                    Evidence(
-                        kind="lag_response",
-                        symbol=c.origin_leader,
-                        supports=True,
-                        weight=1.0,
-                        detail=(f"{c.origin_leader} moved {y_component:+.2f}σ toward the thesis "
-                                f"while {c.symbol} moved {x_component:+.2f}σ; "
-                                f"room={room_by_key[key]}"),
+                y_component = shocks[c.origin_leader].sigma * want
+                x_component = cand_z * want
+
+                if y_component <= 0:
+                    pass  # degenerate: no Evidence, no room/status entry
+                elif x_component < 0:
+                    origin_status_by_key[key] = "opposed"
+                    room_by_key[key] = None
+                    c_effective += 1.0
+                    c_evidence.append(
+                        Evidence(
+                            kind="lag_response",
+                            symbol=c.origin_leader,
+                            supports=False,
+                            weight=1.0,
+                            detail=(
+                                f"{c.origin_leader} moved {y_component:+.2f}σ toward the "
+                                f"thesis while {c.symbol} moved {x_component:+.2f}σ against it"
+                            ),
+                        )
                     )
-                )
+                elif x_component >= y_component:
+                    origin_status_by_key[key] = "responded"
+                    room_by_key[key] = 0.0
+                else:
+                    origin_status_by_key[key] = "open"
+                    room_by_key[key] = round(1 - x_component / y_component, 4)
+                    c_effective += 1.0
+                    c_evidence.append(
+                        Evidence(
+                            kind="lag_response",
+                            symbol=c.origin_leader,
+                            supports=True,
+                            weight=1.0,
+                            detail=(
+                                f"{c.origin_leader} moved {y_component:+.2f}σ toward the "
+                                f"thesis while {c.symbol} moved {x_component:+.2f}σ; "
+                                f"room={room_by_key[key]}"
+                            ),
+                        )
+                    )
 
         news_n = len(news_by_key.get(key, []))
         if news_n:
@@ -134,4 +142,5 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
         "effective_evidence_by_key": effective_by_key,
         "room_by_key": room_by_key,
         "origin_status_by_key": origin_status_by_key,
+        "errors": errors,
     }

@@ -2993,7 +2993,32 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Why:** the alternative was answering from the earlier nulls by analogy. That
   would have been wrong: the conditional hypothesis is genuinely untested, the
   machinery to test it already exists, and the cost is one script.
-- **Outcome:** pending — not yet run at the time of writing
+- **Outcome:** **NULL, and this one is adequately powered.** 1,316,228 partner
+  observations against 1,351,974 controls, over **751 date clusters**,
+  2017-09-07..2026-08-31:
+
+      partner (next session)   -0.0001σ
+      control                  -0.0006σ
+      partner - control = +0.0005 (0.0174)   z = +0.03
+      realised MDE = 0.0487σ   against a 0.10 threshold
+
+  The difference is +0.0005σ — indistinguishable from zero — and the realised MDE
+  is **half** the pre-declared threshold, so an effect of tradeable size could not
+  have been missed. This is not an underpowered shrug like D-92.
+  **Getting here required two data bugs to be found first**, and both are worth
+  recording because the first run reported a mean of 11,612σ:
+  (1) the eleven >1000% returns of D-100; and (2) symbols whose trailing
+  volatility is essentially zero — `EVER` sat at **3.67e-11** for stretches of
+  2018, so market-excess subtraction alone gave it a "response" of 593 million
+  sigma. A `sd > 0` guard is not sufficient; the script now floors volatility at
+  0.1%/day. Note the second bug was invisible to a check on *raw* returns, whose
+  worst `|r/vol|` is a harmless 7.75 — it only appears once the market is
+  subtracted.
+  This makes **four** pre-registered tests of the lag hypothesis, all null:
+  D-59/D-60 (intraday), D-73/D-74 (supply chain, t+1), D-93/D-94 (all pairs, all
+  lags, out of sample), and now D-99 (shock-conditional partners, t+1). The
+  conditional form was the last shape that could plausibly have hidden an effect
+  the unconditional tests missed. It does not.
 - **Status:** Accepted
 
 ### D-100 — Eleven corrupt returns inflated D-95's headline from 0.586 to 0.640

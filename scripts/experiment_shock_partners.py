@@ -12,6 +12,11 @@ from lagmatrix import shocks as S
 
 TRAIL_SHOCK, MW, SIG = 60, 3, 2.0
 TRAIL_CORR, MIN_CORR = 250, 0.5
+# A symbol whose trailing volatility is under 0.1%/day is not trading -- halted,
+# stale, or pre-listing padding. EVER sat at vol 3.7e-11 for stretches of 2018,
+# so market-excess alone gave it a "response" of 593 million sigma. `sd > 0` is
+# not a sufficient guard; a floor is.
+MIN_VOL = 1e-3
 THRESHOLD = 0.10                      # D-99, declared in advance
 COVERAGE = 0.90
 
@@ -21,6 +26,7 @@ def main() -> None:
     closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
     rets = closes.pct_change()
     idx = list(closes.index)
+    rets = rets.mask(rets.abs() > 10.0)   # D-100, before anything derives from it
     mkt = rets.mean(axis=1)
     vol = rets.rolling(TRAIL_SHOCK).std()
     rng = np.random.default_rng(0)
@@ -63,14 +69,14 @@ def main() -> None:
             for sym, c in partners:
                 sd = vol[sym].iloc[ti]
                 r = nxt.get(sym, np.nan)
-                if np.isfinite(r) and np.isfinite(sd) and sd > 0:
+                if np.isfinite(r) and np.isfinite(sd) and sd >= MIN_VOL:
                     rows.append((idx[ti].date(), "partner",
                                  want * np.sign(c) * r / sd))
             pool = [s for s in syms if s != x and abs(col[pos[s]]) < MIN_CORR]
             for sym in rng.choice(pool, size=min(len(partners), len(pool)), replace=False):
                 sd = vol[sym].iloc[ti]
                 r = nxt.get(sym, np.nan)
-                if np.isfinite(r) and np.isfinite(sd) and sd > 0:
+                if np.isfinite(r) and np.isfinite(sd) and sd >= MIN_VOL:
                     rows.append((idx[ti].date(), "control", want * r / sd))
 
     df = pd.DataFrame(rows, columns=["date", "kind", "resp"])

@@ -157,6 +157,35 @@ line.se{stroke:var(--line);stroke-width:1} line.se.sel{stroke:var(--graph);strok
 .err{background:rgba(242,114,107,.12);color:var(--bad);padding:.6rem .8rem;border-radius:4px;
   font-family:var(--mono);font-size:.78rem;margin-top:1rem}
 .empty{color:var(--ink3);font-size:.83rem;font-style:italic}
+/* --- leader explorer: pick a date, pick a mover, see what moves with it --- */
+.expl{display:grid;grid-template-columns:minmax(0,20rem) minmax(0,1fr);gap:1.1rem;
+  margin-top:1.1rem;align-items:start}
+@media(max-width:820px){.expl{grid-template-columns:1fr}}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.pane>h3{margin:0;padding:.6rem .8rem;font:500 .78rem/1.3 var(--body);color:var(--ink2);
+  border-bottom:1px solid var(--line2);background:var(--panel2)}
+.pane>h3 span{color:var(--ink3);font:400 .72rem var(--mono)}
+.mv{max-height:26rem;overflow:auto}
+.mv button{display:grid;grid-template-columns:4.6rem 1fr auto;gap:.55rem;align-items:center;
+  width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);
+  padding:.42rem .8rem;color:var(--ink);font:400 .8rem/1.3 var(--mono);cursor:pointer}
+.mv button:hover{background:var(--panel2)}
+.mv button[aria-current="true"]{background:rgba(79,227,193,.10);color:var(--graph)}
+.mv .z{font-variant-numeric:tabular-nums;color:var(--ink2)}
+.mv .z.up{color:var(--graph)} .mv .z.dn{color:var(--bad)}
+.mv .cov{font:400 .68rem var(--mono);color:var(--ink3)}
+.fl{padding:.55rem .8rem .8rem}
+.frow{display:grid;grid-template-columns:4.6rem 1fr 7.5rem;gap:.6rem;align-items:center;
+  font:400 .78rem/1.5 var(--mono);padding:.16rem 0}
+.frow b{font-weight:500}
+.ftrack{position:relative;height:9px;background:var(--panel2);border-radius:2px}
+.ftrack i{position:absolute;top:0;height:9px;border-radius:2px;background:var(--graph)}
+.ftrack i.neg{background:var(--bad)}
+.ftrack u{position:absolute;top:-2px;height:13px;border-left:1px solid var(--ink3);
+  border-right:1px solid var(--ink3);opacity:.55}
+.frow span:last-child{color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums;
+  font-size:.72rem}
+.emptyp{padding:1rem .8rem;color:var(--ink3);font-size:.82rem;line-height:1.6}
 .bars{display:grid;gap:.35rem;margin-top:1.2rem}
 .abar{display:grid;grid-template-columns:9.5rem 1fr 3.4rem;gap:.65rem;align-items:center;
   font:400 .76rem/1 var(--mono)}
@@ -236,6 +265,47 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     only appears in the list above when both are available.</p>
   <div id="err"></div>
 </header>
+
+<hr>
+
+<section>
+  <p class="eyebrow">Start here</p>
+  <h2>Pick a day, pick something that moved, see what moves with it</h2>
+  <p class="sub">Two steps, both live. <b>One:</b> sweep every company's own price history for the
+    day you choose and keep the ones whose last three sessions were unusually large for them.
+    <b>Two:</b> click one, and see the companies whose prices have actually moved with it over the
+    past year — measured, with a confidence interval on every number.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What the number is, and is not.</b> It is a
+    correlation: how reliably these two have moved <i>together</i>, same day. It is not a forecast.
+    We tested whether one company's move anticipates another's — every pair in the universe, five
+    lags, ten years, out of sample — and it does not: the relationship that looks like 0.21 in one
+    window is worth 0.03 in the next. Same-day co-movement is the opposite: it holds up at 0.64.
+    So the bars below say "these move together", never "this one moves next".</p>
+  <div class="bar" style="margin-top:1rem">
+    <label for="xdate">date</label>
+    <input id="xdate" type="date">
+    <label for="xcorr">min correlation</label>
+    <input id="xcorr" type="number" min="0.1" max="0.95" step="0.05" value="0.5"
+      style="width:5rem">
+    <button class="go" id="xgo">Scan</button>
+    <span class="status" id="xstatus"></span>
+  </div>
+  <div class="expl">
+    <div class="pane">
+      <h3>What moved <span id="xmvmeta"></span></h3>
+      <div class="mv" id="xmovers">
+        <p class="emptyp">Press Scan.</p>
+      </div>
+    </div>
+    <div class="pane">
+      <h3>Moves with it <span id="xflmeta"></span></h3>
+      <div class="fl" id="xfollowers">
+        <p class="emptyp">Pick a company on the left.</p>
+      </div>
+    </div>
+  </div>
+  <p class="note" id="xownmove" hidden></p>
+</section>
 
 <hr>
 
@@ -498,7 +568,10 @@ function stopClock(){ clearInterval(tick); tick = null; }
 fetch("/config").then(r => r.json()).then(c => {
   // The date comes from the data, not a constant baked into this page —
   // the two used to drift apart silently.
-  if (c.default_as_of) $("#asof").value = c.default_as_of;
+  if (c.default_as_of) {
+    $("#asof").value = c.default_as_of;
+    $("#xdate").value = c.default_as_of;
+  }
   if (!c.allow_real) {
     $("#realnote").insertAdjacentHTML("beforeend",
       ` <span style="color:var(--ink3)">It is not offered in this session — the server was
@@ -893,6 +966,105 @@ $("#go").addEventListener("click", () => {
     $("#status").innerHTML = `<span class="dot off"></span>failed`;
     $("#go").disabled = false;
     if (es) { es.close(); es = null; }
+  });
+});
+
+/* ---------- leader explorer: date -> movers -> followers ---------- */
+let XLEADER = null;
+
+function xfmt(n, d = 2) { return (n >= 0 ? "+" : "") + n.toFixed(d); }
+
+function drawMovers(d) {
+  $("#xmvmeta").textContent =
+    `${d.movers_found} of ${d.swept.toLocaleString()} swept`;
+  if (!d.movers.length) {
+    $("#xmovers").innerHTML =
+      `<p class="emptyp">Nothing moved unusually on ${esc(d.as_of)}. That is a real
+       answer, not an error — most days most companies do not.</p>`;
+    return;
+  }
+  $("#xmovers").innerHTML = d.movers.map(m => `
+    <button data-sym="${esc(m.symbol)}" aria-current="false">
+      <b>${esc(m.symbol)}</b>
+      <span class="z ${m.z >= 0 ? "up" : "dn"}">${xfmt(m.z)}σ</span>
+      <span class="cov">${m.followers ? m.followers + " filed" : ""}</span>
+    </button>`).join("");
+  $("#xmovers").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => pickLeader(b.dataset.sym)));
+}
+
+function drawFollowers(d) {
+  $("#xflmeta").textContent = `${d.leader} · ${d.followers_found} at |r| ≥ ${d.min_abs_corr}`;
+  $("#xownmove").hidden = false;
+  $("#xownmove").innerHTML = `<b>${esc(d.leader)} itself moved
+    ${d.leader_z === null ? "—" : xfmt(d.leader_z) + "σ"} that day.</b>
+    What it did next, measured over 40,545 past shocks across 2,153 companies: nothing
+    in particular. It continued in the same direction ${d.own_move.continued_pct}% of the
+    time — a coin flip — with a spread of ±${d.own_move.sd_sigma}σ around zero. The
+    followers below move <i>with</i> it, on the same day; none of this says what happens
+    tomorrow.`;
+  if (!d.followers.length) {
+    $("#xfollowers").innerHTML =
+      `<p class="emptyp">No company has moved with ${esc(d.leader)} reliably enough to
+       clear |r| ≥ ${d.min_abs_corr} over the past ${d.trail} sessions. Lower the
+       threshold, or take it at face value — some names really do move on their own.</p>`;
+    return;
+  }
+  const mx = Math.max(...d.followers.map(f => Math.abs(f.corr)));
+  $("#xfollowers").innerHTML = d.followers.map(f => {
+    const w = (Math.abs(f.corr) / mx) * 100;
+    const lo = (Math.abs(f.ci_low) / mx) * 100, hi = (Math.abs(f.ci_high) / mx) * 100;
+    const a = Math.min(lo, hi), b = Math.max(lo, hi);
+    return `<div class="frow">
+      <b>${esc(f.symbol)}</b>
+      <span class="ftrack">
+        <i class="${f.corr < 0 ? "neg" : ""}" style="width:${w.toFixed(1)}%"></i>
+        <u style="left:${a.toFixed(1)}%;width:${Math.max(b - a, 0.6).toFixed(1)}%"></u>
+      </span>
+      <span>${f.corr.toFixed(2)} <span style="opacity:.6">[${f.ci_low.toFixed(2)},
+        ${f.ci_high.toFixed(2)}]</span></span>
+    </div>`;
+  }).join("") + `<p class="note" style="margin-top:.7rem">The bar is the correlation over
+    ${d.followers[0].n_sessions} sessions; the brackets are its 95% interval — how precisely
+    it is measured, not a probability about the future. A negative bar is a company that
+    reliably moves the <i>other</i> way.</p>`;
+}
+
+function pickLeader(sym) {
+  XLEADER = sym;
+  $("#xmovers").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-current", String(b.dataset.sym === sym)));
+  $("#xfollowers").innerHTML = `<p class="emptyp">measuring ${esc(sym)}…</p>`;
+  const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
+                                 top_n: "18"});
+  fetch("/followers?" + q).then(r => r.json()).then(d => {
+    if (d.error) {
+      $("#xfollowers").innerHTML = `<p class="emptyp">${esc(d.error)}</p>`;
+      return;
+    }
+    d.min_abs_corr = parseFloat($("#xcorr").value) || d.min_abs_corr;
+    drawFollowers(d);
+  }).catch(e => {
+    $("#xfollowers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
+  });
+}
+
+$("#xgo").addEventListener("click", () => {
+  $("#xstatus").innerHTML = `<span class="dot on"></span>scanning…`;
+  $("#xfollowers").innerHTML = `<p class="emptyp">Pick a company on the left.</p>`;
+  $("#xownmove").hidden = true;
+  const q = new URLSearchParams({as_of: $("#xdate").value, top_n: "40"});
+  fetch("/movers?" + q).then(r => r.json()).then(d => {
+    if (d.error) {
+      $("#xmovers").innerHTML = `<p class="emptyp">${esc(d.error)}</p>`;
+      $("#xstatus").innerHTML = `<span class="dot off"></span>failed`;
+      return;
+    }
+    drawMovers(d);
+    $("#xstatus").innerHTML = `<span class="dot on"></span>${d.as_of}`;
+  }).catch(e => {
+    $("#xmovers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
+    $("#xstatus").innerHTML = `<span class="dot off"></span>failed`;
   });
 });
 

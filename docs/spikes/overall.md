@@ -2524,6 +2524,39 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — planned in `docs/plans/PLAN-2026-09-09-leader-in.md`.
 - **Status:** Accepted
 
+### D-91 — Expose how many neighbours were checked, so a negative result reads as one
+- **When:** 2026-09-09T05:50:00-05:00
+- **Decision:** `fuse_evidence` returns `neighbours_by_key: dict[str, int]` —
+  `len(leaders)`, the count of price-correlated neighbours considered — threaded
+  onto `Assessment.neighbours: int`. The card can then say "20 related companies
+  checked, none moved unusually" instead of a bare
+  `0 supporting · 0 contradicting · effective evidence 0`.
+- **Why:** the user's objection was that a reader cannot tell "we looked and
+  found nothing" from "we didn't look". Investigating that produced a
+  correction to my own earlier claim (see D-85's Outcome): the second state
+  essentially does not occur — `topk=20` against a 3,204-symbol universe gives
+  every candidate 20 neighbours, and all 19 on the 2026-05-11 scan had exactly
+  20. So the real problem is narrower and simpler than stated: the *common*
+  outcome, "checked twenty, none moved", is currently indistinguishable from
+  nothing having happened at all. Exposing the count makes a null result legible
+  as a null result rather than as an absence.
+  `len(movers)` is deliberately **not** exposed: every mover produces exactly
+  one `Evidence`, so `len(movers) == n_supporting + n_contradicting`, which the
+  card already shows. One new number, not two.
+  The alternative that lost was rewording `rationale`, which already exists and
+  is already displayed. Rejected because `rationale` is prose assembled for the
+  contradicted case and is not machine-readable; a caller wanting the count
+  would have to parse English out of it.
+  **The invariant, and the reason it is stated here rather than assumed:** this
+  count carries no weight, never enters `effective_evidence`, and is never
+  rendered as a quality or confidence score. D-87 deleted `room` for being a
+  presented number that implied a claim the measurements did not support; a
+  neighbour count is a fact about what the pipeline did, and must stay that.
+  Pinned by a test asserting `effective_evidence` is unchanged across two runs
+  whose neighbour counts differ.
+- **Outcome:** pending
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

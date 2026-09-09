@@ -2795,6 +2795,49 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   predictive.
 - **Status:** Accepted
 
+### D-95 — Contemporaneous co-movement replicates out of sample; the graph should be built from it
+- **When:** 2026-09-09T07:15:00-05:00
+- **Decision:** Build the graph from **measured co-movement over price history**,
+  with a calibrated out-of-sample confidence interval on every edge, rather than
+  from 10-K disclosures alone. The confidence number describes **how reliably two
+  names move together**, never what one does after the other.
+- **Why:** every lagged test failed (D-74, D-88, D-92, D-93, D-94). Nobody had
+  tested **lag 0** out of sample, and D-60 had already hinted it was the live
+  quantity — genuine peers at median rho 0.505 against 0.226 for controls,
+  peaking at lag 0 on 89.2% of dates. Run through D-93's own machinery, same
+  windows (discover 2016-09..2022-08, validate 2022-09..2026-09), 1,573 symbols:
+
+      lag 0, top 1000 pairs   disc |c| 0.8268  val |c| 0.7834  retained 94.8%
+      lag 1 (D-93)            disc |c| 0.2059  val |c| 0.0281  retained 14%
+
+  And across **1,236,371 pairs**, with same-company artefacts screened
+  (`|disc corr| >= 0.95` removed — 7 pairs: GOOGL/GOOG, Z/ZG, FOX/FOXA,
+  NWS/NWSA, plus NATL/LINE at exactly +1.000 flipping to −0.325, which is a data
+  artefact, not a market fact), `corr(discovery, validation) = 0.640`:
+
+      disc band        n        val mean   val sd   sign holds
+      0.3-0.40   115,155           0.260    0.121        98.7%
+      0.4-0.50    39,990           0.350    0.139        98.1%
+      0.5-0.60    12,291           0.460    0.164        96.2%
+      0.6-0.70     4,707           0.587    0.167        98.1%
+      0.7-0.95     2,214           0.712    0.129        99.5%
+
+  A pair measured at 0.6-0.7 lands at 0.587 ± 0.167 four years later with its
+  sign intact 98% of the time. The shrinkage is mild and consistent, which is
+  what makes an interval honest rather than decorative.
+  **Two things stated so they are not mistaken later.** (1) D-93's shuffled
+  control is **invalid at lag 0** — permuting dates permutes both series
+  together and preserves contemporaneous correlation exactly. It scored an
+  identical 99.6% and tests nothing here; the out-of-sample split is the real
+  control. (2) The confidence is about the *relationship*, not a forecast.
+  Same-day co-movement replicates at 0.640; next-day prediction replicates at
+  0.028. The product may state the first and must never imply the second.
+  Coverage, which blocked everything else: **1,573 symbols** with measurable
+  relationships against **76 customers** in the filings graph — about 20x — and
+  it needs no new data collection, which is what Q-45 would have required.
+- **Outcome:** pending — measured, not yet built into the pipeline
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

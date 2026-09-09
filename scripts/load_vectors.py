@@ -21,14 +21,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from datetime import date
 
 import pandas as pd
 
 HOST = "ridopark@192.168.10.123"
 PG = ("kubectl -n copytrade exec -i postgres-0 -- "
-      "psql -U temporal -d orchestrator -q -t -A -F'\x1f'")
+      "psql -U temporal -d orchestrator -q -t -A -v ON_ERROR_STOP=1 -F'\x1f'")
 DB = "lagmatrix"
 DIM = 384
 CHUNK = 400
@@ -67,7 +69,19 @@ def main() -> None:
     ap.add_argument("--since", default="2025-01-01")
     args = ap.parse_args()
 
+    # Both interpolations below land in SQL executed against the *copytrade*
+    # namespace's Postgres, so neither may carry an unvalidated value.
+    # `--since` in particular is not always operator-typed: daily_ingest.py
+    # reads it back out of ArangoDB (`MAX(a.date)`), which makes anything stored
+    # there a second-order injection source. Parse it as a date, and let a bad
+    # value fail loudly here rather than reach psql.
+    try:
+        since = date.fromisoformat(args.since).isoformat()
+    except (TypeError, ValueError):
+        sys.exit(f"--since must be an ISO date, got {args.since!r}")
     tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
+    if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
+        sys.exit("data/fires.csv holds a ticker that is not a plain symbol")
     inlist = ",".join(f"'{t}'" for t in tickers)
     sql = f"""
       WITH ok AS (SELECT article_id FROM lagmatrix.news_symbol
@@ -79,7 +93,7 @@ def main() -> None:
              (SELECT string_agg(symbol, ' ') FROM lagmatrix.news_symbol z
               WHERE z.article_id = a.id)
       FROM lagmatrix.news_article a JOIN hit ON hit.article_id = a.id
-      WHERE a.created_at >= '{args.since}';"""
+      WHERE a.created_at >= '{since}';"""
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PG], input=sql,
                        capture_output=True, text=True, timeout=1200)
     if r.returncode:

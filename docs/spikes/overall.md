@@ -3145,6 +3145,50 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   stays bounded, since that is the property under attack.
 - **Status:** Accepted
 
+### D-103 — A value stored in ArangoDB reached psql inside the trading namespace
+- **When:** 2026-09-09T23:55:00-05:00
+- **Decision:** Validate `--since` as a date at **both** ends of the ingest loop,
+  validate tickers before interpolating them, and add the missing
+  `ON_ERROR_STOP=1` so `load_vectors.py` matches the other two loaders.
+- **Why:** found by a security review of the deployment and verified line by
+  line. `load_vectors.py:82` built SQL by f-string —
+  `WHERE a.created_at >= '{args.since}'` — and piped it to
+  `kubectl -n copytrade exec -i postgres-0 -- psql -U temporal -d orchestrator`.
+  That is the **trading system's own database, in another namespace**.
+  `--since` is not always operator-typed. `daily_ingest.py:107-109` sets it from
+  `last_article_date()`, which reads it back out of ArangoDB
+  (`FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi`). So anything
+  written into `article.date` became SQL executed as `temporal` against
+  `orchestrator` — a second-order injection whose source is our own datastore.
+  Aggravating: `load_vectors.py` was the **only one of three loaders without
+  `-v ON_ERROR_STOP=1`** (compare `load_arango.py:35`, `load_news.py:38`), so an
+  injected statement would not abort and the job would report success.
+  Reachability, stated honestly rather than dramatised: it needs ArangoDB
+  **write** access first, and the HTTP surface has none — `upsert_comovement`
+  is reachable only from `daily_ingest.py`, and `ArangoTopology.upsert_edge` is
+  `NotImplementedError`. So it is not remotely triggerable today. It is the
+  mechanism that would convert a `lagmatrix` foothold into SQL execution inside
+  `copytrade`, which is precisely the adjacency that made the review worth doing.
+  **I introduced the reachable half of this today** when `daily_ingest.py` began
+  feeding a database-derived value into a script that had always interpolated it.
+  The script's f-string predates the ingest job; what was new was the loop that
+  closed it.
+  The alternative was validating only in `load_vectors.py`, at the point of use.
+  Rejected: `daily_ingest.py` also validates now, because a value coming back out
+  of a datastore deserves the same suspicion as one arriving from a user, and
+  trusting it merely because we wrote it is the assumption that created this.
+- **Outcome:** Fixed and verified. `date.fromisoformat` rejects
+  `"2026-09-07'; DROP TABLE x; --"`, `"2026-09-07 OR 1=1"` and `""`, accepting
+  only a real ISO date; tickers must match `[A-Z][A-Z.\-]{0,9}`; all three
+  loaders now carry `ON_ERROR_STOP=1`. 170 passed, baseline unchanged, ingest
+  dry-run still resumes correctly from 2026-09-07.
+  Two things deliberately NOT changed here, recorded so they are not lost:
+  `serve.py:116` still connects to ArangoDB as **root** when the serving process
+  needs only reads (a dedicated read-only grant is the right fix and is its own
+  change), and there is no NetworkPolicy restricting who may reach
+  `arangodb.lagmatrix:8529`.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

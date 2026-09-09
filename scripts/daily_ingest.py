@@ -69,7 +69,17 @@ def last_article_date() -> str | None:
             return None
         rows = list(db.aql.execute(
             "FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi"))
-        return rows[0] if rows and rows[0] else None
+        hi = rows[0] if rows else None
+        if not hi:
+            return None
+        # This value is passed to `load_vectors.py --since`, which reaches psql
+        # inside the *copytrade* namespace. It comes back out of a database, not
+        # from an operator, so it is validated here as well as there -- a stored
+        # value must never be trusted just because we are the ones who stored it.
+        try:
+            return date.fromisoformat(str(hi)).isoformat()
+        except ValueError:
+            return None
     except Exception:
         return None
 

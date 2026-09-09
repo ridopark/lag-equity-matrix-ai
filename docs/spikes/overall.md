@@ -2300,10 +2300,22 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   assert on at all. Leaving the gate and weakening those two tests was the
   alternative; it would have removed the only checks that pin `lag_response`'s
   independent behaviour.
-- **Outcome:** pending — verified not to disturb existing behaviour
-  (`tests/test_nodes.py`, `test_market_scan.py`, `test_fanout.py`: 41 passed,
-  `check_baseline.py --synthetic` unchanged at 6 identical rows).
-- **Status:** Accepted
+- **Outcome:** **Correct, but it never fires on real data — and I mis-reported
+  why it mattered.** I claimed this gate change made 11 of 19 candidates
+  assessable that D-27 had been dropping. That was wrong: I conflated `leaders`
+  with `movers`. Measured on the real 2026-05-11 scan, **every one of the 19
+  candidates has exactly 20 `leaders`** (`topk=20` against a 3,204-symbol
+  universe), so `not leaders` is never true and the old gate never dropped any
+  of them. What was 11-of-19 is `movers == 0` — the neighbours existed and none
+  of them moved. The gate change is still correct in principle (a candidate
+  whose only route in is `origin_leader` should reach fusion) and harmless, but
+  it changed nothing observable, and the "11 of 19" figure attached to it in
+  D-87 and in commit `b4fa3d7`'s message is wrong for the same reason.
+  The only way `leaders` is empty is a candidate absent from the price file or
+  short of history, and `route_on_neighbourhood` sends that to `END` before
+  fusion is reached.
+- **Status:** Accepted — but see the corrected Outcome; the justification
+  originally given for it was measured wrong
 
 ### D-86 — A missing candidate move is an explicit no-result, not `room = 1.0`
 - **When:** 2026-09-08T19:05:00-05:00
@@ -2385,10 +2397,13 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   with), which in turn let the replacement tests call `retrieve_neighbourhood`
   for real — closing the old suite's caveat that its "end-to-end" only held
   from `leader_state` onward. And the D-85 admit gate was kept in simplified
-  form (`if not leaders and not c.origin_leader`), so the 11-of-19 candidates
-  it made visible stay visible as neutral cards carrying a description; D-27
-  governs evidence *sourcing*, not display, and a description cannot
-  manufacture confluence because it is not evidence.
+  form (`if not leaders and not c.origin_leader`). **Correction:** the
+  "11-of-19 candidates it made visible" claim repeated here is wrong — see
+  D-85's corrected Outcome. Those 11 had 20 neighbours each and were always
+  being assessed; what they lacked was any neighbour that *moved*. The gate
+  change is right in principle and observably inert. D-27 governs evidence
+  *sourcing*, not display, and a description cannot manufacture confluence
+  because it is not evidence.
 - **Status:** Accepted — supersedes D-84
 
 ### D-88 — The supply graph's contemporaneous effect is a selection artefact, not a supply-chain effect

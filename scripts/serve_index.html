@@ -201,68 +201,30 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 
 <header>
   <p class="eyebrow">LangGraph · ArangoDB · GraphRAG · live</p>
-  <h1>Which companies would feel it first?</h1>
-  <p class="lede">Start from what actually moved today — then ask the filings whether a real
-    relationship explains it.</p>
-  <p class="sub" style="margin-top:.8rem"><b>Why that order matters.</b> The obvious way round is
-    to take a company, look up whoever it correlates with, and check whether they moved. That
-    cannot tell you anything: neighbours picked because they move together will be found to move
-    together — it is the definition, checked against itself. So this starts at the other end. It
-    sweeps every company's own price history for the ones that just moved, then uses the graph to
-    ask whether a genuine, dated, directed relationship exists among them: a company that named
-    the mover as a customer in an SEC filing, filed before the date in question. The graph is used
-    to <em>verify</em> a relationship, not to pick one.</p>
-  <p class="sub" style="margin-top:.5rem">Press Run and it happens in front of you — no recording,
-    no replay. Everything with a number attached was measured during the run you just triggered.
-    The older <b>corroboration-first</b> ordering is still in the dropdown, where a company arrives
-    from an outside alert feed and the graph looks up its neighbours to check the story; it is
-    labelled as such.</p>
-  <div class="bar">
-    <label for="src">source</label>
-    <select id="src"><option value="synthetic">alert feed, invented data — corroboration-first</option></select>
-    <label for="lim">limit</label>
-    <input id="lim" type="number" min="1" value="3" style="width:4.5rem">
-    <button class="go" id="go">Run</button>
-    <span class="status" id="status"><span class="dot" id="rag"></span><span id="ragtxt">checking…</span></span>
-  </div>
-  <p class="sub" style="margin-top:1rem"><b>What is "limit"?</b> How many companies this run
-    should assess. The feed holds more than that; the limit just takes the first few so a run
-    finishes in a couple of seconds instead of grinding through everything. It is the knob that
-    controls how much parallel work happens — the pipeline starts one independent branch per
-    company, so a limit of 3 means three branches running at once, and 200 means 200. Raising it
-    does not change any answer; it changes how much work you are watching.
-    <span style="color:var(--ink3)">(The diagram draws the first few branches in full and counts
-    the rest, since 200 identical branches side by side would be unreadable. The timing chart
-    below it still measures every one.)</span></p>
-  <p class="sub" style="margin-top:.5rem"><b>A large limit looks frozen, briefly.</b> The graph
-    finishes a whole stage for every company before it reports anything, so with 50 companies
-    nothing appears on screen for the first ten seconds or so, and then it all arrives at once.
-    The counter next to the Run button keeps ticking so you can tell it is working rather than
-    stuck.</p>
-  <p class="sub" style="margin-top:.7rem"><b>Which data?</b>
-    <b style="color:var(--ink2)">Synthetic</b> means invented companies with invented prices —
-    tickers like <code>SYNA</code> and <code>SYNB</code> that do not exist. They ship with the
-    source code, so anyone can clone the repository and press Run without needing credentials,
-    a market-data subscription, or anything private. Nothing you see under that option is a real
-    quote, a real company, or a real trade.</p>
-  <p class="sub" style="margin-top:.5rem" id="realnote"><b style="color:var(--ink2)">Real market
-    data</b> means genuine share prices and the genuine feed of options alerts this project was
-    built to evaluate. Both are licensed vendor data and a private signal feed, so
-    <b>neither is in the repository</b> — the option only appears when the server is started with
-    <code>--allow-real</code> on a machine that already holds those files locally. Nothing is
-    uploaded anywhere; "this machine only" is literal.</p>
-  <p class="sub" style="margin-top:.5rem" id="scannote"><b style="color:var(--ink2)">Scan-first</b>
-    starts from the opposite end. The other two sources hand this page a company that an outside
-    alert already flagged, and the graph then looks up its neighbours to check the story.
-    Scan-first never reads that alert feed at all — it looks at every company's own price history,
-    finds the ones that just moved, and only <em>then</em> asks the graph whether a real supplier
-    of that mover exists on paper: a company that named it as a customer in an SEC filing, filed
-    before the date you pick. That ordering is the whole point. Picking neighbours because they
-    move together and then observing that they move together is not evidence of anything — it is
-    the definition, checked against itself. Scan-first uses the graph the way evidence is normally
-    used: to verify a relationship after the fact, not to choose one in the first place. It needs
-    both a machine with real price history and a live connection to the supply-chain graph, so it
-    only appears in the list above when both are available.</p>
+  <h1>What moved today, and what moves with it</h1>
+  <p class="lede">Pick a day. See which companies moved unusually for them. Click one, and see
+    which other companies have actually moved with it — measured over a decade, with a confidence
+    interval on every number.</p>
+  <p class="sub" style="margin-top:.8rem"><b>The honest version of what this is.</b> This project
+    set out to find companies that move <i>after</i> a leader does — a tradeable lag. It does not
+    exist in this data. We tested it properly: every pair in the universe, 2.47 million of them,
+    at five different delays, over ten years, choosing the pairs in one window and checking them
+    in a completely separate one. A relationship worth 0.21 when you pick it is worth
+    <b>0.03</b> when you test it. Chains of relationships fare no better. Three pre-registered
+    tests, all null.</p>
+  <p class="sub" style="margin-top:.5rem"><b>What is there instead, and it is not small.</b> The
+    <i>same-day</i> version of the same measurement survives that test almost intact:
+    <b>0.64</b>. Companies that have moved together reliably keep moving together, and that holds
+    up across four years of data the measurement never saw. So this page shows you that, and
+    stops there. It will tell you Palo Alto Networks moves with CrowdStrike and Fortinet; it will
+    not tell you which one moves first, because we looked and nothing does.</p>
+  <p class="sub" style="margin-top:.5rem"><b>Isn't that circular?</b> A fair challenge, and it
+    is why this project spent months on the supply chain instead. Picking neighbours <em>because</em>
+    they correlate and then citing their correlation as evidence for a forecast <b>is</b>
+    circular. But "these two have moved together, and here is how precisely that is measured" is
+    a description, not a forecast — and it is falsifiable: measure it on 2016–2022, check it on
+    2022–2026, see whether it holds. It does. That is the difference between the number below and
+    the one this project could not find.</p>
   <div id="err"></div>
 </header>
 
@@ -314,6 +276,36 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 <section>
   <p class="eyebrow">The run</p>
   <h2>How a company ends up on this list</h2>
+  <div class="bar">
+    <label for="src">source</label>
+    <select id="src"><option value="synthetic">alert feed, invented data — corroboration-first</option></select>
+    <label for="lim">limit</label>
+    <input id="lim" type="number" min="1" value="3" style="width:4.5rem">
+    <button class="go" id="go">Run</button>
+    <span class="status" id="status"><span class="dot" id="rag"></span><span id="ragtxt">checking…</span></span>
+  </div>
+  <p class="sub" style="margin-top:.7rem"><b>"limit"</b> is how many companies to assess — one
+    independent branch each, so 3 means three running at once. It changes how much work you watch,
+    never an answer. A large limit looks frozen briefly: the graph finishes a whole stage for every
+    company before reporting anything, so with 50 nothing appears for ten seconds and then it all
+    arrives at once. The counter keeps ticking so you can tell it is working.</p>
+  <p class="sub" style="margin-top:.5rem"><b>Which data?</b>
+    <b style="color:var(--ink2)">Synthetic</b> is invented companies with invented prices —
+    <code>SYNA</code>, <code>SYNB</code> — shipped with the source so anyone can clone the
+    repository and press Run with no credentials. Nothing under that option is a real quote.</p>
+  <p class="sub" style="margin-top:.5rem" id="realnote"><b style="color:var(--ink2)">Real market
+    data</b> is genuine share prices and the genuine options-alert feed this project was built to
+    evaluate. Both are licensed vendor data and a private feed, so <b>neither is in the
+    repository</b> — the option appears only when the server is started with <code>--allow-real</code>
+    on a machine that already holds those files. Nothing is uploaded anywhere.</p>
+  <p class="sub" style="margin-top:.5rem" id="scannote"><b style="color:var(--ink2)">Scan-first</b>
+    sweeps every company's price history for the ones that just moved, then asks the supply graph
+    whether a real supplier of that mover exists on paper — a company that named it as a customer
+    in an SEC filing, dated before the day in question. It is the strictest thing here, and also
+    the narrowest: the graph holds 76 customers, so on a typical day only a handful of movers have
+    any disclosed supplier at all. <b>Co-movement above covers far more</b> — 36 of 43 movers on
+    2026-09-04, against 2 by filings. The filing is better evidence about any single pair; there
+    are just very few pairs.</p>
   <p class="sub">Four steps. The first two decide <i>which</i> companies are worth looking at; the
     last two decide <i>what to think</i> about each one. Everything below is drawn from the run
     itself — a box lights up only once that step has actually finished.</p>

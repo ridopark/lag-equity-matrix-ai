@@ -1,4 +1,10 @@
-"""Unstructured half of GraphRAG: news co-mentioning the candidate and its leaders.
+"""Unstructured half of GraphRAG: news about the candidate itself.
+
+Depends on nothing from the graph half — the query is built from `c.symbol`
+alone (D-83 dropped both `direction` and the leader list from it), so this node
+needs only the candidate, never its neighbourhood. The previous wording here
+said "and its leaders", which stopped being true at D-83 and made the node look
+as though it had to run after `graph_retriever`.
 
 Point-in-time — only articles published strictly before the candidate's date are
 retrieved, so an assessment never reads news the trader could not have seen.

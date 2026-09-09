@@ -298,7 +298,9 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
       </div>
     </div>
     <div class="pane">
-      <h3>Moves with it <span id="xflmeta"></span></h3>
+      <h3>Moves with it <span id="xflmeta"></span>
+        <button class="go" id="xrun" style="float:right;padding:.16rem .5rem;font-size:.7rem"
+          hidden>Assess these →</button></h3>
       <div class="fl" id="xfollowers">
         <p class="emptyp">Pick a company on the left.</p>
       </div>
@@ -1044,10 +1046,28 @@ function pickLeader(sym) {
     }
     d.min_abs_corr = parseFloat($("#xcorr").value) || d.min_abs_corr;
     drawFollowers(d);
+    $("#xrun").hidden = !d.followers.length;
   }).catch(e => {
     $("#xfollowers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
   });
 }
+
+$("#xrun").addEventListener("click", () => {
+  // Hand the chosen leader to the pipeline the section below visualises: the
+  // graph is mode-agnostic (D-23), so co-movement is just another source.
+  if (!XLEADER) return;
+  const o = document.createElement("option");
+  o.value = "leader:" + XLEADER;
+  o.textContent = "co-movement — followers of " + XLEADER;
+  const prev = $("#src").querySelector('option[value^="leader:"]');
+  if (prev) prev.remove();
+  $("#src").prepend(o);
+  $("#src").value = o.value;
+  $("#asof").value = $("#xdate").value;
+  $("#lim").value = "5";
+  document.querySelector("#topo").scrollIntoView({behavior: "smooth", block: "center"});
+  $("#go").click();
+});
 
 $("#xgo").addEventListener("click", () => {
   $("#xstatus").innerHTML = `<span class="dot on"></span>scanning…`;

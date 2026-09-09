@@ -143,6 +143,28 @@ def load(source: str, db=None, as_of: str | None = None
         scan_date = date.fromisoformat(as_of or default_as_of())
         scan = MarketScan(closes, ArangoTopology(db), excluded_symbols=excluded)
         return closes, scan.candidates(scan_date), frozenset(scan.shocked_leaders(scan_date))
+    if source.startswith("leader:"):
+        # Co-movement mode (D-95): a named leader's followers become the
+        # candidates, so the same graph runs unchanged (D-23). Reads the long
+        # bars file — co-movement needs `trail` sessions and `bars.parquet`
+        # holds ~159, which yields no edges at all.
+        if not ALLOW_REAL:
+            raise PermissionError("leader mode needs real market data; start with --allow-real")
+        from lagmatrix.adapters.candidates import CoMovementFollowers
+
+        leader = source.split(":", 1)[1].upper()
+        closes = COMOVE_CLOSES()
+        excluded = frozenset(
+            ln.split(",")[0] for ln in
+            pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
+        )
+        d = date.fromisoformat(as_of or default_as_of())
+        src = CoMovementFollowers(closes, leader, trail=250, min_abs_corr=0.6,
+                                  excluded_symbols=excluded)
+        cands = src.candidates(d)
+        # The leader must not also be allowed to score its own followers — the
+        # same re-entry hole Q-37 closed for scan mode.
+        return closes, cands, frozenset({leader})
     if source == "real":
         if not ALLOW_REAL:
             raise PermissionError("real data not enabled; start with --allow-real")

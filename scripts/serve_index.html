@@ -1166,7 +1166,7 @@ function netLayout(nodes, edges, w, h, iters = 260) {
         let s = a.ang - b.ang;
         while (s > Math.PI) s -= 2 * Math.PI;
         while (s < -Math.PI) s += 2 * Math.PI;
-        const f = 0.35 / (Math.abs(s) + 0.12);
+        const f = 0.62 / (Math.abs(s) + 0.10);
         d[a.symbol] += Math.sign(s) * f; d[b.symbol] -= Math.sign(s) * f;
       }
     }
@@ -1176,7 +1176,7 @@ function netLayout(nodes, edges, w, h, iters = 260) {
       let s = a.ang - b.ang;
       while (s > Math.PI) s -= 2 * Math.PI;
       while (s < -Math.PI) s += 2 * Math.PI;
-      const f = s * Math.abs(e.corr) * 1.4;
+      const f = s * Math.abs(e.corr) * 0.55;
       d[a.symbol] -= f; d[b.symbol] += f;
     });
     fol.forEach(n => { n.ang += Math.max(-0.4, Math.min(0.4, d[n.symbol])) * step; });
@@ -1213,13 +1213,22 @@ function drawNet() {
     // near-identical, so sizing by degree encoded almost nothing.
     const r = n.leader ? 10 : 3.5 + Math.abs(n.corr || 0) * 7;
     const cls = "nn" + (n.leader ? " lead" : "") + (n.symbol === NETSEL ? " sel" : "");
+    // Labels radiate away from the centre rather than always sitting above the
+    // node. With every label above, text stacks wherever nodes cluster — which
+    // is precisely where a dense bloc puts them.
+    const ux = n.leader ? 0 : Math.cos(n.ang), uy = n.leader ? 1 : Math.sin(n.ang);
+    const pad = n.leader ? r + 16 : r + 11;
+    const lx = n.x + ux * pad;
+    const ly = n.y + uy * pad + 3.4;
+    const anchor = n.leader ? "middle"
+      : (ux > 0.30 ? "start" : (ux < -0.30 ? "end" : "middle"));
     const fill = n.leader ? "var(--graph)"
       : (n.corr < 0 ? "var(--bad)" : "var(--vector)");
     out += `<g class="${cls}" data-sym="${esc(n.symbol)}">
       <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}"
         fill="${fill}" opacity="${NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9}"></circle>
-      <text x="${n.x.toFixed(1)}" y="${(n.y - r - 4).toFixed(1)}"
-        text-anchor="middle">${esc(n.symbol)}</text></g>`;
+      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}"
+        text-anchor="${anchor}">${esc(n.symbol)}</text></g>`;
   });
   svg.innerHTML = out;
   svg.querySelectorAll(".nn").forEach(g =>

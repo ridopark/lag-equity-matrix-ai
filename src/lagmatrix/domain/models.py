@@ -36,6 +36,21 @@ class LagEdge(BaseModel):
     relation: str  # e.g. supplier, competitor, sector_peer, index_member
 
 
+class ComovementEdge(BaseModel):
+    """A pairwise contemporaneous co-movement relationship, measured directly
+    from price history (D-95) — a calibrated confidence interval on how
+    reliably two names move together, never a claim about what one does after
+    the other."""
+
+    a: str
+    b: str
+    corr: float
+    n_sessions: int
+    ci_low: float
+    ci_high: float
+    flag: str | None = None
+
+
 class NewsChunk(BaseModel):
     """A retrieved passage of unstructured news / earnings text."""
 

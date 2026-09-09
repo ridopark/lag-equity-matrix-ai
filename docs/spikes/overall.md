@@ -2838,6 +2838,50 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — measured, not yet built into the pipeline
 - **Status:** Accepted
 
+### D-96 — A shocked symbol's own next move is a coin flip; show the distribution, not a direction
+- **When:** 2026-09-09T07:35:00-05:00
+- **Decision:** The leader carries its own probabilistic move on the page, stated
+  as a **distribution centred on zero**, never as an expected direction.
+- **Why:** measured on the D-93/D-95 split, 40,545 held-out episodes across
+  2,153 symbols, thesis-signed market-excess in the symbol's own sigma units:
+
+      h    disc mean   val mean   val sd    val n   val P(continue)
+      1      -0.0442    -0.0137    1.802   40,545        48.3%
+      3      -0.0324    -0.0041    1.447   40,545        48.7%
+      5      +0.0046    +0.0151    1.426   40,545        49.4%
+     10      +0.0021    -0.0741    1.401   40,545        48.0%
+
+  After a >= 2σ move a symbol goes nowhere in particular: mean within ±0.015σ of
+  zero at every horizon, sd ~1.4σ, and it continues in its own direction 48-49%
+  of the time — very slightly *against* continuation. No monotone pattern by
+  shock size either (2-2.5σ: 48.9%; 4-6σ: 52.2%; 6σ+: 49.6%). At n=40,545 this
+  is well powered, not a shrug.
+  The honest presentation is therefore the spread, not a point: "after moves this
+  size this name has historically gone nowhere in particular — 68% of outcomes
+  within ±1.4σ, continuing 48% of the time." That tells a reader not to chase,
+  which is real information, and it is the only probabilistic statement about a
+  single symbol this data supports.
+- **Outcome:** pending — measured, not yet on the page
+- **Status:** Accepted
+
+### D-97 — The loaders drop collections; nothing may run daily until they upsert
+- **When:** 2026-09-09T07:35:00-05:00
+- **Decision:** Before any scheduled ingest, `load_vectors.py` and
+  `load_arango.py` must become **incremental and non-destructive**: upsert by
+  stable key, never `_drop`. `load_news.py` is already correct and is the model.
+- **Why:** found while scoping the daily pipeline.
+  `load_vectors.py:84` runs `if (db._collection("article")) { db._drop("article"); }`
+  and `load_arango.py:89` does the same for its collections — full rebuilds, not
+  updates. `load_arango.py:85` already carries the comment recording that this
+  exact pattern "destroyed 47,640 embeddings and their vector index". Scheduling
+  them daily would re-embed the entire corpus every night and drop live
+  collections each time, converting a one-off accident into a nightly one.
+  `load_news.py` shows the shape that works: stage into a temp table, merge with
+  `ON CONFLICT DO NOTHING`, record coverage per (symbol, window) so a resumed run
+  skips what it has. That is what the other two need.
+- **Outcome:** pending
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

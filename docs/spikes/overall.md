@@ -2915,6 +2915,20 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   throughout — worth knowing that the new direction has no hard dependency on
   the graph store being up.
 - **Outcome:** Verified — restored and confirmed, 148 passed 0 skipped after.
+  **It then died a second time, unprompted, within the hour**, which changed
+  this from a reboot procedure into a script: `scripts/arango_tunnel.sh`,
+  idempotent, safe to re-run.
+  Two things learned the second time that the first recovery missed.
+  **(1) `nohup` is not enough on the remote** — the `kubectl port-forward`
+  did not survive its ssh session closing; it needs
+  `setsid nohup … </dev/null &  disown`.
+  **(2) A listening socket is not proof the path works.** The local ssh tunnel
+  stays up and keeps accepting connections after the remote forward dies, so
+  `serve.arango_db()`'s TCP pre-check reported "reachable" while every query
+  aborted with `ConnectionAbortedError`. The script probes the HTTP endpoint
+  instead. That pre-check in `serve.py` has the same weakness and is left
+  alone for now — it degrades to an empty follower count rather than a crash,
+  and `/followers` is unaffected because co-movement reads parquet.
 - **Status:** Accepted
 
 ## Open Questions

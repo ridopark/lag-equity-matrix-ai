@@ -45,6 +45,28 @@ from lagmatrix.graph.builder import build_graph  # noqa: E402
 from lagmatrix.graph.context import LagMatrixContext  # noqa: E402
 
 SYNTHETIC_CLOSES = "tests/fixtures/synthetic-closes.parquet"
+SYNTHETIC_FALLBACK_DATE = "2026-05-11"  # only when no price file can be read
+
+
+def default_as_of() -> str:
+    """The last session actually present in the data, not a baked-in constant.
+
+    The page and every endpoint used to default to a hardcoded 2026-05-11 while
+    `data/bars.parquet` ran months past it, so the live demo silently assessed a
+    stale date. Reads the real file when it is available and falls back to the
+    synthetic fixture, then to the old constant, so a machine with neither still
+    starts.
+    """
+    for path in ("data/bars.parquet", SYNTHETIC_CLOSES):
+        try:
+            bars = pd.read_parquet(path)
+        except Exception:
+            continue
+        idx = (bars.pivot_table(index="timestamp", columns="symbol", values="close").index
+               if "timestamp" in bars.columns else bars.index)
+        if len(idx):
+            return str(idx[-1].date())
+    return SYNTHETIC_FALLBACK_DATE
 SYNTHETIC_FIRES = "tests/fixtures/synthetic-fires.csv"
 PAGE = pathlib.Path(__file__).parent / "serve_index.html"
 
@@ -95,7 +117,7 @@ def load(source: str, db=None, as_of: str | None = None
             ln.split(",")[0] for ln in
             pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
         )
-        scan_date = date.fromisoformat(as_of or "2026-05-11")
+        scan_date = date.fromisoformat(as_of or default_as_of())
         scan = MarketScan(closes, ArangoTopology(db), excluded_symbols=excluded)
         return closes, scan.candidates(scan_date), frozenset(scan.shocked_leaders(scan_date))
     if source == "real":
@@ -269,12 +291,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/config":
             self._json({"allow_real": ALLOW_REAL, "graphrag": arango_db() is not None,
-                        "arango_url": ARANGO_URL})
+                        "arango_url": ARANGO_URL, "default_as_of": default_as_of()})
             return
         if url.path == "/graph":
             q = parse_qs(url.query)
             sym = (q.get("symbol") or [""])[0].upper()
-            as_of = (q.get("as_of") or ["2026-05-11"])[0]
+            as_of = (q.get("as_of") or [default_as_of()])[0]
             if not sym.isalnum():
                 self.send_error(400, "symbol must be alphanumeric")
                 return
@@ -300,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
         source = (q.get("source") or ["synthetic"])[0]
         raw = (q.get("limit") or [""])[0]
         limit = int(raw) if raw.isdigit() and int(raw) > 0 else None
-        as_of_str = (q.get("as_of") or ["2026-05-11"])[0]
+        as_of_str = (q.get("as_of") or [default_as_of()])[0]
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

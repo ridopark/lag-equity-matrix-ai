@@ -186,6 +186,24 @@ line.se{stroke:var(--line);stroke-width:1} line.se.sel{stroke:var(--graph);strok
 .frow span:last-child{color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums;
   font-size:.72rem}
 .emptyp{padding:1rem .8rem;color:var(--ink3);font-size:.82rem;line-height:1.6}
+.netwrap{position:relative;background:var(--void);border-bottom:1px solid var(--line2)}
+.netwrap svg{display:block;width:100%;height:340px}
+.nn{cursor:pointer}
+.nn circle{stroke:var(--void);stroke-width:1.5}
+.nn text{font:400 .62rem var(--mono);fill:var(--ink2);pointer-events:none}
+.nn.lead circle{stroke:var(--graph);stroke-width:2}
+.nn.lead text{fill:var(--ink);font-weight:500}
+.nn.sel circle{stroke:var(--ink);stroke-width:2}
+.ne{stroke-linecap:round}
+.nettools{display:flex;gap:.5rem;align-items:center;padding:.45rem .8rem;
+  border-bottom:1px solid var(--line2);font:400 .72rem var(--body);color:var(--ink3)}
+.nettools button{background:var(--panel2);border:1px solid var(--line);color:var(--ink2);
+  border-radius:3px;padding:.2rem .5rem;font:400 .7rem var(--body);cursor:pointer}
+.nettools button[aria-pressed="true"]{background:rgba(79,227,193,.14);color:var(--graph);
+  border-color:var(--graph)}
+.netnote{padding:.5rem .8rem;color:var(--ink3);font-size:.74rem;line-height:1.55;
+  border-bottom:1px solid var(--line2)}
+.netnote b{color:var(--ink2);font-weight:500}
 .bars{display:grid;gap:.35rem;margin-top:1.2rem}
 .abar{display:grid;grid-template-columns:9.5rem 1fr 3.4rem;gap:.65rem;align-items:center;
   font:400 .76rem/1 var(--mono)}
@@ -263,6 +281,13 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
       <h3>Moves with it <span id="xflmeta"></span>
         <button class="go" id="xrun" style="float:right;padding:.16rem .5rem;font-size:.7rem"
           hidden>Assess these →</button></h3>
+      <div class="nettools" id="xnettools" hidden>
+        <button id="xbackbone" aria-pressed="false">backbone only</button>
+        <span id="xnetmeta"></span>
+      </div>
+      <div class="netwrap" id="xnetwrap" hidden><svg id="xnet" role="img"
+        aria-label="co-movement network around the selected leader"></svg></div>
+      <p class="netnote" id="xnetnote" hidden></p>
       <div class="fl" id="xfollowers">
         <p class="emptyp">Pick a company on the left.</p>
       </div>

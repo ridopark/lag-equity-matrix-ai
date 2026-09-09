@@ -413,3 +413,123 @@ def test_duplicate_flag_does_not_flag_genuinely_correlated_but_distinct_series()
     flag = duplicate_flag(a, b)
 
     assert flag is None
+
+
+# --- return sanity guard (implausible single-session returns) ---------------
+#
+# Measured on `data/bars-10y.parquet`: 11 sessions carry `|pct_change| > 10`
+# (moves over 1000%) -- bankruptcy emergences, reverse splits and ticker reuse
+# overwriting a price series, not market moves. Re-running D-95's headline
+# measurement with those 11 rows masked moves `corr(discovery, validation)`
+# from 0.640 to 0.586: the conclusion survives, but the published figure is
+# inflated by data errors. `comovement_edges` must exclude such sessions from
+# its correlation, not feed them to Pearson `corr` as if they were real.
+
+
+def _corrupted_return_closes(
+    n: int = 60, corrupt_idx: int = 30, corrupt_return: float = 500.0
+) -> tuple[pd.DataFrame, date, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two independent 2-symbol blocs, same construction as `_two_bloc_closes`,
+    except A's return at session `corrupt_idx` is overwritten with an
+    implausible `corrupt_return` (a raw pct_change value, e.g. `500.0` for a
+    500x single-session move -- the D-95 data-artefact shape: 45x-526x in the
+    real file). B, C and D are left clean throughout, and C-D is left
+    untouched by the corruption entirely, so a test can check the screen is
+    scoped to the affected pair, not applied window-wide.
+
+    Returns `(closes, as_of, a, b, c, d)` where `a` is A's *clean* return
+    array (without the corruption), so a caller can compute the correlation
+    the corrupt session is expected to be excluded from.
+    """
+    rng = np.random.default_rng(0)
+    a = rng.normal(0, 0.01, n)
+    b = 0.9 * a + rng.normal(0, 0.003, n)
+    c = rng.normal(0, 0.01, n)
+    d = 0.9 * c + rng.normal(0, 0.003, n)
+    a_corrupt = a.copy()
+    a_corrupt[corrupt_idx] = corrupt_return
+
+    idx = pd.bdate_range("2026-01-01", periods=n + 2, tz="UTC")
+    as_of = idx[n + 1].date()
+    r = {
+        "A": np.concatenate([[0.0], a_corrupt, [0.0]]), "B": np.concatenate([[0.0], b, [0.0]]),
+        "C": np.concatenate([[0.0], c, [0.0]]), "D": np.concatenate([[0.0], d, [0.0]]),
+    }
+    closes = pd.DataFrame({k: 100 * np.cumprod(1 + v) for k, v in r.items()}, index=idx)
+    return closes, as_of, a, b, c, d
+
+
+def test_comovement_edges_masks_implausible_single_session_return_before_correlating():
+    """A single 500x session (raw pct_change = 500.0) must be excluded from
+    the correlation, not fed into Pearson `corr` as a real return. Verified
+    directly with numpy on this exact fixture: leaving the corrupt session in
+    collapses corr(A, B) from +0.930 to -0.171 -- the pair would not even
+    clear `min_abs_corr=0.3` -- while excluding just that one session
+    recovers +0.930, matching the relationship the fixture actually
+    engineered.
+
+    Masking rather than clipping also means the affected pair is measured
+    over one fewer session than an unaffected pair from the same window and
+    call: A-B's `n_sessions` must be exactly one less than C-D's (C-D is
+    never touched by the corruption), pinning "masked, not clipped" as an
+    observable, per-pair session count rather than a window-wide one.
+
+    Falsifies if: the A-B edge is missing entirely (today's behaviour -- the
+    unmasked correlation collapses below threshold and the edge vanishes),
+    its `corr` differs from the clean numpy computation, or its `n_sessions`
+    is not exactly `trail - 1` while C-D's stays at `trail`.
+    """
+    n = 60
+    corrupt_idx = 30
+    closes, as_of, a, b, c, d = _corrupted_return_closes(n=n, corrupt_idx=corrupt_idx)
+    expected_ab = float(np.corrcoef(np.delete(a, corrupt_idx), np.delete(b, corrupt_idx))[0, 1])
+    assert expected_ab > 0.5, "fixture must engineer a real correlation to test against"
+
+    edges = comovement_edges(closes, as_of, trail=n, min_abs_corr=0.3)
+
+    pairs = {frozenset((e.a, e.b)): e for e in edges}
+    assert frozenset(("A", "B")) in pairs, (
+        "a single corrupt 500x session must not be allowed to erase a real A-B relationship")
+    ab = pairs[frozenset(("A", "B"))]
+    assert ab.corr == pytest.approx(expected_ab, abs=1e-9)
+    assert frozenset(("C", "D")) in pairs, (
+        "C-D is untouched by the corruption and must still qualify")
+    cd = pairs[frozenset(("C", "D"))]
+    assert cd.n_sessions == n
+    assert ab.n_sessions == n - 1
+
+
+def test_comovement_edges_does_not_screen_out_a_genuine_large_move():
+    """The over-screening guard: a real single-session -30% drop (raw
+    pct_change = -0.30) is orders of magnitude below any defensible
+    "implausible return" cut -- the artefacts this screen targets sit at
+    45x-526x in the real data, a very wide gap from a legitimate 30% move --
+    and must be measured exactly as if no screen existed at all: included in
+    both the correlation and the session count.
+
+    Falsifies if: `corr` or `n_sessions` differs from the values computed
+    with the -30% session included, which would mean a threshold set too
+    tight is masking real, tradeable volatility along with the data
+    artefacts it is meant to catch.
+    """
+    n = 60
+    shock_idx = 30
+    rng = np.random.default_rng(0)
+    x = rng.normal(0, 0.01, n)
+    y = 0.9 * x + rng.normal(0, 0.003, n)
+    x_shocked = x.copy()
+    x_shocked[shock_idx] = -0.30
+    expected_xy = float(np.corrcoef(x_shocked, y)[0, 1])
+    assert abs(expected_xy) > 0.3, "fixture must still clear the threshold to test against"
+
+    idx = pd.bdate_range("2026-01-01", periods=n + 2, tz="UTC")
+    as_of = idx[n + 1].date()
+    r = {"X": np.concatenate([[0.0], x_shocked, [0.0]]), "Y": np.concatenate([[0.0], y, [0.0]])}
+    closes = pd.DataFrame({k: 100 * np.cumprod(1 + v) for k, v in r.items()}, index=idx)
+
+    edges = comovement_edges(closes, as_of, trail=n, min_abs_corr=0.3)
+
+    assert edges, "fixture must produce the X-Y edge for this test to mean anything"
+    xy = {frozenset((e.a, e.b)): e for e in edges}[frozenset(("X", "Y"))]
+    assert xy.corr == pytest.approx(expected_xy, abs=1e-9)
+    assert xy.n_sessions == n

@@ -34,6 +34,13 @@ from lagmatrix.domain.models import ComovementEdge
 
 _DUPLICATE_MATCH_THRESHOLD = 0.5
 
+# D-100: `data/bars-10y.parquet` holds 11 sessions with raw `pct_change` above this
+# cutoff -- GPOR +526x (2021-05-18), LINE +448x (2024-07-25), and nine more -- every
+# one a bankruptcy emergence, reverse split or ticker reuse, not a return. A genuine
+# shock (e.g. a real -30% session) sits two orders of magnitude below 10.0, so the
+# cutoff is set where D-100 measured the actual break, not tuned against it.
+_IMPLAUSIBLE_RETURN_CUTOFF = 10.0
+
 
 def comovement_edges(
     closes: pd.DataFrame,
@@ -56,11 +63,23 @@ def comovement_edges(
 
     cols = [c for c in closes.columns if c not in exclude]
     window = closes[cols].pct_change().iloc[ti - trail : ti]
-    n = len(window)
 
-    corr = window.corr()
+    # D-100: mask implausible single-session returns before correlating, rather than
+    # feeding them to Pearson `corr` as real moves. `valid` is False for NaN too
+    # (comparisons against NaN are always False), so no separate NaN check is needed.
+    # Masked, not clipped, and per-pair: a corrupt session in one symbol must not
+    # silently distort the other symbol's other pairs, and the pair it does touch
+    # must be measured over one fewer session, not have the bad value replaced.
+    valid = window.abs() <= _IMPLAUSIBLE_RETURN_CUTOFF
+    masked = window.where(valid)
+
+    corr = masked.corr()
     symbols = corr.columns.to_numpy()
     values = corr.to_numpy()
+    # Pairwise valid-session counts via one matrix product, matching pandas' own
+    # pairwise-NaN-deletion behaviour in `.corr()` above -- avoids a Python loop
+    # over sessions for ~1,500 columns (1.24M pairs).
+    valid_counts = valid.to_numpy(dtype=float).T @ valid.to_numpy(dtype=float)
 
     edges: list[ComovementEdge] = []
     iu, ju = np.triu_indices(len(symbols), k=1)
@@ -69,6 +88,7 @@ def comovement_edges(
         if np.isnan(c) or abs(c) < min_abs_corr:
             continue
         a, b = symbols[i], symbols[j]
+        n = int(valid_counts[i, j])
         ci_low, ci_high = confidence_interval(float(c), n)
         edges.append(
             ComovementEdge(

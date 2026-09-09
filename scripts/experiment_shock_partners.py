@@ -83,7 +83,8 @@ def main() -> None:
     se = d.std(ddof=1) / np.sqrt(len(d))                # clustered by date (D-71)
     mde = 2.8 * se
     print(f"\n{'':<26}{'mean':>10}{'sd':>10}")
-    print(f"{'partner (next session)':<26}{per['partner'].mean():>10.4f}{per['partner'].std():>10.3f}")
+    print(f"{'partner (next session)':<26}{per['partner'].mean():>10.4f}"
+          f"{per['partner'].std():>10.3f}")
     print(f"{'control':<26}{per['control'].mean():>10.4f}{per['control'].std():>10.3f}")
     print(f"\nPRIMARY  partner - control = {d.mean():+.4f} ({se:.4f})  "
           f"z = {d.mean()/se:+.2f}   over {len(d):,} date clusters")

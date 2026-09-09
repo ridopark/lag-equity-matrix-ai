@@ -411,6 +411,85 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     }
 
 
+def network(symbol: str, as_of: str, trail: int = 250,
+            min_abs_corr: float = 0.5, top_n: int = 40) -> dict:
+    """The leader's neighbourhood as a graph, including edges *among* followers.
+
+    The flat follower list hides the thing that matters most about a
+    neighbourhood: whether it is one bloc or many independent names. Measured on
+    2026-09-04, PFG's 37 followers carry 500 of their 666 possible edges — a
+    single financials cluster wearing 37 labels. `context_fusion` already knows
+    this and discounts it (Q-12: "twenty names moving as one bloc contribute
+    about one unit, not twenty"); the UI was the only place that did not.
+
+    Returns nodes with degree (how many strong links each has, so hubs are
+    visible) and every edge above threshold, plus a `backbone` flag marking the
+    maximum spanning tree. The tree is the principled answer to clutter: a
+    threshold is an arbitrary cut, whereas the spanning tree keeps the strongest
+    link that holds each name to the rest and drops the redundant ones.
+    """
+    if not ALLOW_REAL:
+        raise PermissionError("network needs real market data; start with --allow-real")
+    from lagmatrix.comovement import comovement_edges
+
+    closes = COMOVE_CLOSES()
+    excluded = frozenset(
+        ln.split(",")[0] for ln in
+        pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln
+    )
+    d = date.fromisoformat(as_of or default_as_of())
+    sym = symbol.upper()
+    if closes is None or sym not in closes.columns:
+        return {"error": f"{sym} not in the price file"}
+
+    edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
+                             exclude=excluded)
+    to_leader = {(e.b if e.a == sym else e.a): e for e in edges if sym in (e.a, e.b)}
+    keep = {s for s, _ in sorted(to_leader.items(), key=lambda kv: -abs(kv[1].corr))[:top_n]}
+    members = keep | {sym}
+    sub = [e for e in edges if e.a in members and e.b in members]
+
+    deg: dict[str, int] = {}
+    for e in sub:
+        deg[e.a] = deg.get(e.a, 0) + 1
+        deg[e.b] = deg.get(e.b, 0) + 1
+
+    # Maximum spanning tree over |corr| (Kruskal). Same construction as the MST
+    # in the econophysics literature, maximising strength instead of minimising
+    # distance — the two are the same tree under distance = 1 - |corr|.
+    parent = {s: s for s in members}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    backbone = set()
+    for e in sorted(sub, key=lambda x: -abs(x.corr)):
+        ra, rb = find(e.a), find(e.b)
+        if ra != rb:
+            parent[ra] = rb
+            backbone.add((e.a, e.b))
+
+    scan = MarketScan(closes, None, excluded_symbols=excluded)
+    shocked = scan.shocked_leaders(d)
+    nodes = [{"symbol": s, "leader": s == sym, "degree": deg.get(s, 0),
+              "corr": round(to_leader[s].corr, 4) if s in to_leader else None,
+              "ci_low": round(to_leader[s].ci_low, 4) if s in to_leader else None,
+              "ci_high": round(to_leader[s].ci_high, 4) if s in to_leader else None,
+              "z": round(shocked[s], 2) if s in shocked else None}
+             for s in sorted(members)]
+    return {
+        "leader": sym, "as_of": str(d), "trail": trail, "min_abs_corr": min_abs_corr,
+        "nodes": nodes,
+        "edges": [{"a": e.a, "b": e.b, "corr": round(e.corr, 4),
+                   "backbone": (e.a, e.b) in backbone} for e in sub],
+        "among_followers": sum(1 for e in sub if sym not in (e.a, e.b)),
+        "possible_among_followers": len(keep) * (len(keep) - 1) // 2,
+    }
+
+
 def neighbourhood(symbol: str, as_of: str) -> dict:
     """Supply edges with their filing sentences, plus real two-hop co-mention.
 
@@ -475,6 +554,18 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._json(followers(s, (q.get("as_of") or [default_as_of()])[0],
                                      top_n=int((q.get("top_n") or ["25"])[0])))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"})
+            return
+        if url.path == "/network":
+            q = parse_qs(url.query)
+            s = (q.get("symbol") or [""])[0].upper()
+            if not s.isalnum():
+                self.send_error(400, "symbol must be alphanumeric")
+                return
+            try:
+                self._json(network(s, (q.get("as_of") or [default_as_of()])[0],
+                                   min_abs_corr=float((q.get("min_abs_corr") or ["0.5"])[0])))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return

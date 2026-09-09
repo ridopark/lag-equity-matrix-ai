@@ -2277,8 +2277,10 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   The falsifiability check the plan cared about still holds in the code
   (`test_lag_response_already_responded_does_not_read_as_contradicted`); it just
   has no real-data instance yet to exercise it.
-- **Status:** Accepted — but see Q-41; the three-way split is currently a
-  two-way sign test in practice
+- **Status:** **Superseded by D-87.** Measured over 432 scan dates and
+  replicated independently: `room`'s denominator is unfounded and the ordering
+  does not predict. The "empty bucket" reasoning in this entry's Outcome was
+  also wrong — see Q-41.
 
 ### D-85 — `fuse_evidence`'s `if not leaders: continue` gate now admits the origin-leader path
 - **When:** 2026-09-08T18:22:00-05:00
@@ -2331,11 +2333,86 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   --synthetic` unchanged at 6 identical rows.
 - **Status:** Accepted
 
+### D-87 — `room` and `origin_status` are deleted: the denominator is unfounded and the ordering does not predict
+- **When:** 2026-09-09T03:50:00-05:00
+- **Decision:** Remove `room`, `origin_status`, `rank_by_room`, and the
+  `opposed` `lag_response` `Evidence` unit. Replace with **description only** —
+  a plain sentence naming the candidate's own thesis-signed move in its own
+  sigma units and the leader that surfaced it. No threshold, no bucket, no
+  denominator, no ordering, no implied magnitude. `Candidate.origin_leader`
+  (D-84's PHASE-1) is kept; the description needs it.
+- **Why:** two independent reconstructions agree — a quant consult over 432
+  scan dates / 13,063 supplier-events, and a separate rebuild over 30 dates /
+  209 linked events from a different data file and different code.
+  **(1) The denominator assumes what D-84 claimed it avoided.** D-84 states
+  `room` "multiplies by no transfer coefficient, measured or assumed." That is
+  incorrect: `1 - x/y` divides one z by another, which *is* the assumption that
+  the candidate should move as many of its own sigmas as the leader moved of
+  its — a standardised pass-through of exactly 1.0. Measured, that coefficient
+  is +0.18 contemporaneously and statistically zero forward, and its
+  interaction with the leader's shock size is null (−0.050 (0.223), z=−0.22;
+  −0.031 (0.101), z=−0.31 on the replication). The quantity `room` treats as
+  proportional to `y_component` is not proportional to it at all, so the
+  division is arithmetic, not economics.
+  **(2) The ordering does not predict.** Thesis-signed forward return regressed
+  on the ratio: −0.036 (0.112), z=−0.32; replication +0.022 (0.275), z=+0.08.
+  Flat, both signs, neither significant.
+  **(3) The buckets are interchangeable.** Linked-minus-control forward premium
+  is *identical* for `open` and `opposed` in both samples (+0.084/+0.084;
+  −0.206/−0.206) — and the two samples disagree on the sign, which is itself the
+  finding: the level is sampling noise.
+  The alternative that lost was keeping `room` "honestly labelled" with the
+  nulls stated on the page. Rejected because a sort key presented at all is a
+  claim about which names deserve attention, and this null is now *measured*,
+  not merely unmeasured — the distinction this project has drawn everywhere
+  else. Deleting only the `responded` bucket also lost: it would have left the
+  unfounded denominator in place.
+  Scope note, logged as two different claims: `room`'s magnitude is
+  **unfounded** (assumes a contradicted coefficient); the open/opposed sign
+  test is **sound in construction but non-predictive in fact** — it never
+  divides, so it assumes no pass-through; it is deleted on (3), not on (1).
+- **Outcome:** pending
+- **Status:** Accepted — supersedes D-84
+
+### D-88 — The supply graph's contemporaneous effect is a selection artefact, not a supply-chain effect
+- **When:** 2026-09-09T03:50:00-05:00
+- **Decision:** Record that the linked-vs-control co-movement this project has
+  been reading as a supply-chain effect is explained by trailing correlation,
+  and **do not act on it in this change** — the page's claims about the graph
+  need revisiting on their own terms, not as a side effect of removing `room`.
+- **Why:** suppliers of a shocked leader are, first and foremost, names with
+  much higher trailing correlation to that leader. Date-paired linked minus
+  matched control, netting out each pair's own trailing 60-day correlation
+  (`resid = x_component − ρ·y_component`):
+
+  | | consult (432 dates) | replication (30 dates) |
+  |---|---|---|
+  | trailing ρ with leader | +0.176 (0.007), z=+24.85 | +0.245 (0.025), z=+9.98 |
+  | `x_component` | +0.360 (0.035), z=+10.17 | +0.363 (0.112), z=+3.23 |
+  | residual `x − ρ·y` | −0.093 (0.031), z=−2.98 | −0.317 (0.125), z=−2.54 |
+
+  The raw co-move agrees to three decimals across two independent
+  reconstructions, and once ρ is removed the supply-specific excess is not
+  merely absent but **negative and significant in both** — linked names respond
+  *less* than their own trailing correlation predicts. At this horizon the
+  supply graph is a correlation filter with extra steps, and the correlation
+  path was already nulled (README: −4.6 bp, z=−0.72; D-59/D-60 found the lag-0
+  edge tautological). This does not automatically condemn the scan — the graph
+  supplies *direction* and an interpretable rationale, and the forward
+  membership premium (+0.084σ, z≈1.6, not established) is not derived from ρ —
+  but the contemporaneous number can no longer be cited as evidence the graph
+  adds anything over a correlation screen. Logged rather than acted on because
+  it bears on the whole GraphRAG premise and deserves its own measurement, the
+  way Q-38 did.
+- **Outcome:** pending — see Q-42
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-41 | The `responded` bucket never fires — is `x >= y` the wrong bar for "already moved too much to enter"? | D-84, `graph/nodes/context_fusion.py`, `graph/nodes/assessor.py` | On the real 2026-05-11 scan, 0 of 19 candidates landed in `responded`, and none came close: the largest same-direction echo was HST at `room=0.3896`. D-84's threshold asks the candidate to have moved *at least as far as a ≥2σ shock* in the same 3-session window, which is a far higher bar than the one the feature exists to enforce — the user's ask was "candidates that moved too much would mean we would chase", i.e. *enough* of the move is gone that entry is unattractive, not *all* of it. In practice the working signal is a low `room`, and the three-way classification collapses to the sign of the candidate's own move. Answered by deciding what "too much" is — and that is exactly the kind of free parameter this project does not tune to make a story come out, so it needs either a stated prior (e.g. "half the leader's move is gone") owned as a judgement call, or a measurement of realised forward return conditioned on `room`, which needs the forward window D-74 already showed is a null. Not fixed inline: any threshold picked now would be picked to make the bucket non-empty. |
+| Q-42 | If the supply graph is a correlation filter with extra steps, what does the GraphRAG premise actually buy? | D-88, D-74, `adapters/arango.py`, `scripts/serve_index.html` | D-88 shows the contemporaneous linked-vs-control co-move is fully explained by trailing correlation, with a *negative* residual (−0.093, z=−2.98; −0.317, z=−2.54 on replication). The live page presents the supply graph as the thing that finds non-obvious candidates. If a correlation screen selects the same names more cheaply, that framing needs to change or be defended. Three things the graph plausibly still buys, none yet measured: **direction** (the sign of the thesis, which correlation alone does not give), **an interpretable rationale** (a filing sentence a human can check, which is the actual product), and **candidates a correlation screen would rank too low to surface**. Answered by running the scan with the supply traversal replaced by a top-k trailing-correlation screen on the same dates and comparing the candidate sets and their forward returns — if the sets largely coincide and neither predicts, the graph is doing presentational work, which is a legitimate answer but a different claim from the one the page makes. Note the binding constraint from D-88's consult: **chains, not dates** — 105 distinct suppliers across 67 leaders cannot resolve a D-74-sized effect at any date count. |
+| ~~Q-41~~ | The `responded` bucket never fires — is `x >= y` the wrong bar for "already moved too much to enter"? | D-84, D-87 | **The premise was wrong, and the correction matters more than the question.** This was logged from a single scan date (2026-05-11, 0 of 19) and generalised into a structural claim. Measured over 432 dates, `responded` fires on **7.7%** of supplier-events; reproduced on the production code path over 13 sampled dates at **4 of 76 (5.3%)**, firing on 3 of those 13 dates. 69% of dates with >= 8 candidates have zero `responded`, so 0-of-19 is the *modal* outcome, not an anomaly (P = 0.22 under independence), and 40% of dates have a max ratio below that scan's 0.61. The bar was never the problem. Answered by D-87, which deletes the bucket for an entirely different and measured reason — non-predictiveness — not for being unreachable. Lesson worth keeping: one date is not a sample, and this entry asserted a property of the design from n=1. |
 | Q-40 | Are `lag_response` and correlation `leader_move` evidence independent enough to sit in one weighted sum? | D-84, `graph/nodes/context_fusion.py`, Q-12 | `Y` itself never double-counts — Q-37's `signal_universe` fix keeps the originating leader out of `X`'s own correlation pool — but a *third* symbol highly correlated with `Y` still contributes an ordinary `leader_move` unit alongside the `lag_response` unit, and the two are not weighted against each other. The independence discount (Q-12) operates within the correlation bloc only; it does not see `lag_response` at all, so a candidate discovered from `Y` and also neighboured by `Y`'s bloc can reach `MIN_EFFECTIVE` on what is arguably one observation counted twice. **Sharpened 2026-09-08 — when the two do land on the same symbol the interaction is not merely un-weighted, it is destructive, and it was demonstrated, not theorised.** Building PHASE-4's fixtures through a real `retrieve_neighbourhood` put `Y` in `X`'s own correlation top-k, and the two units then collide: in the *opposed* case `leader_move(Y, supports=True)` (that check reads the leader's sign, never the candidate's) exactly cancels `lag_response(Y, supports=False)`, `w_pro == w_con == 1.0`, and a genuine reversal reads **neutral instead of contradicted**; in the *responded* case the lone surviving `leader_move(Y, supports=False)` makes it read **contradicted** — precisely the spent-vs-refuted conflation D-84 exists to prevent. Reproduced directly, not inferred. **Latent, not live:** on the real 2026-05-11 scan, 0 of 19 candidates had their `origin_leader` appear as a `leader_move` unit, because Q-37's `signal_universe` union keeps shocked leaders out of every candidate's correlation pool. But that is the *only* thing preventing it, set at two call sites (`serve.py`, `pipeline/runner.py`); any caller that builds a `MarketScan` without that union reintroduces both failures silently. It also forced PHASE-4's fixtures to hand-build `lag_edges` rather than call `retrieve_neighbourhood`, so Success Criterion 4's "end-to-end" is satisfied from `leader_state` onward, not from retrieval — the plan's own PHASE-4 halt condition prescribes exactly this remedy. Answered by extending the cluster-size discount to cover the origin leader's bloc, or by making the exclusion an invariant of `MarketScan` itself rather than a caller's responsibility. |
 | Q-39 | `LagEdge.beta` carries two incompatible quantities, and the correlation one looks inverted — which is right? | `graph/nodes/graph_retriever.py:62`, `adapters/arango.py:63`, PLAN-2026-09-08-unresponded-lag | Two defects, both currently latent. **(a)** On a correlation edge `beta = corr * std(leader) / std(cand)`; on a supply edge it is `pct_revenue / 100`, an accounting ratio. One field, a volatility ratio and a revenue share, distinguished only by `relation`. **(b)** The correlation form is the reciprocal of the conventional beta for predicting the candidate from the leader (`corr * std(cand) / std(leader)`), so it appears inverted for the direction the pipeline cares about. Neither bites today: `grep -rn '\.beta\b' src/ tests/ scripts/` finds exactly one reader, a test asserting the supply edge's `pct_revenue`. Nothing in production reads it. The unresponded-lag work deliberately computes `room` from z-scores alone so it never touches `beta` — which is why this is logged rather than fixed inline. Answered by deciding what `beta` is *for*: if it is the transfer coefficient the lag hypothesis would want, it needs one meaning, the right orientation, and a test; if nothing will read it, it should be removed rather than left as a trap. |
 | Q-37 | Does `pipeline/runner.py` have the same leader re-entry hole as the live UI did? | D-23, `pipeline/runner.py`, REQ-7 | `runner.py:80` builds `signal_universe = {c.symbol for c in signals.candidates()}` — the identical pattern `serve.py` had before PHASE-5 fixed it. It is not a live bug today, because `runner.py` type-hints `signals: ExternalSignals | None` and no caller passes a `MarketScan`. It becomes one the moment scan mode is wired into the batch runner. Answered by either unioning `shocked_leaders()` there too, or by making the runner refuse a `MarketScan` until it does. **Answered 2026-09-08 by unioning.** It was worse than latent: line 80

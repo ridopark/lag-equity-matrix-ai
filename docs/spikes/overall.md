@@ -2879,7 +2879,42 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `load_news.py` shows the shape that works: stage into a temp table, merge with
   `ON CONFLICT DO NOTHING`, record coverage per (symbol, window) so a resumed run
   skips what it has. That is what the other two need.
-- **Outcome:** pending
+- **Outcome:** Done, in `43d424e`. Both loaders create-if-absent and never drop;
+  `grep -n '_drop' scripts/load_arango.py scripts/load_vectors.py` now returns only
+  docstrings explaining what was removed. Documents upsert on stable keys —
+  articles on their Alpaca id, supply edges on `f"{supplier}->{customer}"`, and
+  co-mentions likewise — so a re-run refreshes what it touched, and two filings
+  restating the same relationship collapse to one edge instead of doubling the
+  graph. The JS text and the document shaping are extracted as importable
+  functions and tested directly (6 tests), since the
+  `ssh -> kubectl -> arangosh` transport is not exercisable here (Q-43's gap).
+  148 passed, 0 skipped.
+- **Status:** Accepted
+
+### D-98 — ArangoDB is a tunnelled k8s pod, not a local container; a reboot needs two commands
+- **When:** 2026-09-09T08:20:00-05:00
+- **Decision:** Record the recovery procedure in the log, because a host reboot
+  breaks it silently and the failure mode looks like data loss.
+- **Why:** the dev machine restarted mid-session and ArangoDB "disappeared". It
+  had not. The database is a pod in a k8s cluster on another host and is reached
+  through **two** forwarding hops, both of which die with the machine:
+
+      remote:  kubectl -n lagmatrix port-forward deploy/arangodb 19999:8529
+      local:   ssh -f -N -L 19999:127.0.0.1:19999 ridopark@192.168.10.123
+
+  `docker ps` shows nothing relevant, which is what makes it look like the
+  container was lost. After restoring both hops: `equity` 514, `supplies_to`
+  818, `co_mentioned` 2,129, `article` 47,640 — everything intact, pod uptime
+  33h. The command is documented at `scripts/capture_showcase.py:151`; this
+  entry exists so it is also findable from the log.
+  **The suite's behaviour during the outage was correct and worth noting**: the
+  9 live tests skipped rather than failing, which is exactly the default Q-43
+  chose for a machine with no tunnel, and `LAGMATRIX_REQUIRE_LIVE=1` is what
+  turns that into an error when a database is expected. The co-movement work
+  (D-95) reads parquet only, so `/movers` and `/followers` kept working
+  throughout — worth knowing that the new direction has no hard dependency on
+  the graph store being up.
+- **Outcome:** Verified — restored and confirmed, 148 passed 0 skipped after.
 - **Status:** Accepted
 
 ## Open Questions

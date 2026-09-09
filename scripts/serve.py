@@ -73,23 +73,19 @@ def COMOVE_CLOSES():
 
 
 def default_as_of() -> str:
-    """The last session actually present in the data, not a baked-in constant.
+    """The last session `COMOVE_CLOSES()` can actually answer for.
 
     The page and every endpoint used to default to a hardcoded 2026-05-11 while
     `data/bars.parquet` ran months past it, so the live demo silently assessed a
-    stale date. Reads the real file when it is available and falls back to the
-    synthetic fixture, then to the old constant, so a machine with neither still
-    starts.
+    stale date. Derives the default from `COMOVE_CLOSES()` itself -- the frame
+    every co-movement feature reads -- rather than re-reading a file of its own,
+    so the two can no longer disagree about what "today" is. Falls back to the
+    synthetic fixture, then to the old constant, so a machine with neither real
+    file still starts.
     """
-    for path in ("data/bars.parquet", SYNTHETIC_CLOSES):
-        try:
-            bars = pd.read_parquet(path)
-        except Exception:
-            continue
-        idx = (bars.pivot_table(index="timestamp", columns="symbol", values="close").index
-               if "timestamp" in bars.columns else bars.index)
-        if len(idx):
-            return str(idx[-1].date())
+    closes = COMOVE_CLOSES()
+    if closes is not None and len(closes.index):
+        return str(closes.index[-1].date())
     return SYNTHETIC_FALLBACK_DATE
 SYNTHETIC_FIRES = "tests/fixtures/synthetic-fires.csv"
 PAGE = pathlib.Path(__file__).parent / "serve_index.html"

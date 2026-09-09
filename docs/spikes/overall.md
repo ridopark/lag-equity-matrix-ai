@@ -3358,6 +3358,45 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   44 movers found from 3,201 swept.
 - **Status:** Accepted
 
+### D-109 — `default_as_of()` derives from the frame co-movement actually reads
+- **When:** 2026-09-09T19:05:00-05:00
+- **Decision:** `default_as_of()` returns `COMOVE_CLOSES()`'s last session
+  instead of re-reading `data/bars.parquet` itself.
+- **Why:** the two disagreed, and the disagreement was invisible. `default_as_of()`
+  read `bars.parquet`; `COMOVE_CLOSES()` prefers `bars-10y.parquet`. They agreed
+  by coincidence until the first real `daily_ingest.py` run advanced one file and
+  not the other, and then:
+
+      default_as_of()                    -> "2026-09-09"
+      followers("PANW", "2026-09-04")    -> 13 followers
+      followers("PANW", default_as_of()) ->  0 followers, error=None
+
+  The page's default date silently returned nothing. Its docstring claimed it
+  returned "the last session actually present in the data" — it returned the last
+  session present in *a* file, not the one that answers the question, and the
+  docstring is corrected to say what it now guarantees.
+  Deriving from `COMOVE_CLOSES()` makes the two agree **by construction**. The
+  alternative that lost was giving `default_as_of()` its own corrected file
+  preference: that restores agreement by coincidence again, and coincidence is
+  precisely what broke.
+  **Measured cost, since this moves a large read onto a hot path.** `/config`
+  fires on every page load, so the co-movement frame is now read there rather
+  than only when a co-movement feature is invoked. On real data:
+
+      RSS before any request   155.8 MiB
+      first /config  (cold)    200 in 1.280s  -> 337.6 MiB   (+182 MiB)
+      second /config (warm)    200 in 0.0016s
+
+  One-time per process and cached. Note the +182 MiB is the *steady* cost; it is
+  not the 650 MiB–1,030 MiB figure the deployment work uses, which is peak during
+  the pivot. Both numbers are real and they measure different things — worth
+  keeping straight, since a pod limit has to cover the peak.
+- **Outcome:** 220 passed. `default_as_of()` returns 2026-09-04 and
+  `followers("PANW", default_as_of())` returns 13 with no error. This is PHASE-2
+  of `PLAN-2026-09-09-ingest-coherence.md`, executed ahead of the rest of that
+  plan because the broken default date was live and user-visible.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

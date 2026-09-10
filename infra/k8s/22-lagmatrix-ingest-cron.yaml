@@ -1,33 +1,44 @@
-# The nightly ingest. Until this exists, daily_ingest.py runs only when a human
-# types the command (Q-50), which makes "the ingest fails loudly at 3am instead
-# of silently" a claim about a run that never happens.
+# NOT DEPLOYABLE AS WRITTEN. Every node fails. Read this before applying it.
 #
-# Schedule: 09:00 UTC, Tue-Sat. The US session closes 20:00-21:00 UTC, so 09:00
-# the following day leaves margin for Alpaca's EOD bars to finalise; Tue-Sat UTC
-# covers every Mon-Fri US session exactly once. A reasonable default, not a
-# measured requirement -- retune freely.
-# NOT APPLIABLE AS WRITTEN -- read this before deploying it.
+# Measured by running the image, not by reading the manifest back:
 #
-# `scripts/load_vectors.py` shells out to `kubectl exec` twice: line 32 reaches
-# `postgres-0` in the `copytrade` namespace, line 41 reaches `deploy/arangodb`
-# in this one. That works from a laptop with a kubeconfig. It cannot work from
-# this pod, which has no `kubectl` binary, `automountServiceAccountToken: false`,
-# and a read-only root filesystem. The `vectors` node will fail here.
+#   node        blocker
+#   ----------  ------------------------------------------------------------
+#   bars        fetch_bars.py reads data/fires.csv -- private signal data,
+#               deliberately in neither the repo nor the image
+#   long_bars   fetch_daily_bars.py needs data/bars-10y.parquet to exist; on
+#               an empty PVC it exits "seed it with fetch_history.py first"
+#   news        load_news.py needs fires.csv AND writes to copytrade's
+#               postgres through `kubectl -n copytrade exec -i postgres-0`
+#   vectors     load_vectors.py needs fires.csv AND the same kubectl path,
+#               plus a second one into deploy/arangodb
+#   comovement  COMOVE_CLOSES() finds no bars-10y.parquet, so
+#               session_available reports "not found in data" (D-110 doing
+#               its job -- a loud failure, not a silent one)
 #
-# The other four nodes are fine: bars, long_bars and news use the Alpaca API,
-# and comovement talks to ArangoDB over HTTP through `serve.arango_db()`.
+# Two independent problems, both one-time rather than ongoing:
 #
-# Three ways out, none chosen: give load_vectors.py a direct postgres
-# connection (it is already reading over a pipe, so this is mostly a connection
-# string plus a Secret, and it removes a kubectl dependency from a batch job
-# that has no business holding cluster credentials); or grant the CronJob a
-# ServiceAccount with exec rights into `copytrade` and ship kubectl in the
-# image (which hands a nightly batch job the ability to exec into the trading
-# namespace -- the opposite direction from where this should go); or split
-# vectors out and keep running it from an operator machine.
+# 1. The PVC has to be seeded once with fires.csv, bars.parquet and
+#    bars-10y.parquet. The ingest extends those files; it does not create them
+#    from nothing. fires.csv is private data, so seeding is an out-of-band
+#    operator step, not something CI can do.
 #
-# Found by checking what the scripts need at runtime rather than by reading the
-# manifest back to myself.
+# 2. load_news.py and load_vectors.py reach postgres by shelling out to
+#    `kubectl exec`, which works from a laptop with a kubeconfig and cannot
+#    work from a pod with no kubectl, no service-account token and a read-only
+#    root filesystem. A direct postgres connection is the clean fix: they are
+#    already piping SQL over a pipe, so it is a connection string and a Secret,
+#    and it removes cluster credentials from a batch job that should not hold
+#    them.
+#
+# What IS ready: the image builds at 725MB, runs, reports healthy, and carries
+# no torch. These manifests pass `kubectl apply --dry-run=server`. And the
+# pipeline itself is correct -- it ran end to end tonight on a machine that has
+# the data, extending bars-10y to 2026-09-09, repairing two live splits, and
+# writing 24,104 co-movement edges.
+#
+# The gap is not the code. It is that nothing has ever put this repo's data
+# where a pod could see it.
 
 apiVersion: batch/v1
 kind: CronJob

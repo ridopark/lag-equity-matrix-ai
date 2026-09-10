@@ -61,11 +61,11 @@ _RUN_ID = os.environ.get("PYTEST_XDIST_WORKER") or str(os.getpid())
 _CREATED: set[str] = set()
 
 
-def _unavailable(reason: str):
+def _unavailable(reason: str, system: str = "ArangoDB", where: str = ARANGO_URL):
     """Fail when a live instance was promised, skip when it was not."""
     if REQUIRE_LIVE:
-        pytest.fail(f"LAGMATRIX_REQUIRE_LIVE=1 but ArangoDB is unusable: {reason}")
-    pytest.skip(f"ArangoDB not usable at {ARANGO_URL}: {reason}")
+        pytest.fail(f"LAGMATRIX_REQUIRE_LIVE=1 but {system} is unusable: {reason}")
+    pytest.skip(f"{system} not usable at {where}: {reason}")
 
 
 def arango_db_or_skip(db_name: str):
@@ -122,6 +122,35 @@ def pytest_sessionfinish(session, exitstatus):
         except Exception:
             pass
 
+
+
+# Q-53: postgres.copytrade:5432 is reachable from the lagmatrix namespace, so
+# `lagmatrix.pg` connects directly rather than shelling out through kubectl.
+# Defaults assume a local tunnel; override for a real target.
+PG_HOST = os.environ.get("LAGMATRIX_PG_HOST", "localhost")
+PG_PORT = int(os.environ.get("LAGMATRIX_PG_PORT", "5432"))
+
+
+def pg_conn_or_skip():
+    """A live, read-only postgres connection for the one round-trip test.
+
+    Same fail-vs-skip rule as `arango_db_or_skip`: skip when postgres genuinely
+    is not reachable, fail under LAGMATRIX_REQUIRE_LIVE=1. `psycopg2` is not
+    yet a project dependency, so its absence here also skips rather than fails
+    -- the same convention `arango_db_or_skip` applies to `python-arango`.
+    """
+    pytest.importorskip("psycopg2")
+    where = f"{PG_HOST}:{PG_PORT}"
+    try:
+        with socket.create_connection((PG_HOST, PG_PORT), timeout=1):
+            pass
+    except OSError as exc:
+        _unavailable(str(exc), system="postgres", where=where)
+    from lagmatrix import pg
+    try:
+        return pg.connect()
+    except Exception as exc:
+        _unavailable(str(exc), system="postgres", where=where)
 
 
 def require_local_file(path: str, what: str) -> None:

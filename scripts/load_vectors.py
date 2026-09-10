@@ -21,14 +21,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+from datetime import date
 
 import pandas as pd
 
 HOST = "ridopark@192.168.10.123"
 PG = ("kubectl -n copytrade exec -i postgres-0 -- "
-      "psql -U temporal -d orchestrator -q -t -A -F'\x1f'")
+      "psql -U temporal -d orchestrator -q -t -A -v ON_ERROR_STOP=1 -F'\x1f'")
 DB = "lagmatrix"
 DIM = 384
 CHUNK = 400
@@ -46,12 +48,40 @@ def arango_js(js: str, database: str = DB) -> str:
     return r.stdout
 
 
+def ensure_article_js() -> str:
+    """JS that creates the `article` collection if absent -- never drops it.
+
+    D-97: the two lines this replaces were
+    `if (db._collection("article")) { db._drop("article"); } db._create("article");`
+    and re-running them destroyed 47,640 embeddings and their vector index once
+    already. Documents are upserted by their stable Alpaca id below
+    (`overwriteMode:'replace'`), so a re-run refreshes what it re-embeds and
+    leaves everything else in place -- which is what makes a nightly job safe.
+    """
+    return """
+      if (!db._collection("article")) { db._create("article"); }
+      print("article collection ready");
+    """
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", default="2025-01-01")
     args = ap.parse_args()
 
+    # Both interpolations below land in SQL executed against the *copytrade*
+    # namespace's Postgres, so neither may carry an unvalidated value.
+    # `--since` in particular is not always operator-typed: daily_ingest.py
+    # reads it back out of ArangoDB (`MAX(a.date)`), which makes anything stored
+    # there a second-order injection source. Parse it as a date, and let a bad
+    # value fail loudly here rather than reach psql.
+    try:
+        since = date.fromisoformat(args.since).isoformat()
+    except (TypeError, ValueError):
+        sys.exit(f"--since must be an ISO date, got {args.since!r}")
     tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
+    if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
+        sys.exit("data/fires.csv holds a ticker that is not a plain symbol")
     inlist = ",".join(f"'{t}'" for t in tickers)
     sql = f"""
       WITH ok AS (SELECT article_id FROM lagmatrix.news_symbol
@@ -63,7 +93,7 @@ def main() -> None:
              (SELECT string_agg(symbol, ' ') FROM lagmatrix.news_symbol z
               WHERE z.article_id = a.id)
       FROM lagmatrix.news_article a JOIN hit ON hit.article_id = a.id
-      WHERE a.created_at >= '{args.since}';"""
+      WHERE a.created_at >= '{since}';"""
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PG], input=sql,
                        capture_output=True, text=True, timeout=1200)
     if r.returncode:
@@ -72,19 +102,14 @@ def main() -> None:
     df = pd.DataFrame(rows, columns=["id", "date", "headline", "summary", "symbols"])
     print(f"  {len(df):,} articles since {args.since} (breadth<=8, alert-universe tagged)")
 
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    from fastembed import TextEmbedding
+    model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
     text = (df.headline.fillna("") + ". " + df.summary.fillna("").str.slice(0, 600)).tolist()
     print("  embedding…")
-    vecs = model.encode(text, batch_size=128, show_progress_bar=False,
-                        normalize_embeddings=True)
-    print(f"  {vecs.shape[0]:,} x {vecs.shape[1]} embeddings")
+    vecs = list(model.embed(text, batch_size=128))
+    print(f"  {len(vecs):,} x {vecs[0].shape[0]} embeddings")
 
-    arango_js("""
-      if (db._collection("article")) { db._drop("article"); }
-      db._create("article");
-      print("article collection reset");
-    """)
+    arango_js(ensure_article_js())
     for i in range(0, len(df), CHUNK):
         part = df.iloc[i:i + CHUNK]
         docs = [{"_key": str(row.id), "date": row.date, "headline": row.headline[:300],

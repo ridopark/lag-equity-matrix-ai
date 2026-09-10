@@ -39,6 +39,8 @@ data/*
 
 # playwright-mcp scratch output (console dumps, snapshots, screenshots)
 .playwright-mcp/
+# screenshots land in the repo root when the tool is given a bare filename
+/*.png
 
 # unlazy local coordination state (per-machine, not shared)
 .claude/settings.local.json
@@ -47,3 +49,20 @@ data/*
 
 
 # ArangoDB credentials live outside the repo (~/.lagmatrix-arango-pw)
+
+# stray scratch file, not part of the project
+src/hello.py
+
+# Deliberately unpublished: this plan maps the homelab cluster in detail --
+# host, namespaces, Secret and PVC names -- and states plainly which box runs
+# real-money trading and where authentication is absent. This repo is public.
+# Kept locally, held out of history on purpose (2026-09-09). Removing this line
+# republishes it.
+docs/plans/PLAN-2026-09-09-homelab-deploy.md
+
+# Real headlines + their stored embeddings, captured read-only from the live
+# `article` collection to prove a new encoder reproduces the existing corpus.
+# Not committed: the corpus derives from the Alpaca/Benzinga news feed and this
+# repo is public. Regenerate locally; the test that needs it fails loudly rather
+# than skipping when it is absent (Q-43).
+tests/fixtures/embedding-reference.json

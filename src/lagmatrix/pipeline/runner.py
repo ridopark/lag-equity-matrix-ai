@@ -71,13 +71,19 @@ async def run(
     """
     thread_id = thread_id or f"{as_of or 'all'}-{uuid4().hex[:8]}"
     signals = signals or ExternalSignals()
-    candidates = signals.candidates(as_of)
-    if limit:
-        candidates = candidates[:limit]
+    all_candidates = signals.candidates(as_of)
+    candidates = all_candidates[:limit] if limit else all_candidates
     if not candidates:
         return [], thread_id, None
 
-    signal_universe = {c.symbol for c in signals.candidates()}
+    signal_universe = {c.symbol for c in all_candidates}
+    # Q-37: union in the shocked leaders that originated scan candidates, the
+    # same way scripts/serve.py does, so a leader's own move can't be counted
+    # as evidence for the candidate it produced. Duck-typed because
+    # ExternalSignals has no shocked_leaders and the protocol shouldn't force
+    # scan-only machinery onto every source.
+    if hasattr(signals, "shocked_leaders") and as_of is not None:
+        signal_universe |= set(signals.shocked_leaders(as_of))
 
     if closes is None:
         start = min(c.as_of for c in candidates) - timedelta(days=TRAIL_PAD)

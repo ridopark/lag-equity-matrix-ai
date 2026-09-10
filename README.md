@@ -65,14 +65,30 @@ one — "no large effect", never "no effect".
 
 ### 3. Supply chain from EDGAR — directed, and the cleanest null
 
-1,211 customer edges extracted from 5,880 10-K filings, 2018→2026,
+1,211 customer relations extracted from 5,880 10-K filings, 2018→2026,
 point-in-time by filing date. The first **directed** edge in the project: QRVO
 names Apple; Apple never names QRVO.
+
+**818 of those 1,211 survive audit** (D-78). Re-reading each stored passage from
+the *one sentence that names the counterparty* — rather than from the ±420-char
+window, which spans enough text that a competitor list two sentences from a
+customer mention scored as a customer — reclassifies 31% of them: 253 name the
+party while stating no relation, 66 are competitor lists, 45 acquisitions, 9
+explicitly reversed. Two were *South Dakota v. Wayfair*, a sales-tax case read as
+a supply relationship. Of the 818 survivors, 685 carry a complete, quotable
+disclosure sentence; the other 133 rest on a page header or a financial table.
 
 | test | result |
 |---|---|
 | Apple's 13 suppliers, 1-day lag | b=+0.0090, z=+0.46, I²=0% |
 | pooled across 18 chains | **b=+0.0052**, z=+0.43, pooled estimate **+0.0000**, I²=0% |
+
+⚠️ **Both rows were computed on the pre-audit edge set**, when a third of the
+edges were competitor lists and acquisitions. They have not been re-run on the
+cleaned 818. The direction of the error is knowable but its size is not: removing
+non-supply edges removes noise, so a null computed on contaminated edges stays
+null or sharpens — it cannot become a false positive this way. The honest
+statement is that these numbers describe a graph that no longer exists (Q-35).
 
 A 1% customer move implies +0.5 bp on its suppliers. Unlike the correlation
 nulls, this one is *stable* — no regime dependence, no specification
@@ -304,7 +320,7 @@ namespaced away from the trading tables, but joinable to `audit_log`):
 |---|---|---|
 | `news_article` / `news_symbol` | 229,737 / 932,545 | Benzinga 2014→2026, 248 MB |
 | `news_comention` | *view* | undirected co-mention pairs |
-| `filing_mention` | 1,211 | 10-K customer disclosures, 2018→2026 |
+| `filing_mention` | 1,211 → **818** | 10-K customer disclosures after audit, 2018→2026 |
 | `supply_edge` | *view* | directed supplier → customer |
 
 Both graph tables are exposed as **views, never materialised**, so every caller
@@ -312,10 +328,13 @@ must supply its own `created_at < as_of` or `filing_date < as_of` bound.
 Materialising them would bake in a single as-of date and make look-ahead a
 matter of forgetting to filter rather than an impossibility.
 
-`filing_mention` stores the **passage verbatim** alongside a `relation` label
-marked `confidence='heuristic'`. The passage is the durable artefact; the label
-is disposable. Re-labelling with an LLM never re-crawls EDGAR, and every edge
-stays auditable against the filing that produced it.
+`filing_mention` stores the **passage verbatim** alongside a `relation` label.
+The passage is the durable artefact; the label is disposable. That design paid
+off directly: D-78's reclassification re-read all 1,211 passages and rewrote
+every label without re-crawling EDGAR, turning one hardcoded `'customer'` into
+six labels (`customer`, `reversed`, `competitor`, `corporate_action`, `unstated`,
+`unnamed`) and marking them `confidence='sentence'`. Every edge stays auditable
+against the filing that produced it — which is exactly how the 31% was found.
 
 ## What is not in this repo, and why
 

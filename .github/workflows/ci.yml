@@ -43,6 +43,15 @@ jobs:
 
       - run: uv run ruff check
 
+      # Four tests cannot run here and skip, by design, not by accident:
+      #   test_serve_source.py           needs data/bars-10y.parquet
+      #   test_serve_default_as_of_*.py  needs data/bars*.parquet   (x2)
+      #   test_vector_index_embedding.py needs tests/fixtures/embedding-reference.json
+      # All four are vendor or corpus data deliberately kept out of a public
+      # repo. `require_local_file` skips them when absent and FAILS them under
+      # LAGMATRIX_REQUIRE_LIVE=1, so a machine that is supposed to have the
+      # data cannot quietly skip instead (Q-43). Naming them here so the skip
+      # count is a stated expectation rather than something nobody reads.
       - run: uv run pytest -q
 
       - name: Baseline guard, synthetic universe

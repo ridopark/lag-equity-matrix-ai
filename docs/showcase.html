@@ -1,410 +1,713 @@
-<title>Supply Chain GraphRAG</title>
+<title>LagMatrix GraphRAG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
 <style>
 :root{
-  --void:#0A0D13; --panel:#141A24; --panel2:#1B222E; --line:#242C3A;
-  --ink:#E8ECF3; --dim:#7E8899; --dimmer:#525C6B;
-  --graph:#4FE3C1; --graph-dim:#1E4A44;
-  --vector:#B78AFF; --vector-dim:#3A2C55;
-  --warn:#FF9166; --warn-dim:#4A2A20;
+  /* The artifact host wraps pages with color-scheme:light, so without this the
+     browser paints scrollbars, pickers and dropdowns light around a dark page. */
+  color-scheme: dark;
+  accent-color:#4FE3C1;
+  --void:#0A0D13; --panel:#141A24; --panel2:#1B222E; --line:#242C3A; --line2:#1A212C;
+  --ink:#E8EDF5; --ink2:#9AA7B8; --ink3:#647287;
+  --graph:#4FE3C1; --vector:#B78AFF; --warn:#F2B45C; --bad:#F2726B;
   --disp:"Archivo",system-ui,sans-serif;
-  --sans:"IBM Plex Sans",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
-  --wrap:min(1240px,100% - 3rem);
 }
-*{box-sizing:border-box}
-body{background:var(--void);color:var(--ink);font-family:var(--sans);
-  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
-.wrap{width:var(--wrap);margin-inline:auto}
-h1,h2,h3{font-family:var(--disp);font-weight:600;text-wrap:balance;margin:0;letter-spacing:-.02em}
-.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#242C3A transparent}
+::selection{background:rgba(79,227,193,.25)}
+:focus-visible{outline:2px solid #4FE3C1;outline-offset:2px;border-radius:3px}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#242C3A;border-radius:5px;border:2px solid #0A0D13}
+body{margin:0;background:var(--void);color:var(--ink);font:15.5px/1.6 var(--body);
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding:3rem 1.4rem 5rem}
+h1{font:700 2.5rem/1.08 var(--disp);letter-spacing:-.025em;margin:0 0 .7rem;text-wrap:balance}
+h2{font:600 1.02rem/1.3 var(--disp);letter-spacing:.005em;margin:0 0 .25rem}
+.eyebrow{font:500 .68rem/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink3);margin:0 0 .8rem}
+.lede{font-size:1.09rem;color:var(--ink2);max-width:62ch;margin:0}
+.sub{color:var(--ink3);font-size:.88rem;margin:.3rem 0 0;max-width:64ch}
+section{margin-top:3.4rem}
+hr{border:0;border-top:1px solid var(--line2);margin:3.4rem 0 0}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(138px,1fr));gap:1px;
+  background:var(--line2);border:1px solid var(--line2);border-radius:7px;overflow:hidden;margin-top:1.8rem}
+.stat{background:var(--panel);padding:.95rem 1.05rem}
+.stat b{display:block;font:500 1.42rem/1 var(--mono);letter-spacing:-.02em}
+.stat span{display:block;font-size:.72rem;color:var(--ink3);margin-top:.34rem}
+
+/* timeline */
+.tl{margin-top:1.5rem;border-left:1px solid var(--line);padding-left:0}
+.ev{display:grid;grid-template-columns:5.4rem 1fr;gap:.9rem;padding:.34rem 0 .34rem 1.1rem;
+  position:relative;font-size:.85rem}
+.ev::before{content:"";position:absolute;left:-3.5px;top:.86rem;width:6px;height:6px;
+  border-radius:50%;background:var(--line)}
+.ev.g::before{background:var(--graph)} .ev.v::before{background:var(--vector)}
+.ev.i::before{background:var(--warn);box-shadow:0 0 0 3px rgba(242,180,92,.16)}
+.ev .t{font:400 .8rem/1.6 var(--mono);color:var(--ink3);text-align:right;
+  font-variant-numeric:tabular-nums}
+.ev .n{font:500 .82rem/1.6 var(--mono)}
+.ev .d{color:var(--ink2);font-size:.83rem}
+.ev.i .d{color:var(--warn)}
+.par{color:var(--graph);font:400 .7rem/1 var(--mono);letter-spacing:.05em}
+
+/* diagrams */
+.dia{margin-top:1.5rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:1rem .6rem .6rem}
+.dia svg{display:block;width:100%;height:auto}
+text.nl{font:500 9.5px var(--mono);fill:var(--ink)}
+text.ms{font:400 8.5px var(--mono);fill:var(--ink3)}
+text.br{font:400 8.5px var(--mono);fill:var(--ink3)}
+rect.nd{fill:var(--panel2);stroke:var(--line);stroke-width:1;rx:4}
+rect.nd.g{stroke:var(--graph)} rect.nd.v{stroke:var(--vector)}
+rect.nd.i{stroke:var(--warn)}
+path.ed{fill:none;stroke:var(--line);stroke-width:1.1}
+path.ed.on{stroke:var(--graph);stroke-width:1.4}
+path.ed.vv{stroke:var(--vector);stroke-width:1.4}
+.legend{display:flex;gap:1.1rem;flex-wrap:wrap;margin-top:.7rem;padding-left:.4rem}
+.legend span{font:400 .72rem/1 var(--mono);color:var(--ink3);display:flex;align-items:center;gap:.34rem}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+rect.sp{rx:2}
+rect.sp.g{fill:rgba(79,227,193,.55)} rect.sp.v{fill:rgba(183,138,255,.55)}
+rect.sp.o{fill:rgba(154,167,184,.42)}
+text.sl{font:400 8.5px var(--mono);fill:var(--ink2)}
+line.gl{stroke:var(--line2);stroke-width:1}
+.ck{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:1rem}
+.ck code{font:400 .68rem/1 var(--mono);background:var(--panel2);border:1px solid var(--line);
+  color:var(--ink3);padding:.28rem .4rem;border-radius:3px}
+
+/* subgraph explorer */
+.sg{display:grid;grid-template-columns:1fr 300px;gap:1rem;margin-top:1.5rem}
+@media(max-width:760px){.sg{grid-template-columns:1fr}}
+.sgbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.7rem}
+circle.v{fill:var(--panel2);stroke:var(--graph);stroke-width:1.3;cursor:pointer}
+circle.v.u{stroke:var(--ink3);stroke-dasharray:2 2}
+circle.v.hub{fill:rgba(79,227,193,.14);stroke-width:1.8}
+circle.v.sel{fill:rgba(79,227,193,.3)}
+text.vl{font:500 9px var(--mono);fill:var(--ink);pointer-events:none}
+line.se{stroke:var(--line);stroke-width:1}
+line.se.sel{stroke:var(--graph);stroke-width:1.6}
+.insp h4{margin:0 0 .5rem;font:500 .66rem/1 var(--mono);letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink3)}
+.insp .sym{font:500 1.05rem/1 var(--mono);color:var(--graph)}
+.insp .meta{font:400 .74rem/1.5 var(--mono);color:var(--ink3);margin:.35rem 0 .6rem}
+.insp .q{font-size:.83rem;color:var(--ink2)}
+.tabs{display:flex;gap:.35rem;margin-top:1.2rem;flex-wrap:wrap}
+.tab{font:500 .76rem/1 var(--mono);padding:.4rem .62rem;border-radius:4px;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink2)}
+.tab[aria-selected=true]{border-color:var(--graph);color:var(--graph)}
+
+/* contrast */
+.vs{display:grid;grid-template-columns:repeat(auto-fit,minmax(292px,1fr));gap:1.05rem;margin-top:1.6rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card>header{padding:.8rem 1rem;border-bottom:1px solid var(--line);display:flex;
+  align-items:baseline;gap:.6rem}
+.card>header b{font:500 1rem/1 var(--mono)}
+.card>header span{font-size:.72rem;color:var(--ink3)}
+.lane{padding:.85rem 1rem}
+.lane+.lane{border-top:1px solid var(--line2)}
+.lane h3{margin:0 0 .5rem;font:500 .66rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase}
+.lane.g h3{color:var(--graph)} .lane.v h3{color:var(--vector)}
+.chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.chip{font:500 .72rem/1 var(--mono);padding:.3rem .45rem;border-radius:3px;
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink)}
+.chip i{font-style:normal;color:var(--graph);margin-left:.28rem}
+.chip.u{color:var(--ink3);border-style:dashed}
+.hl{font-size:.83rem;color:var(--ink2);margin:0}
+.hl+.hl{margin-top:.42rem;padding-top:.42rem;border-top:1px dotted var(--line2)}
+.score{font:400 .72rem/1 var(--mono);color:var(--ink3);margin-left:.35rem}
+.verdict{font:500 .7rem/1 var(--mono);padding:.26rem .48rem;border-radius:3px;margin-left:auto}
+.v-corroborated{background:rgba(79,227,193,.13);color:var(--graph)}
+.v-contradicted{background:rgba(242,114,107,.13);color:var(--bad)}
+.v-neutral{background:var(--panel2);color:var(--ink3)}
+.none{color:var(--ink3);font-size:.83rem;font-style:italic}
+
+blockquote.rat{margin:1rem 0 0;padding:.9rem 1.1rem;background:var(--panel);
+  border-left:2px solid var(--warn);border-radius:0 5px 5px 0;color:var(--ink2);font-size:.88rem}
+.bars{display:grid;gap:.4rem;margin-top:1.4rem}
+.bar{display:grid;grid-template-columns:9.5rem 1fr 3.6rem;gap:.7rem;align-items:center;
+  font:400 .78rem/1 var(--mono)}
+.bar i{display:block;height:11px;border-radius:2px;background:var(--line)}
+.bar.keep i{background:var(--graph)}
+.bar span:last-child{color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums}
+details.fold{margin-top:1.2rem}
+details.fold summary{cursor:pointer;font:500 .78rem/1 var(--mono);color:var(--graph);
+  padding:.55rem 0}
+
+/* provenance */
+table{border-collapse:collapse;width:100%;font-size:.85rem;margin-top:1.4rem}
+th{text-align:left;font:500 .64rem/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink3);padding:0 .7rem .55rem 0;border-bottom:1px solid var(--line)}
+td{padding:.6rem .7rem .6rem 0;border-bottom:1px solid var(--line2);vertical-align:top}
+td.s{font:500 .84rem/1.5 var(--mono);white-space:nowrap}
+td.p{font:400 .82rem/1.5 var(--mono);color:var(--ink2);font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.quote{color:var(--ink2);font-size:.85rem}
+.quote em{font-style:normal;color:var(--ink);background:rgba(79,227,193,.10);
+  padding:.05rem .18rem;border-radius:2px}
+.nq{color:var(--ink3);font-style:italic;font-size:.82rem}
+.scroll{overflow-x:auto}
+
+pre{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:1rem 1.1rem;
+  font:400 .78rem/1.62 var(--mono);color:var(--ink2);overflow-x:auto;margin:1.2rem 0 0}
+pre b{color:var(--graph);font-weight:500}
+.note{color:var(--ink3);font-size:.85rem;margin-top:1.1rem;max-width:66ch}
+.note b{color:var(--ink2);font-weight:500}
 a{color:var(--graph)}
-
-header{padding:4rem 0 2rem;border-bottom:1px solid var(--line)}
-.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--dimmer);margin-bottom:1rem}
-h1{font-size:clamp(2.3rem,5.5vw,3.8rem);line-height:1.03;font-weight:700}
-h1 .g{color:var(--graph)} h1 .v{color:var(--vector)}
-.lede{font-size:clamp(1rem,2vw,1.18rem);color:var(--dim);max-width:64ch;margin:1.3rem 0 0}
-.facts{display:flex;flex-wrap:wrap;gap:0;margin-top:2.2rem;border-top:1px solid var(--line)}
-.fact{flex:1 1 7.5rem;padding:.9rem 1.1rem .9rem 0;border-right:1px solid var(--line)}
-.fact:last-child{border-right:0}
-.fact b{display:block;font-family:var(--mono);font-size:1.35rem;font-weight:500;letter-spacing:-.02em}
-.fact span{display:block;font-size:.68rem;color:var(--dimmer);margin-top:.25rem;letter-spacing:.03em}
-
-section{padding:3.2rem 0;border-bottom:1px solid var(--line)}
-h2{font-size:clamp(1.4rem,2.6vw,1.85rem)}
-.sub{color:var(--dim);font-size:.9rem;margin:.45rem 0 1.8rem;max-width:72ch}
-p{margin:0 0 1rem;max-width:70ch}
-.dimtext{color:var(--dim)}
-
-.ctl{display:flex;gap:.9rem;align-items:center;flex-wrap:wrap;margin-bottom:1.4rem}
-button{font:500 .84rem var(--sans);cursor:pointer;border:1px solid var(--graph);
-  background:transparent;color:var(--graph);padding:.48rem 1.15rem;border-radius:3px}
-button:hover{background:var(--graph-dim)}
-button:disabled{opacity:.4;cursor:default}
-button.alt{border-color:var(--line);color:var(--dim)}
-button.alt:hover{background:var(--panel2)}
-input[type=range]{accent-color:var(--graph);width:15rem}
-label{font-size:.75rem;color:var(--dimmer);font-family:var(--mono)}
-.clock{margin-left:auto;font-family:var(--mono);font-size:.8rem;color:var(--dim)}
-
-.split{display:grid;grid-template-columns:1.75fr 1fr;gap:1.6rem}
-@media(max-width:900px){.split{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:1.1rem 1.2rem}
-.card h3{font-size:.72rem;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;
-  color:var(--dimmer);margin-bottom:.9rem;display:flex;align-items:center;gap:.5rem}
-.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
-.dot.g{background:var(--graph)} .dot.v{background:var(--vector)}
-
-svg.graph{width:100%;height:auto;display:block}
-.node-c{fill:var(--panel2);stroke:var(--graph);stroke-width:1.5}
-.node-1{fill:var(--panel2);stroke:var(--graph);stroke-width:1.2}
-.node-2{fill:var(--panel2);stroke:var(--vector);stroke-width:1.2}
-.node-off{opacity:.16}
-.edge{stroke:var(--graph-dim);stroke-width:1.4;fill:none;transition:stroke .15s,stroke-width .15s}
-.edge.lit{stroke:var(--graph);stroke-width:2.6}
-.edge.h2{stroke:#3A4A5E}
-.edge.off{opacity:.08}
-text.lbl{font-family:var(--mono);font-size:12px;font-weight:500;fill:var(--ink)}
-text.pct{font-family:var(--mono);font-size:10px;fill:var(--graph)}
-g.nd{cursor:pointer}
-g.nd:hover circle{stroke-width:2.4}
-
-.arts{display:grid;gap:.5rem}
-.art{border-left:2px solid var(--vector);padding:.5rem .7rem;background:var(--panel2);border-radius:0 3px 3px 0}
-.art .s{font-family:var(--mono);font-size:.7rem;color:var(--vector)}
-.art .h{font-size:.82rem;margin-top:.15rem}
-.art .d{font-family:var(--mono);font-size:.66rem;color:var(--dimmer);margin-top:.2rem}
-
-pre{background:var(--panel);border:1px solid var(--line);border-radius:5px;
-  padding:1rem 1.1rem;overflow-x:auto;font-family:var(--mono);font-size:.76rem;
-  line-height:1.6;color:#BFD8D2;margin:0}
-pre .kw{color:var(--graph)} pre .cm{color:var(--dimmer)}
-
-.tl{border-top:1px solid var(--line);margin-top:.4rem}
-.ev{display:grid;grid-template-columns:4.6rem 9.5rem 1fr;gap:.9rem;padding:.4rem .2rem;
-  border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.76rem;
-  opacity:.32;transition:opacity .16s,background .16s}
-.ev.on{opacity:1}
-.ev.now{background:var(--panel2)}
-.ev .t{text-align:right;color:var(--dimmer)}
-.ev .n{color:var(--ink)}
-.ev .d{color:var(--dim)}
-.ev.g .n{color:var(--graph)} .ev.v .n{color:var(--vector)}
-@media(max-width:640px){.ev{grid-template-columns:4rem 1fr}.ev .d{grid-column:2}}
-
-table{border-collapse:collapse;width:100%;font-size:.82rem}
-th{text-align:left;font-family:var(--mono);font-size:.65rem;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--dimmer);padding:0 .8rem .5rem 0;border-bottom:1px solid var(--line)}
-td{padding:.42rem .8rem .42rem 0;border-bottom:1px solid var(--line)}
-td.s{font-family:var(--mono);color:var(--ink)}
-td.p{font-family:var(--mono);color:var(--dim)}
-.path{font-family:var(--mono);font-size:.76rem;color:var(--vector)}
-.tw{overflow-x:auto}
-
-.note{background:var(--warn-dim);border-left:3px solid var(--warn);padding:1.1rem 1.3rem;
-  border-radius:0 4px 4px 0;margin-top:1.6rem}
-.note h3{font-size:.95rem;color:var(--warn);margin-bottom:.5rem;font-family:var(--disp)}
-.note p{color:#E7C9B8;font-size:.88rem;margin:0;max-width:78ch}
-footer{padding:2.6rem 0 4rem;color:var(--dimmer);font-size:.8rem}
-@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+footer{margin-top:3.4rem;padding-top:1.4rem;border-top:1px solid var(--line2);
+  color:var(--ink3);font-size:.79rem}
 </style>
 
+<div class="wrap">
+
 <header>
-  <div class="wrap">
-    <div class="eyebrow">LangGraph · ArangoDB · vector search · replayed from a real run</div>
-    <h1>A supply chain, traversed <span class="g">two hops deep</span><br>and read <span class="v">semantically</span></h1>
-    <p class="lede">Every number on this page was measured. The traversal is an AQL graph query
-      against 1,211 directed supply-chain edges extracted from SEC 10-K filings. The retrieval is
-      approximate nearest-neighbour search over 47,640 embedded news articles, both against a live
-      ArangoDB instance.</p>
-    <p class="lede" style="font-size:.95rem;margin-top:.9rem">One caveat stated plainly, because the
-      rest of this page is measured: the two queries below were issued <em>directly</em> against those
-      stores. The pipeline's retrieval nodes do not call them yet — the adapters are being wired in
-      now. The topology, the fan-out and the query timings are real; "the pipeline ran this" will be
-      true shortly, and is not claimed until it is.</p>
-    <div class="facts">
-      <div class="fact"><b id="f-eq">606</b><span>equity vertices</span></div>
-      <div class="fact"><b id="f-sup">1,211</b><span>directed edges</span></div>
-      <div class="fact"><b id="f-art">47,640</b><span>embedded articles</span></div>
-      <div class="fact"><b>384</b><span>vector dimensions</span></div>
-      <div class="fact"><b id="f-ms">20<small>ms</small></b><span>2-hop traversal</span></div>
-      <div class="fact"><b>2</b><span>max_lag_hops</span></div>
-    </div>
-  </div>
+  <p class="eyebrow">LangGraph · ArangoDB · GraphRAG</p>
+  <h1>Which companies would feel it first?</h1>
+  <p class="lede">A LangGraph pipeline answers that by traversing a directed, point-in-time
+    supply-chain graph built from 5,880 SEC 10-K filings, and searching 47,640 news articles
+    semantically. Everything below is one recorded run.</p>
+  <div class="stats" id="stats"></div>
 </header>
 
+<hr>
+
 <section>
-  <div class="wrap">
-    <h2>Why this needs a graph database</h2>
-    <p class="sub">The question is not "who supplies Apple". It is <em>"as of a given date, who reaches
-      Apple within two supply-chain hops, using only filings published before that date"</em> — a
-      directed traversal with a per-hop validity window. One hop is a dataframe join. Two hops with a
-      temporal predicate on every edge is a self-join per hop, and it is one AQL statement.</p>
-
-    <div class="ctl">
-      <button id="play">▶ Replay the run</button>
-      <button class="alt" id="reset">Reset</button>
-      <label for="asof">as-of</label>
-      <input type="range" id="asof" min="2020" max="2026" step="1" value="2026">
-      <span class="mono" id="asof-v" style="color:var(--graph)">2026-01-01</span>
-      <span class="clock" id="clock">idle</span>
-    </div>
-
-    <div class="split">
-      <div class="card">
-        <h3><span class="dot g"></span> ArangoDB · INBOUND traversal, depth 1..2</h3>
-        <svg class="graph" id="gsvg" viewBox="0 0 760 560" role="img"
-             aria-label="Supply chain graph: Apple at centre, direct suppliers, and second-hop suppliers"></svg>
-        <p class="dimtext" style="font-size:.78rem;margin:.7rem 0 0">
-          Inner ring: companies naming Apple as a customer in their own 10-K.
-          Outer ring: reached only <em>through</em> another supplier. Drag the as-of slider —
-          edges filed after that date genuinely disappear.</p>
-      </div>
-      <div class="card">
-        <h3><span class="dot v"></span> Vector search · APPROX_NEAR_COSINE</h3>
-        <div class="arts" id="arts"></div>
-        <p class="dimtext" style="font-size:.78rem;margin:.8rem 0 0">
-          Query embedded with all-MiniLM-L6-v2, matched against the article index.
-          Scores are cosine similarity from ArangoDB's vector index, not a keyword match.</p>
-      </div>
-    </div>
-
-    <div style="margin-top:1.6rem" class="tw">
-      <table>
-        <thead><tr><th>company</th><th>hops</th><th>path</th><th>% of its revenue</th><th>disclosed in</th></tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
+  <p class="eyebrow">The run</p>
+  <h2>One <code>graph.astream</code>, as it happened</h2>
+  <p class="sub">The shape below is drawn from the run's own task records. <b>Each number is
+    that task's duration</b> — how long the node ran — not a timestamp. Nodes appear only if the
+    run actually produced a task for them; <code>START</code> has no task and so carries no
+    number.</p>
+  <div class="dia"><svg id="topo" viewBox="0 0 960 300" role="img"
+     aria-label="LangGraph execution graph for this run"></svg></div>
+  <div class="legend">
+    <span><i style="background:var(--graph)"></i>graph path</span>
+    <span><i style="background:var(--vector)"></i>vector path</span>
+    <span><i style="background:var(--warn)"></i>interrupt gate</span>
+    <span>dashed = declared edge this run did not take</span>
   </div>
+  <h2 style="margin-top:2.2rem">Where the work actually overlapped</h2>
+  <p class="sub">Each bar is one LangGraph task, from its start to its result, taken from the
+    <code>debug</code> stream rather than inferred. Bars sharing a row band ran in the same
+    superstep; bars overlapping in x ran at the same time.</p>
+  <div class="dia"><svg id="spans" viewBox="0 0 960 300" role="img"
+     aria-label="task spans showing concurrency"></svg></div>
+  <div class="ck" id="ckpts"></div>
+  <p class="note" id="cknote"></p>
+  <p class="note" id="tlnote"></p>
 </section>
 
-<section>
-  <div class="wrap">
-    <h2>The queries, verbatim</h2>
-    <p class="sub">Both are shown in full so the claims above can be checked rather than believed.
-      The <span class="mono" style="color:var(--graph)">ALL</span> quantifier is the load-bearing part:
-      it constrains <em>every edge on the path</em>, not just the last one, which is what makes the
-      traversal point-in-time rather than merely date-labelled.</p>
-    <div class="split">
-      <div><h3 style="font-size:.72rem;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dimmer);margin-bottom:.7rem">graph traversal</h3><pre id="aql-g"></pre></div>
-      <div><h3 style="font-size:.72rem;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dimmer);margin-bottom:.7rem">vector search</h3><pre id="aql-v"></pre></div>
-    </div>
-  </div>
-</section>
+<hr>
 
 <section>
-  <div class="wrap">
-    <h2>The LangGraph pipeline</h2>
-    <p class="sub">One <span class="mono">Send</span> branch per candidate. Graph traversal and vector
-      retrieval run in parallel and rejoin at <span class="mono">context_fusion</span>. Every run is
-      checkpointed under a thread id and replayable; <span class="mono">review</span> is an
-      <span class="mono">interrupt()</span> gate that halts on a contradicted verdict — this topology
-      is what the pipeline actually builds, and the suite that proves it is
-      <span class="mono">test_fanout</span>, <span class="mono">test_checkpointing</span> and
-      <span class="mono">test_review</span>.
-      The per-node timings below are the real durations of the AQL and ANN calls; the ordering is the
-      graph's own. Once the adapters land, these become one <span class="mono">graph.astream</span>
-      trace rather than a composed one.</p>
-    <div class="tl" id="tl"></div>
-  </div>
+  <p class="eyebrow">Why a graph database</p>
+  <h2>Same question, both retrievers</h2>
+  <p class="sub">Each candidate asks: who supplies this company? The graph answers with named
+    counterparties and the revenue share they disclosed. The vector index answers with the
+    nearest articles in embedding space to the query the node actually issued
+    (<code>"news relevant to a up move in &lt;symbol&gt;"</code>). These are
+    <em>vector_retriever</em>'s own results, not a second query run beside the pipeline.</p>
+  <p class="sub" style="margin-top:.6rem">These are <em>vector_retriever</em>'s own results —
+    not a second query run beside the pipeline. Scores are lower than they used to be, and that
+    turns out to be the point; see below.</p>
+  <div class="vs" id="contrast"></div>
 </section>
 
+  <h2 style="margin-top:2.6rem">What this node used to ask</h2>
+  <p class="sub">Building this page found a real bug in the pipeline it was demonstrating. For two
+    phases <code>vector_retriever</code> asked a question with almost no content in it, and every
+    assessment the system ever made retrieved market-wrap noise as its news context. Both queries
+    below are real: the left column is what the node asked in production until today.</p>
+  <div class="vs" id="changelog"></div>
+  <p class="note"><b>The score went down, and that is the finding.</b> Cosine similarity measures
+    proximity to the query, not usefulness. A vague query sits near the centre of the corpus, so
+    it scores well against almost everything — the <em>high</em> number was the symptom. The
+    specific query lands further from that centroid and closer to the few articles that matter.
+    Picking the query by score would have selected the worse retriever: a third phrasing we tested
+    scored highest of all, at 0.700, and returned generic stock chatter.</p>
+  <p class="note"><b>It is uneven, and that is kept rather than tuned away.</b> The same query
+    retrieves more for Apple and Tesla than for Broadcom, because Broadcom has less retail-facing
+    coverage. Tuning the wording until it flattered these three candidates would be exactly the
+    cherry-picking the rest of this page argues against.</p>
+</section>
+
+<hr>
+
 <section>
-  <div class="wrap">
-    <h2>What the pipeline concluded</h2>
-    <p>It found the relationships. It did not find a tradeable signal in them, and that is the honest
-      result rather than a caveat.</p>
-    <div class="tw" style="margin-top:1.2rem">
-      <table>
-        <thead><tr><th>edge type</th><th>shape</th><th>tested</th><th>result</th></tr></thead>
-        <tbody>
-          <tr><td class="s">correlation</td><td class="p">symmetric</td><td class="p">19,867 candidate-dates</td><td class="p">powered null, −4.6 bp, MDE 17.9 bp</td></tr>
-          <tr><td class="s">correlation, intraday</td><td class="p">symmetric</td><td class="p">1.07M minute bars</td><td class="p">no lead — 89% peak at lag 0</td></tr>
-          <tr><td class="s">news co-mention</td><td class="p">undirected</td><td class="p">29,014 seed-days</td><td class="p">no large effect, b=+0.0013</td></tr>
-          <tr><td class="s">supply chain</td><td class="p" style="color:var(--graph)">directed</td><td class="p">28,131 chain-days</td><td class="p">b=+0.0000, I²=0%</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="note">
-      <h3>Four results that looked real and were not</h3>
-      <p>A 400-sample run reported +115 bp at z=+3.89; the full 19,867 reversed the sign. One evidence
-        band showed +64 bp while the strongest band showed +1.66 bp. A ten-year run gave +27 bp at
-        z=+4.53 until a coverage filter turned out to be excluding every post-2016 IPO. A corrected run
-        still showed +17.95 bp until a heterogeneity test found I²=81% with the sign flipping between
-        halves. Every test on this page was pre-registered — decision rule, economic threshold and
-        expected power written down before the data was fetched — which is the only reason those four
-        were caught rather than published.</p>
-    </div>
+  <p class="eyebrow">Multi-hop</p>
+  <h2>Two hops, with every edge on the path constrained</h2>
+  <p class="sub">The supply graph is only one hop deep — see the note below. Depth lives in the
+    co-mention graph, where an edge means two companies were named together in enough articles to
+    clear a PMI floor. Each path here required <em>every</em> edge to clear PMI ≥ 2.0
+    <em>and</em> to have existed by the as-of date. Paths through ETF tickers are excluded
+    outright: an index fund is co-mentioned with every constituent, so it is a hub that makes any
+    two holdings look two hops apart. "AVGO and TSM connect via SOXX" is an artifact of the index,
+    not a relationship — 1,022 such tickers are filtered from the path.</p>
+  <div class="vs" id="twohop"></div>
+  <p class="note"><b>Why this is not a dataframe query.</b> The constraint is per-path, not
+    per-row: a two-hop path survives only if both of its edges independently clear the weight
+    floor and the date. Expressing that in a dataframe means materialising the transitive closure
+    first and filtering after — which is the work the graph database is doing here in single-digit
+    milliseconds.</p>
+  <p class="note"><b>And why the supply graph cannot show this.</b> Before the audit it appeared
+    to have two-hop depth. Every one of those paths turned out to run through a competitor list, a
+    divestiture, or a "Baker Hughes rig count" statistic read as a customer relationship. Removing
+    them removed the depth. Of 514 companies, none retains a sound two-hop supply chain — a
+    supplier and <em>its</em> supplier must both name a customer, and that almost never happens.
+    The honest demonstration is on the edge type that has real depth, labelled as such.</p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">Provenance</p>
+  <h2>Every edge traces to a sentence in a filing</h2>
+  <p class="sub">The graph is not inferred by a model. Each edge exists because a company wrote
+    its customer's name in a 10-K, and the sentence that created it is carried through to here.</p>
+  <div class="tabs" id="tabs"></div>
+  <div class="sg">
+    <div class="sgbox"><svg id="subgraph" viewBox="0 0 620 340" role="img"
+       aria-label="supply-chain subgraph"></svg></div>
+    <div class="sgbox insp" id="insp"></div>
   </div>
+  <details class="fold"><summary>all 14 edges as a table</summary>
+    <div class="scroll"><table id="prov"></table></div></details>
+  <p class="note" id="provnote"></p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">Point in time</p>
+  <h2>The traversal cannot see a filing that had not happened</h2>
+  <p class="sub">Every path is guarded per-edge, not per-query. A supplier joins the graph on the
+    date its filing was made and not a day earlier, so a backtest cannot borrow tomorrow's
+    disclosure.</p>
+  <div class="tabs" id="aqltabs">
+    <button class="tab" data-q="traversal" aria-selected="true">supply traversal</button>
+    <button class="tab" data-q="comention" aria-selected="false">two-hop co-mention</button>
+  </div>
+  <pre id="aql"></pre>
+  <p class="note"><b>Both retrievers, not just the graph.</b> The semantic search is bounded by
+    the same date: <code>FILTER … AND a.date &lt; @as_of</code>, strictly before. That was not
+    true until recently — the vector adapter shipped with no date predicate at all, and a
+    recorded run retrieved an article published 24 days <em>after</em> its as-of. The suite
+    passed over it; it was caught by a reviewer reading the retrieved rows on this page. Every
+    other guard in this system is enforced by construction; that one was enforced by a comment,
+    which is exactly why it failed. The counts below are recomputed each capture.</p>
+  <p class="note"><b><code>ALL</code> is a quantifier, not a direction.</b> It requires
+    <em>every</em> edge along a path to satisfy the predicate; checking only the edge nearest the
+    candidate would let a later filing leak in behind an earlier one, which is what one of the
+    adapter's tests exists to catch. Do not confuse it with the <code>ANY</code> in the two-hop
+    query above — that word chooses edge <em>direction</em>, and the quantified predicates there
+    are still <code>ALL</code>.</p>
+  <p class="note"><b>The three properties do not co-occur in this corpus, and that is worth
+    saying.</b> The supply edge is directed and date-guarded, but only one hop deep after the
+    audit. The co-mention edge reaches two hops and is date-guarded, but it is undirected. A
+    traversal that is directed <em>and</em> point-in-time <em>and</em> multi-hop all at once is
+    not something this data supports: each property is demonstrated here, the conjunction is
+    not.</p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">What it concluded</p>
+  <h2>Three verdicts, a rejected probability, and a null</h2>
+  <div class="stats" id="concl"></div>
+
+  <p class="sub" style="margin-top:1.6rem">The run halted on TSLA. This is the rationale the
+    pipeline itself wrote into the interrupt payload — not a summary of it:</p>
+  <blockquote class="rat" id="rationale"></blockquote>
+  <p class="note"><b>Read the last clause.</b> The pipeline computes a weighted for/against split
+    and then declines to call it a probability, because nothing in the research supports
+    calibration. A system that stops short of a number it cannot justify is doing the harder
+    thing.</p>
+
+  <h2 style="margin-top:2.6rem">A third of the graph did not survive audit</h2>
+  <div class="bars" id="audit"></div>
+  <p class="note">1,211 extracted "customer" relations, re-read from the one sentence that names
+    the counterparty: <b>818 survive</b>. Two of the discards were
+    <em>South Dakota v. Wayfair</em> — a sales-tax case read as a supply relationship. Of the
+    survivors, 133 rest on a page header or a table row rather than a quotable sentence, and the
+    page marks those rather than dropping a relationship that may well be real.</p>
+
+  <h2 style="margin-top:2.6rem">And the predictive claim came back null</h2>
+  <p class="note">This pipeline retrieves and reasons over real structure, and that machinery
+    works. Whether the structure <em>predicts returns</em> is a separate question, pre-registered
+    and tested: pooled across every supply chain, the one-session lead-lag slope is
+    <b>b = &minus;0.0015</b> against a declared economic threshold of <b>0.02</b>, with
+    I&sup2; = 44%. That is a null, and it was re-run on the audited graph rather than inherited
+    from the contaminated one. Two other edge types — price correlation and news co-mention —
+    returned nulls too. Nothing here is a trading signal.</p>
 </section>
 
 <footer>
-  <div class="wrap">
-    Replayed from a real run · ArangoDB 3.12.11 · all-MiniLM-L6-v2 · LangGraph
-    <span id="gen" class="mono"></span> ·
-    <a href="https://github.com/ridopark/lag-equity-matrix-ai">github.com/ridopark/lag-equity-matrix-ai</a>
-  </div>
+  Recorded <span id="gen"></span> · ArangoDB 3.12.11 · all-MiniLM-L6-v2 (384-dim) ·
+  filings from EDGAR, news from Benzinga via Alpaca. Symbols and figures are real; nothing here
+  is investment advice.
 </footer>
 
+</div>
+
 <script>
-const T = {"meta":{"equity":606,"supplies":1211,"comention":2129,"articles":47640,"as_of":"2026-06-01","generated_at":"2026-09-07T22:30:09Z","arangodb":"3.12.11","embedding_model":"all-MiniLM-L6-v2 (384-dim)","total_ms":5099.9},"aql":{"traversal":"FOR v, e, p IN 1..@hops INBOUND @start supplies_to\n  FILTER p.edges[*].filing_date ALL <= @as_of\n  COLLECT symbol = v.symbol\n    AGGREGATE hops = MIN(LENGTH(p.edges)),\n              path = MIN(CONCAT_SEPARATOR(\">\", REVERSE(p.vertices[*].symbol))),\n              pct  = MAX(p.edges[-1].pct_revenue),\n              filed = MAX(p.edges[-1].filing_date)\n  RETURN {symbol, hops, path, pct, filed}","vector":"FOR a IN article\n  LET score = APPROX_NEAR_COSINE(a.embedding, @vec)\n  FILTER a.date < @as_of\n  SORT score DESC\n  LIMIT @k\n  RETURN {headline: a.headline, date: a.date, symbols: a.symbols, score: score}"},"events":[{"t_ms":0.0,"node":"START","key":null,"detail":"Send fan-out: 3 candidates"},{"t_ms":1133.3,"node":"graph_retriever","key":"AAPL","detail":"13 at 1 hop, 6 at 2 hops (20 ms AQL)"},{"t_ms":1951.2,"node":"vector_retriever","key":"AAPL","detail":"6 articles (12 ms ANN)"},{"t_ms":3023.1,"node":"graph_retriever","key":"AVGO","detail":"3 at 1 hop, 6 at 2 hops (5 ms AQL)"},{"t_ms":3658.1,"node":"vector_retriever","key":"AVGO","detail":"6 articles (7 ms ANN)"},{"t_ms":4469.0,"node":"graph_retriever","key":"TSLA","detail":"2 at 1 hop, 0 at 2 hops (2 ms AQL)"},{"t_ms":5099.8,"node":"vector_retriever","key":"TSLA","detail":"6 articles (4 ms ANN)"},{"t_ms":5099.8,"node":"context_fusion","key":null,"detail":"3 candidates weighted"},{"t_ms":5099.8,"node":"assessor","key":null,"detail":"3 assessments"},{"t_ms":5099.8,"node":"review","key":null,"detail":"no contradicted verdict \u2014 interrupt not raised"},{"t_ms":5099.8,"node":"publisher","key":null,"detail":"published"}],"candidates":[{"symbol":"AAPL","as_of":"2026-06-01","traversal_ms":20,"vector_ms":12,"query":"AAPL supply chain, suppliers, component demand, orders and production outlook","hop1":[{"symbol":"ADI","hops":1,"path":"ADI>AAPL","pct":"30","filed":"2021-12-03"},{"symbol":"AMKR","hops":1,"path":"AMKR>AAPL","pct":"69","filed":"2024-02-16"},{"symbol":"APH","hops":1,"path":"APH>AAPL","pct":"12","filed":"2021-02-10"},{"symbol":"AVGO","hops":1,"path":"AVGO>AAPL","pct":"9","filed":"2023-12-14"},{"symbol":"CGNX","hops":1,"path":"CGNX>AAPL","pct":"15","filed":"2020-02-13"},{"symbol":"COHR","hops":1,"path":"COHR>AAPL","pct":null,"filed":"2023-08-18"},{"symbol":"CRUS","hops":1,"path":"CRUS>AAPL","pct":null,"filed":"2026-05-21"},{"symbol":"JBL","hops":1,"path":"JBL>AAPL","pct":"10","filed":"2024-10-28"},{"symbol":"QRVO","hops":1,"path":"QRVO>AAPL","pct":"50","filed":"2026-05-08"},{"symbol":"SITM","hops":1,"path":"SITM>AAPL","pct":"10","filed":"2026-02-11"},{"symbol":"SNX","hops":1,"path":"SNX>AAPL","pct":"12","filed":"2022-01-28"},{"symbol":"SWKS","hops":1,"path":"SWKS>AAPL","pct":null,"filed":"2025-11-07"},{"symbol":"TTMI","hops":1,"path":"TTMI>AAPL","pct":"33","filed":"2020-02-26"}],"hop2":[{"symbol":"DELL","hops":2,"path":"DELL>AVGO>AAPL","pct":null,"filed":"2024-03-25"},{"symbol":"GEN","hops":2,"path":"GEN>AVGO>AAPL","pct":null,"filed":"2020-05-28"},{"symbol":"LITE","hops":2,"path":"LITE>AVGO>AAPL","pct":null,"filed":"2022-08-24"},{"symbol":"MTSI","hops":2,"path":"MTSI>QRVO>AAPL","pct":null,"filed":"2025-11-14"},{"symbol":"MXL","hops":2,"path":"MXL>QRVO>AAPL","pct":null,"filed":"2022-02-02"},{"symbol":"QCOM","hops":2,"path":"QCOM>QRVO>AAPL","pct":null,"filed":"2018-11-07"}],"articles":[{"headline":"Apple's Margins Catch A Break, But Road Ahead Still Looks  Bumpy","date":"2025-04-14","symbols":["AAPL"],"score":0.564335286617279},{"headline":"Apple: Market Structure And Key Support Levels Ahead Of Q2 Earnings","date":"2025-04-24","symbols":["AAPL"],"score":0.5527594089508057},{"headline":"Stock Of The Day: Will Apple Bring Tech Sector Down?","date":"2025-07-10","symbols":["AAPL","MSFT","NVDA","XLK"],"score":0.5464950203895569},{"headline":"AAPL Surges 15% In May: What's Driving The Rally And Will It Continue?","date":"2026-05-27","symbols":["AAPL","GOOGL"],"score":0.5272969007492065},{"headline":"As Apple Sheds Over $500 Billion In Market Cap Since Trump's 'Liberation Day,' Top Analysts Weigh In On Its Path Ahead","date":"2025-04-11","symbols":["AAPL","MSFT"],"score":0.5231068134307861},{"headline":"Apple Reportedly Cuts iPhone Air Production, Ramps Up Other Flagship Models","date":"2025-10-22","symbols":["AAPL"],"score":0.5211336612701416}]},{"symbol":"AVGO","as_of":"2026-06-01","traversal_ms":5,"vector_ms":7,"query":"AVGO supply chain, suppliers, component demand, orders and production outlook","hop1":[{"symbol":"DELL","hops":1,"path":"DELL>AVGO","pct":null,"filed":"2024-03-25"},{"symbol":"GEN","hops":1,"path":"GEN>AVGO","pct":null,"filed":"2020-05-28"},{"symbol":"LITE","hops":1,"path":"LITE>AVGO","pct":null,"filed":"2022-08-24"}],"hop2":[{"symbol":"APLD","hops":2,"path":"APLD>DELL>AVGO","pct":null,"filed":"2024-08-30"},{"symbol":"CLS","hops":2,"path":"CLS>DELL>AVGO","pct":"73","filed":"2026-02-27"},{"symbol":"COHR","hops":2,"path":"COHR>DELL>AVGO","pct":null,"filed":"2022-08-29"},{"symbol":"FN","hops":2,"path":"FN>LITE>AVGO","pct":null,"filed":"2025-08-19"},{"symbol":"NTNX","hops":2,"path":"NTNX>DELL>AVGO","pct":"48","filed":"2025-09-24"},{"symbol":"SMTC","hops":2,"path":"SMTC>LITE>AVGO","pct":null,"filed":"2023-03-30"}],"articles":[{"headline":"Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment","date":"2025-09-25","symbols":["NVDA"],"score":0.42470476031303406},{"headline":"Cisco, Nvidia, Arista Tackle Tariff Turmoil: Who's Best Positioned?","date":"2025-03-10","symbols":["AMZN","ANET","APH","CDW","COHR","CSCO","FN","NVDA"],"score":0.42133957147598267},{"headline":"Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment","date":"2025-09-26","symbols":["NVDA"],"score":0.41834086179733276},{"headline":"Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry","date":"2025-07-15","symbols":["NVDA"],"score":0.40402913093566895},{"headline":"Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry","date":"2025-07-14","symbols":["NVDA"],"score":0.40402913093566895},{"headline":"Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry","date":"2025-05-09","symbols":["NVDA"],"score":0.40402913093566895}]},{"symbol":"TSLA","as_of":"2026-06-01","traversal_ms":2,"vector_ms":4,"query":"TSLA supply chain, suppliers, component demand, orders and production outlook","hop1":[{"symbol":"APTV","hops":1,"path":"APTV>TSLA","pct":"9","filed":"2023-02-08"},{"symbol":"JBL","hops":1,"path":"JBL>TSLA","pct":null,"filed":"2020-10-22"}],"hop2":[],"articles":[{"headline":"Amazon, Alphabet, KLA And A Health Care Stock On CNBC's 'Final Trades'","date":"2025-04-03","symbols":["AMZN","GILD","GOOG","GOOGL","KLAC"],"score":0.4233931005001068},{"headline":"Amazon, JPMorgan, RH And More: CNBC's 'Final Trades'","date":"2025-04-07","symbols":["AMZN","JPM","RH"],"score":0.4189804792404175},{"headline":"Meta, TJX, Taiwan Semiconductor Manufacturing And A Health Care Stock: CNBC's 'Final Trades'","date":"2025-04-14","symbols":["ABBV","META","TJX","TSM"],"score":0.41852709650993347},{"headline":"Microsoft, Morgan Stanley And A Basic Materials Stock On CNBC's 'Final Trades'","date":"2025-03-20","symbols":["CRH","MS","MSFT","NVDA"],"score":0.4168128967285156},{"headline":"CNBC Halftime Report Final Trades: Meta Platforms, TJX Companies, AbbVie, Taiwan Semiconductor Manufacturing","date":"2025-04-11","symbols":["ABBV","META","TJX","TSM"],"score":0.41467899084091187},{"headline":"CNBC Halftime Report Final Trades: Tesla, Delta Air Lines, Teck Resources, Rocket Companies","date":"2025-09-11","symbols":["DAL","RKT","TECK","TSLA"],"score":0.4134949743747711}]}]};
+const T = {"meta":{"equity":514,"supplies":818,"comention":2129,"articles":47640,"as_of":"2026-05-11","generated_at":"2026-09-08T00:55:29Z","arangodb":"3.12.11","embedding_model":"all-MiniLM-L6-v2 (384-dim)","total_ms":7591.6},"aql":{"traversal":"FOR v, e, p IN 1..@hops INBOUND @start supplies_to\n  FILTER p.edges[*].filing_date ALL <= @as_of\n  COLLECT symbol = v.symbol INTO g\n  LET paths = g[*].p\n  LET depth = MIN(FOR x IN paths RETURN LENGTH(x.edges))\n  // the quoted filing must lie on the path the page draws, so choose among the\n  // SHORTEST paths only. Ranking over all paths let a 2-hop filing be shown\n  // beside a 1-hop label -- COHR sat at 1 hop from AAPL quoting Qorvo's 10-K.\n  LET best = FIRST(FOR x IN paths\n                     FILTER LENGTH(x.edges) == depth\n                     SORT TO_NUMBER(x.edges[-1].pct_revenue) DESC,\n                          x.edges[-1].filing_date DESC\n                     LIMIT 1 RETURN x)\n  RETURN {\n    symbol,\n    hops:  depth,\n    path:  CONCAT_SEPARATOR(\">\", REVERSE(best.vertices[*].symbol)),\n    filed: best.edges[-1].filing_date,\n    says:  best.edges[-1].passage,\n    named: best.edges[-1].counterparty\n  }","vector":"FOR a IN article\n  LET score = APPROX_NEAR_COSINE(a.embedding, @vec)\n  FILTER a.date < @as_of\n  SORT score DESC\n  LIMIT @k\n  RETURN {headline: a.headline, date: a.date, symbols: a.symbols, score: score}","comention":"FOR v, e, p IN 1..2 ANY @start co_mentioned\n  OPTIONS {uniqueVertices: \"path\", bfs: true}\n  FILTER p.edges[*].pmi ALL >= @minpmi\n  FILTER p.edges[*].first_seen ALL <= @as_of\n  // An ETF is co-mentioned with every constituent, so it is a hub that makes\n  // any two holdings look two hops apart. \"AVGO and TSM connect via SOXX\" is an\n  // artifact of the index, not a relationship. Exclude them from the whole path.\n  FILTER p.vertices[*].symbol NONE IN @excluded\n  COLLECT symbol = v.symbol INTO g\n  LET paths = g[*].p\n  LET depth = MIN(FOR x IN paths RETURN LENGTH(x.edges))\n  FILTER depth == 2\n  LET best = FIRST(FOR x IN paths FILTER LENGTH(x.edges) == depth\n                     SORT MIN(x.edges[*].pmi) DESC LIMIT 1 RETURN x)\n  SORT MIN(best.edges[*].pmi) DESC\n  LIMIT 7\n  RETURN {symbol, hops: depth,\n          path: CONCAT_SEPARATOR(\">\", best.vertices[*].symbol),\n          pmi: MIN(best.edges[*].pmi),\n          via: best.vertices[1].symbol,\n          articles: MIN(best.edges[*].articles)}"},"events":[{"t_ms":0.0,"node":"START","key":null,"detail":"Send fan-out: 3 candidates"},{"t_ms":1271.6,"node":"graph_retriever","key":"TSLA|2026-05-11","detail":"22 neighbours"},{"t_ms":1272.1,"node":"graph_retriever","key":"AAPL|2026-05-11","detail":"32 neighbours"},{"t_ms":1299.9,"node":"graph_retriever","key":"AVGO|2026-05-11","detail":"20 neighbours"},{"t_ms":1318.8,"node":"leader_state","key":"AVGO|2026-05-11","detail":"5 moved"},{"t_ms":1322.8,"node":"leader_state","key":"AAPL|2026-05-11","detail":"13 moved"},{"t_ms":1325.0,"node":"leader_state","key":"TSLA|2026-05-11","detail":"11 moved"},{"t_ms":1552.2,"node":"vector_retriever","key":"AVGO|2026-05-11","detail":"6 articles"},{"t_ms":1553.1,"node":"vector_retriever","key":"TSLA|2026-05-11","detail":"6 articles"},{"t_ms":1559.9,"node":"vector_retriever","key":"AAPL|2026-05-11","detail":"6 articles"},{"t_ms":1566.0,"node":"context_fusion","key":null,"detail":"3 candidates weighted"},{"t_ms":1566.8,"node":"assessor","key":null,"detail":"3 assessments"},{"t_ms":1580.4,"node":"__interrupt__","key":null,"detail":""},{"t_ms":1581.8,"node":"review","key":null,"interrupt":{"reason":"contradicted verdicts require confirmation (D-19)","contradicted":[{"symbol":"TSLA","as_of":"2026-05-11","rationale":"1 corroborating and 7 contradicting neighbour moves, weighted to 1.00 effective independent observations (0.12 for / 0.88 against). Not calibrated: no powered test supports a probability (D-34)."}]},"detail":"interrupt(): TSLA contradicted \u2014 run halted"},{"t_ms":1584.1,"node":"review","key":null,"detail":""},{"t_ms":1600.0,"node":"publisher","key":null,"detail":""}],"spans":[{"node":"graph_retriever","step":1,"start_ms":72.4,"end_ms":1272.1,"key":"AAPL"},{"node":"graph_retriever","step":1,"start_ms":72.4,"end_ms":1299.9,"key":"AVGO"},{"node":"graph_retriever","step":1,"start_ms":72.4,"end_ms":1271.6,"key":"TSLA"},{"node":"leader_state","step":2,"start_ms":1300.5,"end_ms":1322.8,"key":"AAPL"},{"node":"leader_state","step":2,"start_ms":1300.5,"end_ms":1318.8,"key":"AVGO"},{"node":"leader_state","step":2,"start_ms":1300.5,"end_ms":1325.0,"key":"TSLA"},{"node":"vector_retriever","step":2,"start_ms":1300.5,"end_ms":1560.0,"key":"AAPL"},{"node":"vector_retriever","step":2,"start_ms":1300.5,"end_ms":1552.2,"key":"AVGO"},{"node":"vector_retriever","step":2,"start_ms":1300.5,"end_ms":1553.1,"key":"TSLA"},{"node":"context_fusion","step":3,"start_ms":1560.3,"end_ms":1566.0,"key":null},{"node":"assessor","step":4,"start_ms":1566.0,"end_ms":1566.8,"key":null},{"node":"review","step":5,"start_ms":1583.4,"end_ms":1584.1,"key":null},{"node":"publisher","step":6,"start_ms":1584.1,"end_ms":1600.0,"key":null}],"checkpoints":[{"t_ms":71.2,"step":-1,"id":"1f1ab1ff-937b-6372-bfff-5b79a20f181c"},{"t_ms":72.3,"step":0,"id":"1f1ab1ff-937e-6c3b-8000-0f535552c09b"},{"t_ms":1300.5,"step":1,"id":"1f1ab1ff-9f34-6ea9-8001-875705ac06ae"},{"t_ms":1560.3,"step":2,"id":"1f1ab1ff-a1af-6abc-8002-2fb8eda74a43"},{"t_ms":1566.0,"step":3,"id":"1f1ab1ff-a1bd-69b8-8003-12b7807ccbad"},{"t_ms":1566.8,"step":4,"id":"1f1ab1ff-a1bf-6896-8004-fd7b43b72c31"},{"t_ms":1583.4,"step":4,"id":"1f1ab1ff-a1bf-6896-8004-fd7b43b72c31"},{"t_ms":1584.1,"step":5,"id":"1f1ab1ff-a1ea-60d1-8005-e61f464d6fa5"},{"t_ms":1600.0,"step":6,"id":"1f1ab1ff-a1eb-66a1-8006-09b8224c1aee"}],"run":{"thread_id":"showcase"},"candidates":[{"symbol":"AAPL","as_of":"2026-05-11","traversal_ms":34.0,"vector_ms":18.4,"query":"AAPL supply chain, suppliers, component demand, orders and production outlook","hop1":[{"symbol":"ADI","hops":1,"path":"ADI>AAPL","filed":"2018-11-27","named":"Apple","verified":true,"sentence":"Apple Inc. represented approximately 14% and 12% of revenue in the fiscal year ended October 28, 2017 (fiscal 2017) and the fiscal year ended October 29, 2016 (fiscal 2016), respectively","pct":"14"},{"symbol":"AMKR","hops":1,"path":"AMKR>AAPL","filed":"2024-02-16","named":"Apple","verified":true,"sentence":"Direct sales to Apple Inc. accounted for 27.7% of our net sales for the year ended December 31, 2023","pct":"27.7"},{"symbol":"APH","hops":1,"path":"APH>AAPL","filed":"2020-02-12","named":"Apple","verified":true,"sentence":"During the year ended December 31, 2018, aggregate sales to Apple Inc., including sales of products to EMS companies that the Company believes are manufacturing products on Apple s behalf, accounted for approximately 12% of our net sales. 7 Table of Contents The Company sells its products through its own global sales force, independent representatives and a global network of electronics distributors","pct":"12"},{"symbol":"AVGO","hops":1,"path":"AVGO>AAPL","filed":"2018-12-21","named":"Apple","verified":true,"sentence":"We believe aggregate sales to Apple, Inc., through all channels, accounted for approximately 25% of our net revenue for fiscal year 2018 and more than 20% for fiscal year 2017","pct":"25"},{"symbol":"CGNX","hops":1,"path":"CGNX>AAPL","filed":"2020-02-13","named":"Apple","verified":true,"sentence":"In 2018 and 2017, direct and indirect revenue from Apple Inc. accounted for 15% and 20% of total revenue, respectively","pct":"15"},{"symbol":"COHR","hops":1,"path":"COHR>AAPL","filed":"2023-08-18","named":"Apple","verified":false,"sentence":null,"pct":null},{"symbol":"CRUS","hops":1,"path":"CRUS>AAPL","filed":"2025-05-23","named":"Apple","verified":true,"sentence":"For fiscal years 2025, 2024, and 2023, we had one end customer, Apple, Inc., who purchased through multiple contract manufacturers and represented approximately 89 percent, 87 percent, and 83 percent, of the Company s total net sales, respectively","pct":null},{"symbol":"JBL","hops":1,"path":"JBL>AAPL","filed":"2024-10-28","named":"Apple","verified":true,"sentence":"Sales to the following customer accounted for 10% or more of the Company s net revenues, expressed as a percentage of consolidated net revenue: Percentage of Net Revenue Fiscal Year Ended August 31, 2024 2023 2022 Apple, Inc. (1) 11 % 17 % 19 % (1) Sales to this customer were reported in the DMS operating segment","pct":"11"},{"symbol":"QRVO","hops":1,"path":"QRVO>AAPL","filed":"2026-05-08","named":"Apple","verified":true,"sentence":"We provide products to our largest end customer, Apple Inc. (\"Apple\"), through sales to multiple contract manufacturers, which in the aggregate accounted for 50% and 47% of total revenue in fiscal years 2026 and 2025, respectively","pct":"50"},{"symbol":"SITM","hops":1,"path":"SITM>AAPL","filed":"2026-02-11","named":"Apple","verified":true,"sentence":"Based on the sell-through information provided to us from distributors who identify end customers, we believe that the majority of our products sold to Pernas Electronics Co. Ltd (\"Pernas\") and Quantek Technology Corporation (\"Quantek\") are in turn incorporated into products of Apple Inc. ( Apple ), our largest end customer","pct":null},{"symbol":"SWKS","hops":1,"path":"SWKS>AAPL","filed":"2025-11-07","named":"Apple","verified":true,"sentence":"Our key customers include Amazon, Apple Inc. ( Apple ), Arcadyan, Arris, Bose, Ciena, Cisco, Ericsson, Fibocom, Garmin, Gemalto (a Thales company), General Electric, Google, Honeywell, Itron, Lenovo, LG Electronics, Microsoft, Motorola, NETGEAR, Nokia, Northrop Grumman, OPPO, Rockwell Collins, Sagemcom, Samsung, Schneider Electric, Sierra Wireless, Sonos, Sony, Technicolor, Telit, Tesla, TP-Link, VIVO, and Xiaomi","pct":null},{"symbol":"TTMI","hops":1,"path":"TTMI>AAPL","filed":"2020-02-26","named":"Apple","verified":true,"sentence":"Our five largest OEM customers in 2019 were, in alphabetical order, Apple Inc., Huawei Technology Co. Ltd., Northrop Grumman Corporation, Raytheon Company and Robert Bosch GmbH","pct":null}],"hop2":[],"articles":[{"headline":"ISM Manufacturing Prices For February 70.5 Vs 60.6 Est.","date":"2026-03-02","symbols":["SPY"],"score":0.41137415170669556},{"headline":"USA S&P Global Manufacturing PMI For March 52.3 Vs 52.4 Est.","date":"2026-04-01","symbols":["SPY"],"score":0.41122716665267944},{"headline":"USA ISM Manufacturing Prices For August 63.7 Vs 65.1 Est.","date":"2025-09-02","symbols":["SPY"],"score":0.408205509185791},{"headline":"ISM Manufacturing Prices For April 84.6 Vs 80.0 Est.","date":"2026-05-01","symbols":["SPY"],"score":0.4050450026988983},{"headline":"USA S&P Global Manufacturing PMI For March 52.4 Vs 51.5 Est.","date":"2026-03-24","symbols":["SPY"],"score":0.4049214720726013},{"headline":"S&P Global Manufacturing PMI For August 53.3 Vs 49.7Est.","date":"2025-08-21","symbols":["SPY"],"score":0.4014476239681244}],"pipeline_news":[{"doc_id":"52168722","symbol":"AAPL","text":"Apple Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call","published_at":"2026-04-30T00:00:00","score":0.5764098167419434},{"doc_id":"45139025","symbol":"AAPL","text":"Apple Gears Up For Q2 Earnings With Bearish Technicals: 'Super Cycle Unlikely' Says Strategist","published_at":"2025-05-01T00:00:00","score":0.5686253905296326},{"doc_id":"50253734","symbol":"AAPL","text":"Apple Sees Revenue for Q2 is expected to grow by 13% to 16% YOY","published_at":"2026-01-29T00:00:00","score":0.40318381786346436},{"doc_id":"45152493","symbol":"AAPL","text":"Apple Reports 'Strong' Q2 Earnings: Revenue Beat, EPS Beat, Installed Base Hits All-Time High Across All Segments, $100 Billion Buyback And More","published_at":"2025-05-01T00:00:00","score":0.3900771737098694},{"doc_id":"51749190","symbol":"AAPL","text":"Taiwan Semiconductor Revenue Skyrockets On Unstoppable AI Demand","published_at":"2026-04-10T00:00:00","score":0.38966503739356995},{"doc_id":"50951965","symbol":"AAPL","text":"Berkshire Hathaway Misses Projections As Abel Takes The Helm","published_at":"2026-02-28T00:00:00","score":0.38699251413345337}],"twohop":[{"symbol":"FSR","hops":2,"path":"AAPL>HNHPF>FSR","pmi":2.0734,"via":"HNHPF","articles":29}],"twohop_ms":17.6,"legacy_query":"news relevant to a up move in AAPL","query_now":"AAPL catalyst: earnings, demand, guidance, production, regulation","legacy_news":[{"text":"Market-Moving News for April 21st","score":0.5672,"published_at":"2026-04-21 00:00:00"},{"text":"Market-Moving News for April 3rd","score":0.5427,"published_at":"2025-04-03 00:00:00"},{"text":"Market-Moving News for April 14th","score":0.5384,"published_at":"2025-04-14 00:00:00"},{"text":"Market-Moving News for February 24th","score":0.5364,"published_at":"2025-02-24 00:00:00"},{"text":"Market-Moving News for September 3rd","score":0.5299,"published_at":"2025-09-03 00:00:00"},{"text":"Market-Moving News for May 12th","score":0.5247,"published_at":"2025-05-12 00:00:00"}]},{"symbol":"AVGO","as_of":"2026-05-11","traversal_ms":8.8,"vector_ms":35.9,"query":"AVGO supply chain, suppliers, component demand, orders and production outlook","hop1":[],"hop2":[],"articles":[{"headline":"Arista Networks Posts Strong Q1, Analysts Say Supply Shortages Dampen Outlook","date":"2026-05-06","symbols":["ANET","AVGO","TSM"],"score":0.4676660895347595},{"headline":"ASML Q3 Bookings Beat Expectations At $6.3 Billion As AI Demand, EUV Adoption Drive Strong 2025 Outlook","date":"2025-10-15","symbols":["ASML","NVDA"],"score":0.43214595317840576},{"headline":"Taiwan Semiconductor CFO Anticipates Tariffs Impact But Has Not Seen Change In Customer Behavior Yet, Issues Strong Q2 Outlook","date":"2025-04-17","symbols":["AAPL","INTC","NVDA","TSM"],"score":0.43183985352516174},{"headline":"Broadcom Slides 4% Despite Q4 Beat As Management Warns Q1 Margin Squeeze, Tax Hikes Could Overshadow AI Growth","date":"2025-12-12","symbols":["AVGO"],"score":0.4082182049751282},{"headline":"P&G Holds Its Premium As Analysts Cite Durable Growth Beyond Near-Term Tariff Hits","date":"2025-10-27","symbols":["PG"],"score":0.36876633763313293},{"headline":"Amazon's AI-Powered AWS, Efficiency Gains, And Consumer Demand Fuel Bullish Q2 Outlook","date":"2025-07-23","symbols":["AMZN","GOOGL","MSFT"],"score":0.36204177141189575}],"pipeline_news":[{"doc_id":"49354413","symbol":"AVGO","text":"Broadcom Slides 4% Despite Q4 Beat As Management Warns Q1 Margin Squeeze, Tax Hikes Could Overshadow AI Growth","published_at":"2025-12-12T00:00:00","score":0.5026029348373413},{"doc_id":"52332071","symbol":"AVGO","text":"Arista Networks Posts Strong Q1, Analysts Say Supply Shortages Dampen Outlook","published_at":"2026-05-06T00:00:00","score":0.4051101803779602},{"doc_id":"51008941","symbol":"AVGO","text":"Broadcom Q1 Preview: Record Revenue Expected, But Stock Is Looking 'On the Ropes'","published_at":"2026-03-03T00:00:00","score":0.38824138045310974},{"doc_id":"45803595","symbol":"AVGO","text":"Broadcom Q2 Earnings: Revenue, EPS Beat Estimates Driven By 'Robust Demand' For AI Networking, Company Sees Acceleration In AI Revenue Ahead","published_at":"2025-06-05T00:00:00","score":0.38357216119766235},{"doc_id":"43109922","symbol":"AVGO","text":"Qorvo Could Achieve $9.63 EPS By 2026 With Activist Involvement, Morgan Stanley Upgrades Stock","published_at":"2025-01-21T00:00:00","score":0.37316614389419556},{"doc_id":"44149533","symbol":"AVGO","text":"Broadcom Q1 Earnings Preview: Semiconductor Looks To Get Back To Beating Analyst Estimates After Q4 Miss","published_at":"2025-03-05T00:00:00","score":0.36948511004447937}],"twohop":[{"symbol":"INTC","hops":2,"path":"AVGO>TXN>INTC","pmi":2.5539,"via":"TXN","articles":33},{"symbol":"AMD","hops":2,"path":"AVGO>TXN>AMD","pmi":2.4349,"via":"TXN","articles":33},{"symbol":"TSM","hops":2,"path":"AVGO>MRVL>TSM","pmi":2.4203,"via":"MRVL","articles":40},{"symbol":"SFTBY","hops":2,"path":"AVGO>QCOM>SFTBY","pmi":2.3571,"via":"QCOM","articles":29},{"symbol":"SSNLF","hops":2,"path":"AVGO>QCOM>SSNLF","pmi":2.3571,"via":"QCOM","articles":93},{"symbol":"NVDA","hops":2,"path":"AVGO>MRVL>NVDA","pmi":2.0475,"via":"MRVL","articles":131},{"symbol":"DELL","hops":2,"path":"AVGO>HPE>DELL","pmi":2.0447,"via":"HPE","articles":25}],"twohop_ms":18.6,"legacy_query":"news relevant to a up move in AVGO","query_now":"AVGO catalyst: earnings, demand, guidance, production, regulation","legacy_news":[{"text":"Market-Moving News for April 7th","score":0.5269,"published_at":"2026-04-07 00:00:00"},{"text":"Market-Moving News for June 6th","score":0.5177,"published_at":"2025-06-06 00:00:00"},{"text":"Market-Moving News for March 7th","score":0.5104,"published_at":"2025-03-07 00:00:00"},{"text":"Market-Moving News for December 12th","score":0.4881,"published_at":"2025-12-12 00:00:00"},{"text":"Market-Moving News for March 5th","score":0.4879,"published_at":"2026-03-05 00:00:00"},{"text":"Market-Moving News for September 5th","score":0.4826,"published_at":"2025-09-05 00:00:00"}]},{"symbol":"TSLA","as_of":"2026-05-11","traversal_ms":4.2,"vector_ms":9.6,"query":"TSLA supply chain, suppliers, component demand, orders and production outlook","hop1":[{"symbol":"APTV","hops":1,"path":"APTV>TSLA","filed":"2023-02-08","named":"Tesla","verified":true,"sentence":"The following table provides the percentage of net sales to our largest customers for the year ended December 31, 2022: Customer Percentage of Net Sales General Motors Company 9% Stellantis N.V. 9% Ford Motor Company 8% Volkswagen Group 8% Tesla, Inc. 5% Geely Automobile Holdings Limited 5% Mercedes-Benz Group AG 4% SAIC General Motors Corporation Limited 3% Bayerische Motoren Werke AG 2% Toyota Motor Corporation 2% Tata Motors Limited 2% Supply Relationships with Our Customers We typically supply products to our OEM customers through purchase orders, which are generally governed by general terms and conditions established by each OEM","pct":"9"},{"symbol":"JBL","hops":1,"path":"JBL>TSLA","filed":"2020-10-22","named":"Tesla","verified":true,"sentence":"Based on net revenue, for the fiscal year ended August 31, 2020 , our largest customers include Amazon.com, Inc., Apple, Inc., Cisco Systems, Inc., Hewlett-Packard Company, Ingenico Group, Johnson and Johnson, LM Ericsson Telephone Company, NetApp, Inc., SolarEdge Technologies Inc., and Tesla, Inc. For the fiscal year ended August 31, 2020 , we had net revenues of $27.3 billion and net income attributable to Jabil Inc. of $53.9 million","pct":null}],"hop2":[],"articles":[{"headline":"Amazon, Alphabet, KLA And A Health Care Stock On CNBC's 'Final Trades'","date":"2025-04-03","symbols":["AMZN","GILD","GOOG","GOOGL","KLAC"],"score":0.4233931005001068},{"headline":"Amazon, JPMorgan, RH And More: CNBC's 'Final Trades'","date":"2025-04-07","symbols":["AMZN","JPM","RH"],"score":0.4189804792404175},{"headline":"Meta, TJX, Taiwan Semiconductor Manufacturing And A Health Care Stock: CNBC's 'Final Trades'","date":"2025-04-14","symbols":["ABBV","META","TJX","TSM"],"score":0.41852709650993347},{"headline":"Microsoft, Morgan Stanley And A Basic Materials Stock On CNBC's 'Final Trades'","date":"2025-03-20","symbols":["CRH","MS","MSFT","NVDA"],"score":0.4168128967285156},{"headline":"CNBC Halftime Report Final Trades: Meta Platforms, TJX Companies, AbbVie, Taiwan Semiconductor Manufacturing","date":"2025-04-11","symbols":["ABBV","META","TJX","TSM"],"score":0.41467899084091187},{"headline":"CNBC Halftime Report Final Trades: Tesla, Delta Air Lines, Teck Resources, Rocket Companies","date":"2025-09-11","symbols":["DAL","RKT","TECK","TSLA"],"score":0.4134949743747711}],"pipeline_news":[{"doc_id":"51966124","symbol":"TSLA","text":"Tesla Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call","published_at":"2026-04-22T00:00:00","score":0.45685768127441406},{"doc_id":"43285246","symbol":"TSLA","text":"Tesla's Q4 Earnings Looms: Can The Stock Keep Its Rally Alive?","published_at":"2025-01-28T00:00:00","score":0.4424653649330139},{"doc_id":"45844984","symbol":"TSLA","text":"Tesla Among S&P's Big Losers: Q1 EPS Miss Puts TSLA In Bottom 10","published_at":"2025-06-09T00:00:00","score":0.4309442639350891},{"doc_id":"45210400","symbol":"TSLA","text":"Ahead Of Uber Earnings, Analyst Raises Forecast","published_at":"2025-05-05T00:00:00","score":0.4066602289676666},{"doc_id":"48613203","symbol":"TSLA","text":"Ahead Of Uber's Q3 Earnings, Mark Mahaney Predicts Investors Will Be Looking Out For This Major Update \u2014 Outlines Tesla, Waymo's Role","published_at":"2025-11-04T00:00:00","score":0.40347903966903687},{"doc_id":"50404256","symbol":"TSLA","text":"Tesla Rival Nio Expects Its First Profitable Quarter","published_at":"2026-02-05T00:00:00","score":0.3893887400627136}],"twohop":[],"twohop_ms":4.2,"legacy_query":"news relevant to a up move in TSLA","query_now":"TSLA catalyst: earnings, demand, guidance, production, regulation","legacy_news":[{"text":"Market-Moving News for April 21st","score":0.57,"published_at":"2025-04-21 00:00:00"},{"text":"Market-Moving News for April 16th","score":0.5514,"published_at":"2025-04-16 00:00:00"},{"text":"Market-Moving News for June 6th","score":0.5491,"published_at":"2025-06-06 00:00:00"},{"text":"Market-Moving News for July 7th","score":0.5469,"published_at":"2025-07-07 00:00:00"},{"text":"Market-Moving News for April 23rd","score":0.5424,"published_at":"2025-04-23 00:00:00"},{"text":"Market-Moving News for April 23rd","score":0.5424,"published_at":"2026-04-23 00:00:00"}]}],"assessments":[{"symbol":"AAPL","direction":"up","verdict":"neutral","effective_evidence":0.0,"n_supporting":0,"n_contradicting":0},{"symbol":"AVGO","direction":"up","verdict":"corroborated","effective_evidence":1.0,"n_supporting":3,"n_contradicting":1},{"symbol":"TSLA","direction":"up","verdict":"contradicted","effective_evidence":1.0,"n_supporting":1,"n_contradicting":7}]};
 const $ = s => document.querySelector(s);
-const CAND = T.candidates.find(c => c.symbol === "AAPL");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-$("#f-eq").textContent  = T.meta.equity.toLocaleString();
-$("#f-sup").textContent = T.meta.supplies.toLocaleString();
-$("#f-art").textContent = T.meta.articles.toLocaleString();
-$("#f-ms").innerHTML    = CAND.traversal_ms + "<small>ms</small>";
-$("#gen").textContent   = "captured " + T.meta.generated_at.slice(0,10);
+/* ---- corpus stats ---- */
+const M = T.meta;
+$("#stats").innerHTML = [
+  [M.equity.toLocaleString(), "companies"],
+  [M.supplies.toLocaleString(), "supply edges"],
+  [M.articles.toLocaleString(), "articles embedded"],
+  [M.comention.toLocaleString(), "co-mention edges"],
+  [M.as_of, "as of"],
+].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join("");
+$("#gen").textContent = M.generated_at.replace("T", " ").replace("Z", " UTC");
 
-/* ---------- the queries, lightly highlighted ---------- */
-function hl(s){
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/\b(FOR|IN|INBOUND|FILTER|ALL|RETURN|DISTINCT|COLLECT|AGGREGATE|SORT|LIMIT|LET|DESC|MIN|MAX|LENGTH|REVERSE|CONCAT_SEPARATOR|APPROX_NEAR_COSINE)\b/g,
-      '<span class="kw">$1</span>');
-}
-$("#aql-g").innerHTML = hl(T.aql.traversal);
-$("#aql-v").innerHTML = hl(T.aql.vector);
+/* ---- interrupt note (the list it used to caption was cut) ---- */
+const iv = T.events.find(e => e.interrupt);
+$("#tlnote").innerHTML = iv
+  ? `<b>The gate fired.</b> <code>review</code> called <code>interrupt()</code> because a
+     verdict came back contradicted, the run halted mid-graph, and the checkpointer held state
+     until it resumed — the two <code>review</code> rows are the same node before and after, and
+     <code>publisher</code> did not run until the resume. See the checkpoint note above for
+     exactly what that does and does not demonstrate.`
+  : "";
 
-/* ---------- graph geometry ---------- */
-const W=760, H=560, CX=W/2, CY=H/2;
-const h1 = CAND.hop1, h2 = CAND.hop2;
-const R1 = 150, R2 = 248;
-const pos = {}; pos[CAND.symbol] = [CX,CY];
-h1.forEach((n,i)=>{ const a = -Math.PI/2 + i*2*Math.PI/h1.length;
-  pos[n.symbol] = [CX+R1*Math.cos(a), CY+R1*Math.sin(a)]; });
-// second hop connects through the middle company named in its path (A>B>AAPL)
-const via = {};
-h2.forEach(n => { const p = (n.path||"").split(">"); via[n.symbol] = p.length>=2 ? p[1] : null; });
 
-// Place each second-hop node NEXT TO the supplier it routes through, fanned
-// around that supplier's own angle. Spacing them evenly round an outer ring
-// looked tidier and read worse: MXL routes through QRVO, and an edge crossing
-// the whole diagram to say so buries the one thing this graph exists to show.
-const byVia = {};
-h2.forEach(n => { const m = via[n.symbol]; if(m) (byVia[m] = byVia[m] || []).push(n); });
-Object.entries(byVia).forEach(([m, kids]) => {
-  const idx = h1.findIndex(x => x.symbol === m);
-  const base = -Math.PI/2 + (idx<0?0:idx)*2*Math.PI/h1.length;
-  const spread = Math.min(0.30, 0.62/kids.length);
-  kids.forEach((n,k) => {
-    const a = base + (k - (kids.length-1)/2)*spread;
-    pos[n.symbol] = [CX+R2*Math.cos(a), CY+R2*Math.sin(a)];
+/* ---- task spans: measured concurrency, not inferred ---- */
+(function spans(){
+  const S = T.spans || [];
+  if (!S.length) return;
+  const W = 960, L = 158, R = 16, top = 26, h = 13, gap = 6;
+  const maxT = Math.max(...S.map(s => s.end_ms)) * 1.02;
+  const x = ms => L + (ms / maxT) * (W - L - R);
+  const cls = n => n.includes("vector") ? "v" : (n.includes("graph_") || n === "leader_state") ? "g" : "o";
+  let out = "", y = top;
+  const steps = [...new Set(S.map(s => s.step))].sort((a, b) => a - b);
+  steps.forEach(st => {
+    const rows = S.filter(s => s.step === st);
+    out += `<line class="gl" x1="0" y1="${y - 5}" x2="${W}" y2="${y - 5}"></line>
+      <text class="sl" x="4" y="${y + 7}" style="fill:var(--ink3)">step ${st}</text>`;
+    rows.forEach(s => {
+      const w = Math.max(2, x(s.end_ms) - x(s.start_ms));
+      out += `<rect class="sp ${cls(s.node)}" x="${x(s.start_ms).toFixed(1)}" y="${y}"
+          width="${w.toFixed(1)}" height="${h}"></rect>
+        <text class="sl" x="92" y="${y + 10}" text-anchor="end">${esc(s.node)}</text>
+        ${s.key ? `<text class="sl" x="96" y="${y + 10}"
+           style="fill:var(--ink3)">${esc(s.key)}</text>` : ""}
+        <text class="sl" x="${(x(s.end_ms) + 5).toFixed(1)}" y="${y + 10}"
+          style="fill:var(--ink3)">${(s.end_ms - s.start_ms).toFixed(0)}</text>`;
+      y += h + gap;
+    });
+    y += 5;
   });
+  const svg = $("#spans");
+  svg.setAttribute("viewBox", `0 0 ${W} ${y + 16}`);
+  [0, .25, .5, .75, 1].forEach(f => {
+    out += `<text class="sl" x="${x(maxT * f).toFixed(1)}" y="${y + 10}"
+      text-anchor="middle" style="fill:var(--ink3)">${(maxT * f).toFixed(0)} ms</text>`;
+  });
+  svg.innerHTML = out;
+  // state the strongest true claim the data supports, computed not asserted
+  const byStep = {};
+  S.forEach(s => (byStep[s.step] = byStep[s.step] || []).push(s));
+  const overlaps = Object.entries(byStep).map(([st, rows]) => {
+    if (rows.length < 2) return null;
+    const lo = Math.max(...rows.map(r => r.start_ms)), hi = Math.min(...rows.map(r => r.end_ms));
+    return hi > lo ? {st, n: rows.length, ov: hi - lo} : null;
+  }).filter(Boolean).sort((a, b) => b.ov - a.ov);
+  const ck = T.checkpoints || [];
+  $("#ckpts").innerHTML = ck.map(c =>
+    `<code title="step ${c.step}">${esc((c.id || "").slice(0, 8))}</code>`).join("");
+  $("#cknote").innerHTML =
+    (overlaps.length ? `<b>` + overlaps.map(o =>
+        `${o.n} tasks in step ${o.st} overlapped for ${o.ov.toFixed(0)} ms`).join("; ") +
+      `.</b> Every one of those is a window in which all the listed tasks were simultaneously
+      in flight — measured from task start and result timestamps in LangGraph's own
+      <code>debug</code> stream, not inferred from two events landing in the same
+      millisecond. ` : "") +
+    `The run wrote <b>${ck.length} checkpoints</b> on thread
+     <code>${esc((T.run || {}).thread_id || "")}</code> — ids above, truncated. To be exact about
+     the gate: the resume was issued programmatically as <code>Command(resume=True)</code> about
+     2&nbsp;ms after the interrupt, so what is demonstrated is that the graph <em>halts, persists,
+     and resumes correctly</em> — not that a human deliberated. The gate is the seam a human would
+     sit in; nothing here pretends one did.`;
+})();
+
+/* ---- two-hop co-mention ---- */
+$("#twohop").innerHTML = T.candidates.map(c => {
+  const rows = c.twohop || [];
+  return `<div class="card">
+    <header><b>${esc(c.symbol)}</b><span>${rows.length} two-hop path${rows.length === 1 ? "" : "s"}
+      · ${c.twohop_ms} ms</span></header>
+    <div class="lane">${rows.length ? rows.map(r => `<p class="hl">
+        <span style="font:500 .8rem var(--mono);color:var(--graph)">${
+          esc(r.path.replace(/>/g, " → "))}</span>
+        <span class="score">PMI ≥ ${r.pmi.toFixed(2)} · ${r.articles} articles</span></p>`).join("")
+      : `<p class="none">No two-hop path clears PMI ≥ 2.0 at this date.</p>`}</div>
+  </div>`;
+}).join("");
+
+/* ---- contrast ---- */
+$("#contrast").innerHTML = T.candidates.map(c => {
+  const edges = c.hop1.concat(c.hop2);
+  const chips = edges.length
+    ? `<div class="chips">${edges.map(n => `<span class="chip${n.verified ? "" : " u"}">${esc(n.symbol)}${
+        n.pct ? `<i>${esc(n.pct)}%</i>` : ""}</span>`).join("")}</div>`
+    : `<p class="none">No supply edge survived the audit for this company.</p>`;
+  const arts = (c.pipeline_news || []).slice(0, 3).map(a =>
+    `<p class="hl">${esc(a.text)}<span class="score">${a.score.toFixed(3)}</span></p>`).join("");
+  return `<div class="card">
+    <header><b>${esc(c.symbol)}</b><span>${edges.length} supplier${edges.length === 1 ? "" : "s"} ·
+      ${c.traversal_ms} ms graph / ${c.vector_ms} ms vector</span></header>
+    <div class="lane g"><h3>Graph traversal</h3>${chips}</div>
+    <div class="lane v"><h3>vector_retriever</h3>${arts}</div>
+  </div>`;
+}).join("");
+
+
+/* ---- execution graph, laid out from the run's own spans ---- */
+(function topology(){
+  const S = T.spans || [];
+  // duration, never arrival time. An arrival timestamp on a node reads as that
+  // node's cost and is wrong by two orders of magnitude here.
+  const dur = (node, key) => {
+    const s = S.find(x => x.node === node && (key ? x.key === key : true));
+    return s ? s.end_ms - s.start_ms : undefined;
+  };
+  // lane order = the order the run actually started them, not candidate order
+  const order = S.filter(s => s.node === "graph_retriever")
+                 .sort((a, b) => a.start_ms - b.start_ms || a.key.localeCompare(b.key));
+  const syms = order.length ? order.map(s => s.key) : T.candidates.map(c => c.symbol);
+  const rowY = i => 58 + i * 88;
+  // A node is drawn only when the run produced a task for it, so the picture
+  // cannot show a step that did not execute. START is the one exception: it is
+  // a graph entry point, not a task, so it has no span to find.
+  const box = (x, y, w, label, ms, cls) => (ms === undefined && label !== "START") ? "" : `
+    <rect class="nd ${cls}" x="${x}" y="${y - 12}" width="${w}" height="24"></rect>
+    <text class="nl" x="${x + w / 2}" y="${y + 1}" text-anchor="middle">${esc(label)}</text>
+`;
+  const link = (x1, y1, x2, y2, cls, dash) => {
+    const mx = (x1 + x2) / 2;
+    return `<path class="ed ${cls}" ${dash ? 'stroke-dasharray="3 3"' : ""}
+      d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"></path>`;
+  };
+  let edges = "", nodes = "";
+  const FX = 148, LX = 296, CX = 466, AX = 612, RX = 716, PX = 824;
+  nodes += box(28, 150, 72, "START", undefined, "");
+  syms.forEach((s, i) => {
+    const y = rowY(i);
+    edges += link(100, 150, FX, y, "on");
+    edges += link(FX + 104, y, LX, y - 18, "on");
+    edges += link(FX + 104, y, LX, y + 18, "vv");
+    edges += link(LX + 98, y - 18, CX, 150, "on");
+    edges += link(LX + 98, y + 18, CX, 150, "vv");
+    // the branch this run did NOT take: no neighbourhood -> END
+    edges += link(FX + 104, y, FX + 132, y + 40, "", true);
+    nodes += `<text class="br" x="${FX + 138}" y="${y + 46}">END</text>`;
+    nodes += box(FX, y, 104, "graph_retriever", dur("graph_retriever", s), "g");
+    nodes += `<text class="br" x="${FX + 52}" y="${y - 17}" text-anchor="middle">${esc(s)}</text>`;
+    nodes += box(LX, y - 18, 98, "leader_state", dur("leader_state", s), "g");
+    nodes += box(LX, y + 18, 98, "vector_retriever", dur("vector_retriever", s), "v");
+  });
+  edges += link(CX + 102, 150, AX, 150, "on");
+  edges += link(AX + 82, 150, RX, 150, "on");
+  edges += link(RX + 74, 150, PX, 150, "on");
+  nodes += box(CX, 150, 102, "context_fusion", dur("context_fusion"), "");
+  nodes += box(AX, 150, 82, "assessor", dur("assessor"), "");
+  nodes += box(RX, 150, 74, "review", dur("review"), "i");
+  nodes += box(PX, 150, 82, "publisher", dur("publisher"), "");
+  const iv = T.events.find(e => e.interrupt);
+  const rev = T.events.filter(e => e.node === "review").map(e => e.t_ms);
+  const badge = iv ? `
+    <text class="ms" x="${RX + 37}" y="126" text-anchor="middle" fill="var(--warn)">interrupt()</text>
+    <text class="ms" x="${RX + 37}" y="196" text-anchor="middle" fill="var(--warn)">halt ${
+      rev[0]?.toFixed(0)} → resume ${rev[1]?.toFixed(0)} ms</text>` : "";
+  $("#topo").innerHTML = edges + nodes + badge +
+    `<text class="br" x="124" y="276" text-anchor="middle">Send ×${syms.length}</text>` +
+    `<text class="br" x="${CX + 51}" y="276" text-anchor="middle">rejoin</text>` +
+    `<text class="br" x="${FX + 240}" y="276">dashed = declared branch, not taken</text>`;
+})();
+
+/* ---- contrast ---- */
+$("#contrast").innerHTML = T.candidates.map(c => {
+  const edges = c.hop1.concat(c.hop2);
+  const chips = edges.length
+    ? `<div class="chips">${edges.map(n => `<span class="chip${n.verified ? "" : " u"}">${esc(n.symbol)}${
+        n.pct ? `<i>${esc(n.pct)}%</i>` : ""}</span>`).join("")}</div>`
+    : `<p class="none">No supply edge survived the audit for this company.</p>`;
+  const arts = (c.pipeline_news || []).slice(0, 3).map(a =>
+    `<p class="hl">${esc(a.text)}<span class="score">${a.score.toFixed(3)}</span></p>`).join("");
+  return `<div class="card">
+    <header><b>${esc(c.symbol)}</b><span>${edges.length} supplier${edges.length === 1 ? "" : "s"} ·
+      ${c.traversal_ms} ms graph / ${c.vector_ms} ms vector</span></header>
+    <div class="lane g"><h3>Graph traversal</h3>${chips}</div>
+    <div class="lane v"><h3>vector_retriever</h3>${arts}</div>
+  </div>`;
+}).join("");
+
+
+/* ---- supply-chain subgraph explorer ---- */
+let CUR = T.candidates[0].symbol, SEL = null;
+$("#tabs").innerHTML = T.candidates.map(c =>
+  `<button class="tab" role="tab" data-s="${esc(c.symbol)}"
+     aria-selected="${c.symbol === CUR}">${esc(c.symbol)}</button>`).join("");
+$("#tabs").addEventListener("click", e => {
+  const b = e.target.closest(".tab"); if (!b) return;
+  CUR = b.dataset.s; SEL = null;
+  [...$("#tabs").children].forEach(x => x.setAttribute("aria-selected", x === b));
+  drawSub();
 });
-
-const svg = $("#gsvg");
-function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-
-function draw(){
-  const parts = [];
-  h1.forEach(n=>{ const [x,y]=pos[n.symbol];
-    parts.push(`<path class="edge" data-e="${n.symbol}" d="M${x.toFixed(1)},${y.toFixed(1)} L${CX},${CY}"/>`); });
-  h2.forEach(n=>{ const [x,y]=pos[n.symbol]; const m=via[n.symbol];
-    if(!m||!pos[m]) return; const [mx,my]=pos[m];
-    const qx=(x+mx)/2+(y-my)*0.12, qy=(y+my)/2+(mx-x)*0.12;
-    parts.push(`<path class="edge h2" data-e="${n.symbol}" d="M${x.toFixed(1)},${y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${mx.toFixed(1)},${my.toFixed(1)}"/>`); });
-
-  parts.push(`<g class="nd" data-n="${CAND.symbol}"><circle class="node-c" cx="${CX}" cy="${CY}" r="33"/>`+
-             `<text class="lbl" x="${CX}" y="${CY+3.5}" text-anchor="middle">${CAND.symbol}</text></g>`);
-  h1.forEach(n=>{ const [x,y]=pos[n.symbol];
-    parts.push(`<g class="nd" data-n="${n.symbol}"><circle class="node-1" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="22"/>`+
-      `<text class="lbl" x="${x.toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="middle">${esc(n.symbol)}</text>`+
-      (n.pct?`<text class="pct" x="${x.toFixed(1)}" y="${(y+35).toFixed(1)}" text-anchor="middle">${n.pct}%</text>`:"")+
-      `</g>`); });
-  h2.forEach(n=>{ const [x,y]=pos[n.symbol];
-    parts.push(`<g class="nd" data-n="${n.symbol}"><circle class="node-2" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="19"/>`+
-      `<text class="lbl" x="${x.toFixed(1)}" y="${(y+3).toFixed(1)}" text-anchor="middle">${esc(n.symbol)}</text></g>`); });
-  svg.innerHTML = parts.join("");
-
-  svg.querySelectorAll("g.nd").forEach(g=>{
-    g.addEventListener("mouseenter", ()=>highlight(g.dataset.n));
-    g.addEventListener("mouseleave", ()=>highlight(null));
+function drawSub(){
+  const c = T.candidates.find(x => x.symbol === CUR);
+  const rows = c.hop1.concat(c.hop2);
+  const svg = $("#subgraph");
+  if (!rows.length){
+    svg.innerHTML = `<text class="vl" x="310" y="170" text-anchor="middle"
+      fill="var(--ink3)">no supply edge survived the audit for ${esc(CUR)}</text>`;
+    $("#insp").innerHTML = `<h4>Inspector</h4><p class="q">Every edge the extractor produced for
+      ${esc(CUR)} was a divestiture, a competitor list, or a mention with no stated relation.
+      Rather than show a graph built from those, the page shows none.</p>`;
+    return;
+  }
+  const HX = 470, HY = 170, SX = 108;
+  const step = Math.min(26, 280 / rows.length);
+  const y0 = HY - (rows.length - 1) * step / 2;
+  let out = "";
+  rows.forEach((n, i) => {
+    const y = y0 + i * step;
+    out += `<line class="se ${SEL === n.symbol ? "sel" : ""}" x1="${SX + 13}" y1="${y}"
+      x2="${HX - 26}" y2="${HY}"></line>`;
   });
-}
-
-function highlight(sym){
-  svg.querySelectorAll(".edge").forEach(e=>e.classList.remove("lit"));
-  if(!sym) return;
-  const chain = [sym]; let cur = sym;
-  while(via[cur]){ chain.push(via[cur]); cur = via[cur]; }
-  chain.forEach(s=>{ const e = svg.querySelector(`.edge[data-e="${s}"]`); if(e) e.classList.add("lit"); });
-}
-
-/* ---------- as-of filter: real, using each edge's filing_date ---------- */
-function applyAsOf(year){
-  // year-END, so the slider at its maximum shows every edge; a 01-01 cut hid
-  // every filing made later that same year, which looked like a broken control
-  const cut = year + "-12-31";
-  $("#asof-v").textContent = cut;
-  const live = new Set();
-  h1.forEach(n => { if(!n.filed || n.filed <= cut) live.add(n.symbol); });
-  h2.forEach(n => { if((!n.filed || n.filed <= cut) && live.has(via[n.symbol])) live.add(n.symbol); });
-  svg.querySelectorAll("g.nd").forEach(g=>{
-    const s = g.dataset.n;
-    g.classList.toggle("node-off", s !== CAND.symbol && !live.has(s));
+  rows.forEach((n, i) => {
+    const y = y0 + i * step;
+    out += `<circle class="v ${n.verified ? "" : "u"} ${SEL === n.symbol ? "sel" : ""}"
+        cx="${SX}" cy="${y}" r="11" data-s="${esc(n.symbol)}"></circle>
+      <text class="vl" x="${SX + 18}" y="${y + 3}">${esc(n.symbol)}${
+        n.pct ? ` · ${esc(n.pct)}%` : ""}</text>`;
   });
-  svg.querySelectorAll(".edge").forEach(e=>e.classList.toggle("off", !live.has(e.dataset.e)));
-  document.querySelectorAll("#rows tr").forEach(tr=>{
-    tr.style.opacity = live.has(tr.dataset.s) ? "1" : "0.22";
-  });
-  const n1 = h1.filter(n=>live.has(n.symbol)).length;
-  const n2 = h2.filter(n=>live.has(n.symbol)).length;
-  $("#clock").textContent = n1 + " at 1 hop / " + n2 + " at 2 hops, as of " + cut;
+  out += `<circle class="v hub" cx="${HX}" cy="${HY}" r="25"></circle>
+    <text class="vl" x="${HX}" y="${HY + 3}" text-anchor="middle">${esc(CUR)}</text>
+    <text class="br" x="${SX}" y="${HY + 160}" text-anchor="middle"
+      style="font:400 8.5px var(--mono);fill:var(--ink3)">suppliers</text>
+    <text class="br" x="${HX}" y="${HY + 160}" text-anchor="middle"
+      style="font:400 8.5px var(--mono);fill:var(--ink3)">customer</text>`;
+  svg.innerHTML = out;
+  svg.querySelectorAll("circle.v[data-s]").forEach(el =>
+    el.addEventListener("click", () => { SEL = el.dataset.s; drawSub(); }));
+  const n = rows.find(r => r.symbol === SEL);
+  $("#insp").innerHTML = n
+    ? `<h4>Inspector</h4><div class="sym">${esc(n.path.replace(/>/g, " → "))}</div>
+       <div class="meta">${n.pct ? esc(n.pct) + "% of revenue · " : ""}filed ${esc(n.filed)} ·
+         ${n.hops} hop${n.hops === 1 ? "" : "s"}</div>
+       ${n.sentence ? `<p class="q">“${esc(n.sentence)}”</p>`
+                    : `<p class="q" style="color:var(--ink3);font-style:italic">The stored passage
+                        opens mid-sentence — a page header or table row — so there is no quotable
+                        disclosure. The edge is kept and marked rather than dropped.</p>`}`
+    : `<h4>Inspector</h4><p class="q" style="color:var(--ink3)">Click a supplier to read the
+        sentence in its 10-K that created the edge.</p>`;
 }
+drawSub();
 
-/* ---------- tables and articles ---------- */
-$("#rows").innerHTML = h1.concat(h2).map(n=>
-  `<tr data-s="${esc(n.symbol)}"><td class="s">${esc(n.symbol)}</td>`+
-  `<td class="p">${n.hops}</td>`+
-  `<td class="path">${esc((n.path||"").replace(/>/g," → "))}</td>`+
-  `<td class="p">${n.pct? n.pct+"%" : "—"}</td>`+
-  `<td class="p">${esc(n.filed||"—")}</td></tr>`).join("");
 
-$("#arts").innerHTML = CAND.articles.map(a=>
-  `<div class="art"><div class="s">${a.score.toFixed(3)}</div>`+
-  `<div class="h">${esc(a.headline)}</div>`+
-  `<div class="d">${esc(a.date)} &middot; ${esc((a.symbols||[]).slice(0,6).join(" "))}</div></div>`).join("");
+/* ---- changelog: the query this node used to ask ---- */
+(function changelog(){
+  const el = $("#changelog");
+  if (!el) return;
+  const boiler = s => /Market-Moving News/i.test(s);
+  el.innerHTML = T.candidates.map(c => {
+    const was = (c.legacy_news || []).slice(0, 3);
+    const now = (c.pipeline_news || []).slice(0, 3);
+    const nb = (c.legacy_news || []).filter(a => boiler(a.text)).length;
+    const row = a => `<p class="hl">${esc(a.text)}<span class="score">${
+      Number(a.score).toFixed(3)}</span></p>`;
+    return `<div class="card">
+      <header><b>${esc(c.symbol)}</b><span>${nb}/${(c.legacy_news || []).length}
+        boilerplate before · 0 after</span></header>
+      <div class="lane v"><h3>was</h3>
+        <p class="sub" style="margin:0 0 .5rem"><code>${esc(c.legacy_query || "")}</code></p>
+        ${was.map(row).join("")}</div>
+      <div class="lane g"><h3>now</h3>
+        <p class="sub" style="margin:0 0 .5rem"><code>${esc(c.query_now || "")}</code></p>
+        ${now.map(row).join("")}</div>
+    </div>`;
+  }).join("");
+})();
 
-/* ---------- LangGraph timeline ---------- */
-const cls = n => n==="graph_retriever" ? "g" : n==="vector_retriever" ? "v" : "";
-$("#tl").innerHTML = T.events.map((e,i)=>
-  `<div class="ev on ${cls(e.node)}" data-i="${i}"><div class="t">${e.t_ms.toFixed(0)}</div>`+
-  `<div class="n">${esc(e.node)}</div>`+
-  `<div class="d">${e.key? esc(e.key)+" &middot; ":""}${esc(e.detail)}</div></div>`).join("");
-const evs = [...document.querySelectorAll(".ev")];
 
-/* ---------- replay ---------- */
-let timers = [];
-function stop(){ timers.forEach(clearTimeout); timers = []; }
-function showAll(){
-  evs.forEach(e=>{ e.classList.add("on"); e.classList.remove("now"); });
-  $("#play").disabled = false;
-}
-$("#play").addEventListener("click", ()=>{
-  stop(); $("#play").disabled = true;
-  evs.forEach(e=>e.classList.remove("on","now"));
-  const speed = 2.4;
-  T.events.forEach((e,i)=>{
-    timers.push(setTimeout(()=>{
-      evs[i].classList.add("on","now");
-      if(i) evs[i-1].classList.remove("now");
-      $("#clock").textContent = e.t_ms.toFixed(0) + " ms - " + e.node;
-      if(e.node==="graph_retriever" && e.key===CAND.symbol) h1.forEach((n,k)=>
-        setTimeout(()=>highlight(n.symbol), k*45));
-    }, e.t_ms/speed + 120));
+/* ---- conclusion: stats, the pipeline's own rationale, the audit ---- */
+(function conclusion(){
+  const a = T.assessments || [];
+  const cnt = v => a.filter(x => x.verdict === v).length;
+  $("#concl").innerHTML = [
+    [`${cnt("corroborated")} / ${cnt("neutral")} / ${cnt("contradicted")}`, "corroborated / neutral / contradicted"],
+    ["−0.0015", "lead-lag slope b"],
+    ["0.02", "threshold it had to beat"],
+    ["818 / 1,211", "edges surviving audit"],
+  ].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join("");
+
+  const iv = T.events.find(e => e.interrupt);
+  const c = iv && iv.interrupt.contradicted[0];
+  $("#rationale").innerHTML = c
+    ? `${esc(c.rationale)}<div class="meta" style="margin-top:.5rem;font:400 .72rem/1 var(--mono);
+        color:var(--ink3)">— ${esc(c.symbol)}, ${esc(c.as_of)}</div>`
+    : "";
+
+  const AUDIT = [["customer (kept)", 818, true], ["names it, no relation", 253],
+                 ["competitor list", 66], ["acquisition", 45], ["reversed", 9]];
+  const max = Math.max(...AUDIT.map(r => r[1]));
+  $("#audit").innerHTML = AUDIT.map(([label, n, keep]) => `<div class="bar${keep ? " keep" : ""}">
+      <span>${esc(label)}</span><i style="width:${(100 * n / max).toFixed(1)}%"></i>
+      <span>${n.toLocaleString()}</span></div>`).join("");
+})();
+
+/* ---- one AQL block, two tabs ---- */
+(function aqlTabs(){
+  const KW = /\b(FOR|IN|ANY|INBOUND|OPTIONS|FILTER|ALL|NONE|COLLECT|LET|RETURN|SORT|LIMIT|FIRST|MIN)\b/g;
+  const show = k => { $("#aql").innerHTML = esc(T.aql[k] || "").replace(KW, "<b>$1</b>"); };
+  const tabs = $("#aqltabs");
+  if (!tabs) return;
+  tabs.addEventListener("click", e => {
+    const b = e.target.closest(".tab"); if (!b) return;
+    [...tabs.children].forEach(x => x.setAttribute("aria-selected", x === b));
+    show(b.dataset.q);
   });
-  timers.push(setTimeout(()=>{ highlight(null); showAll();
-    $("#clock").textContent = "complete in " + T.meta.total_ms.toFixed(0) + " ms"; },
-    T.events[T.events.length-1].t_ms/speed + 900));
-});
-$("#reset").addEventListener("click", ()=>{ stop(); showAll(); $("#asof").value=2026; applyAsOf(2026); });
-$("#asof").addEventListener("input", e => applyAsOf(+e.target.value));
+  show("traversal");
+})();
 
-draw();
-applyAsOf(2026);
+/* ---- provenance ---- */
+const rows = T.candidates.flatMap(c => c.hop1.concat(c.hop2).map(n => ({...n, of: c.symbol})));
+const mark = (s, sym) => {
+  const t = esc(s);
+  return t.replace(/\b(accounted for|represented|net sales|net revenue|total revenue|customers?)\b/gi,
+                   m => `<em>${m}</em>`);
+};
+$("#prov").innerHTML = `<thead><tr>
+    <th>Supplier</th><th>Customer</th><th>%</th><th>Filed</th><th>What the filing says</th>
+  </tr></thead><tbody>` + rows.map(n => `<tr>
+    <td class="s">${esc(n.symbol)}</td>
+    <td class="s" style="color:var(--ink3)">${esc(n.of)}</td>
+    <td class="p">${n.pct ? esc(n.pct) + "%" : "—"}</td>
+    <td class="p">${esc(n.filed || "—")}</td>
+    <td>${n.sentence
+        ? `<span class="quote">${mark(n.sentence)}</span>`
+        : `<span class="nq">named in the filing, but the stored passage opens mid-sentence —
+             no quotable disclosure</span>`}</td>
+  </tr>`).join("") + `</tbody>`;
+const nv = rows.filter(r => !r.verified).length;
+$("#provnote").innerHTML = `<b>${rows.length - nv} of ${rows.length} edges shown here carry a
+  complete, quotable sentence.</b> ${nv ? `The ${nv === 1 ? "other one is" : `other ${nv} are`}
+  marked rather than dropped: the relationship may well be real, but its stored evidence is a
+  table row or a page header, and a demo that quotes those at you is worse than one that says so.`
+  : ""}`;
+
+/* ---- point-in-time ---- */
+
 </script>

@@ -352,9 +352,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   scanning open, rather than a plugin framework. Node order also changed
   (`graph_retriever` now precedes `leader_state`) because a candidate's
   neighbourhood must be known before there is anything to check for shocks.
-- **Outcome:** pending — `MarketScan` is a documented stub raising
-  NotImplementedError; the claim that no node needs branching is untested until
-  it is written.
+- **Outcome:** **Written, and the claim holds — narrowly.** `MarketScan` is
+  implemented (13 tests), wired into the live UI as a third source, and a real
+  scan at 2026-05-11 sweeps 3,204 symbols, traverses to suppliers of what moved,
+  and produces 19 candidates in 8.7 s with genuine verdicts (APTV corroborated,
+  CDW contradicted). **No node needed branching** — `graph/` was not touched at
+  all, exactly as this entry predicted.
+  **But "no node needed branching" turned out to be narrower than "no caller
+  needed changes."** The scan surfaced a circularity that corroboration mode
+  cannot have: the shocked leader `Y` that *originates* a candidate `X` is often
+  correlated with `X`, so without intervention `Y` re-enters `X`'s own
+  neighbourhood and `context_fusion` counts `Y`'s move as evidence for the
+  candidate `Y` created. Selecting on a signal and then scoring on the same
+  signal is the exact circularity `MarketScan` exists to remove, one hop
+  removed. It is closed at the caller, by unioning `MarketScan.shocked_leaders()`
+  into `signal_universe` — the mechanism D-27 already provides — and proved
+  end-to-end: the test first asserts the hole is real with `signal_universe=set()`
+  (a `leader_move` evidence for `Y`, verdict `corroborated`) before asserting it
+  disappears with the fix. Found in plan review, not in code review.
 - **Status:** Accepted
 
 ### D-24 — mattpocock/skills installed as a plugin, not vendored
@@ -1768,6 +1783,15 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   semiconductor suppliers. Across a broad cross-section it is ~13%, flat across
   liquidity ranks (15%/16%/9%/15% for ranks 1-50/51-100/101-175/176-250). Most
   companies simply have no single >10% customer to disclose.
+  **Superseded by a full-population audit (2026-09-07).** The "~9/12" above was
+  12 rows read by hand. Classifying all 1,211 stored passages by the sentence
+  that actually names the counterparty gives **69.2% sound** (838), and names the
+  three failure modes rather than sampling them: 20.9% (253) name the party but
+  state no relation — this is where CRUS→GFS lives, "wafers primarily *supplied
+  by* GLOBALFOUNDRIES", a reversed relation the active-voice veto never saw;
+  5.5% (66) competitor lists; 3.7% (45) acquisitions; 0.7% (9) explicitly
+  reversed. GOOG→GOOGL is in there too — a share class, not a counterparty.
+  This is the re-labelling D-72 reserved, and it needed no re-crawl. See D-78.
 - **Status:** Accepted
 
 ### D-73 — Pre-registration: does Apple's move lead its suppliers? (Q-34)
@@ -1974,10 +1998,1601 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Outcome:** pending — plan being written to `docs/plans/`.
 - **Status:** Accepted — partially supersedes D-16
 
+### D-78 — Classify the relation from the naming sentence, not the ±420-char window
+- **When:** 2026-09-07T17:55:25-05:00
+- **Decision:** Derive `relation` from the single sentence that names the
+  counterparty, with an explicit precedence — competitor > corporate_action >
+  reversed > customer > unstated — and build `supplies_to` edges from the
+  `customer` label alone. The percentage is read from that same sentence. Six
+  labels replace the one hardcoded `'customer'`; `passage` is untouched, so this
+  is a re-read of stored text and re-crawls nothing.
+- **Why:** The showcase page shows a reviewer the verbatim filing sentence behind
+  each edge, and that panel is what exposed this: `LITE→AVGO` would have rendered
+  "we compete against various companies" beneath a *supplies* label. The
+  alternative was to ship all 1,211 edges with an honest accuracy caveat. Rejected
+  — a caveat does not survive contact with a reader who can click the edge and
+  read the contradiction, and the goal's whole premise is that the graph is shown
+  working rather than described as working. Window-scoped matching is what failed:
+  a ±420-char window spans several sentences, so a competitor list two sentences
+  away from a customer mention scored as a customer. One sentence cannot say both.
+- **Outcome:** **Applied to real data.** 1,211 rows rewritten in one transaction:
+  818 customer, 288 unstated, 47 competitor, 46 corporate_action, 12 reversed.
+  `supplies_to` reloaded at 818 edges / 514 vertices. Q-35 then re-ran D-74's
+  pooled test on the cleaned graph: **b = -0.0015, I² = 44%** (was +0.0000, I² 0%)
+  — still a null far below the declared 0.02 threshold, so the conclusion holds
+  while its inputs no longer do. A cost this also surfaced: every 2-hop supply
+  path vanished with the bad edges, so supply-chain multi-hop was an artifact of
+  competitor lists and the "Baker Hughes rig count" statistic.
+- **Status:** Accepted
+
+### D-79 — The candidate is the leader, not the lagger: `leaders_of` dropped for `laggers_of`
+- **When:** 2026-09-07T18:05:00-05:00
+- **Decision:** `graph_retriever` calls the already-declared
+  `laggers_of(leader, max_hops, as_of)`, walking **INBOUND** from the candidate
+  to its suppliers. The planned `leaders_of` / `OUTBOUND` pair is dropped before
+  it was written. On the returned `LagEdge`, `leader` is the candidate and
+  `lagger` is the neighbour reached.
+- **Why:** PLAN-2026-09-07 TASK-3.1 assumed "a candidate is a potential lagger"
+  and added `leaders_of` to find what leads it. That premise is false for this
+  candidate set, and D-72 already contains the measurement that refutes it:
+  "only 8 of the 24 alert tickers are reachable **as customers**." Every real
+  candidate — AAPL, AVGO, TSLA — sits at the customer end. Combined with D-73's
+  fixed direction (customer → supplier, Cohen & Frazzini), the candidate is a
+  **leader** and its suppliers are its **laggers**. `leaders_of(AAPL)` would ask
+  for Apple's customers, which barely exist in this graph; the traversal that
+  produces the 13 suppliers is `laggers_of`. The alternative — keep `leaders_of`
+  and walk OUTBOUND — was defended on D-73's economics, which are correct but do
+  not rescue the premise: getting the direction right while putting the candidate
+  on the wrong end still inverts the query. Surfaced by the `red-adapters` agent,
+  which noticed that `scripts/capture_showcase.py` had been running INBOUND
+  against real data all along while the plan's worked example said OUTBOUND.
+  Test isolation landed at the **database** layer, not the collection layer: the
+  fixtures create disposable `test_arango_topology` / `test_vector_index`
+  databases holding production-named `equity`/`supplies_to`/`article`, so the
+  adapters hardcode those names and take only `db`. Collection-name constructor
+  kwargs were tried first and abandoned — they put a parameter on the production
+  API whose only purpose was to make a test pass (CLAUDE.md §2), and they forced
+  test collections into the live `lagmatrix` database, which promptly produced
+  real races between concurrent runners (`IndexCreateError: index was dropped`,
+  `DocumentInsertError: conflicting key: chip-article`). A separate database
+  cannot collide with production data at all. Reaching that took five reversals
+  across two agents and me, most of them caused by my own crossed messages.
+- **Outcome:** **Done and verified against the live instance**, not on report:
+  6 passed (4 topology + 2 vector) with `LAGMATRIX_ARANGO_URL` tunnelled to the
+  homelab ArangoDB 3.12.11; full suite 73 passed + 6, ruff clean; production
+  `equity`/`supplies_to`/`co_mentioned`/`article` confirmed at 514/818/2129/47640
+  afterwards with no leftover test collections. `laggers_of` implements the
+  ALL-quantified per-path guard and picks the shortest path, mirroring
+  `capture_showcase.py`. Two real defects surfaced *because the next agent in the
+  chain refused to guess* rather than from the tests: the plan's inverted premise,
+  and fixtures that seeded collections the adapter could not reach — the latter
+  hidden underneath a `TypeError` that looked like a complete explanation.
+- **Status:** Accepted
+
+### D-80 — The comparison bar: FalkorDB's GraphRAG app, and the one element we were missing
+- **When:** 2026-09-07T18:40:00-05:00
+- **Decision:** Treat FalkorDB's GraphRAG showcase as the reference page the goal
+  demands, and adopt its most persuasive device: a **side-by-side where vector
+  retrieval visibly fails and the graph visibly succeeds**, on the same question,
+  with both halves real output. For LagMatrix that is TSLA — semantic search over
+  47,640 articles returns CNBC "Final Trades" noise, while the traversal returns
+  APTV at 9% of net sales and JBL, each with the verbatim 10-K sentence.
+- **Why:** The goal says success is measured by comparison, not self-assessment,
+  so the bar had to be an actual page. FalkorDB's makes four things visible:
+  SSE-streamed pipeline stages, an "explainability subgraph" (source document →
+  chunks → entities → answer), a clickable force-directed explorer, and a
+  side-by-side where vector RAG hallucinates three non-existent World Cup host
+  cities while GraphRAG lists all 22 finals correctly. We already had analogues
+  of the first three — `scripts/serve.py` streams a real `graph.astream` over
+  SSE, D-78's sentence-level provenance is a stronger explainability chain than
+  theirs (a dated SEC filing, not an LLM-extracted chunk), and the page draws the
+  traversal. **The contrast demo is the one we lacked**, and it is the element
+  that does the actual persuading, because it is the only one that shows the
+  graph doing something the vector index cannot. The alternative — asserting in
+  prose that the graph adds value — is exactly the "read about it rather than see
+  it" failure the goal names.
+  Two things we have that the bar does not, and should therefore lead with rather
+  than bury: **point-in-time correctness** (an `as_of` that provably changes the
+  result, which no LLM-extraction demo attempts) and **honest negative results**.
+- **Outcome:** The contrast is real and, usefully, **it cuts both ways** — which
+  is a better demo than FalkorDB's, whose side-by-side only ever shows the graph
+  winning. Measured on the current trace:
+  **AAPL** — graph returns 12 named suppliers with disclosed percentages (AMKR
+  27.7%, QRVO 50%, AVGO 25%) in 6 ms; vector returns "ISM Manufacturing Prices
+  For February 70.5 Vs 60.6 Est." at 0.411. Graph wins decisively.
+  **TSLA** — graph returns APTV at 9% of net sales; vector returns "Amazon,
+  Alphabet, KLA And A Health Care Stock On CNBC's 'Final Trades'". Graph wins.
+  **AVGO** — graph returns **nothing** (every AVGO edge was a divestiture or a
+  competitor list and was dropped by D-78); vector returns Arista on supply
+  shortages and ASML on EUV demand, both genuinely on-topic. **Vector wins.**
+  Shipping the case the graph loses is the point: a demo that admits a failure
+  mode is more credible than one that cannot, and this one costs nothing because
+  the honest answer — use both, they fail differently — is also the correct one.
+- **Status:** Accepted
+
+### D-81 — Two edge types, opposite orientations: only the candidate's *laggers* count as evidence
+- **When:** 2026-09-08T00:10:00-05:00
+- **Decision:** `context_fusion` builds `leader_move` evidence only from edges
+  where the candidate is the **lagger** (`e.lagger == c.symbol`). Supply-chain
+  edges, where the candidate is the leader, contribute none. They stay in
+  `lag_edges` and stay on the showcase page; this governs what counts toward a
+  verdict, not what is retrieved or displayed.
+- **Why:** PHASE-4 made `graph_retriever` additive — correlation edges plus
+  ArangoDB supply edges — and the two carry **opposite orientations relative to
+  the candidate**. A correlation edge has `leader`=neighbour, `lagger`=candidate.
+  A supply edge (D-79) has `leader`=candidate, `lagger`=supplier. `fuse_evidence`
+  read `[e.leader for e in ...]` assuming every leader is a neighbour, so the
+  candidate's own symbol entered that list once per supplier — AAPL twelve times
+  — duplicating DataFrame columns until `rho[m]` returned a Series and
+  `int()` raised. Deduplication would have silenced the crash while leaving the
+  real error: counting a supplier's move as evidence about its customer inverts
+  the inference D-73 fixed. D-73 already said so — the supply edge is "signal
+  generation on suppliers, not corroboration of an Apple alert" — so the edge
+  genuinely cannot corroborate a mega-cap candidate, and the honest wiring says
+  that rather than manufacturing evidence from it.
+  **Found only by running the real pipeline.** Every unit test passed; the
+  showcase capture crashed on its first real `graph.astream`. The old capture
+  synthesised its node timeline with a `mark()` helper, so it would have produced
+  a clean-looking page from a pipeline that could not complete a single run.
+- **Outcome:** Fixed with a one-line filter plus a comment naming this entry.
+  80 passed, `check_baseline.py --synthetic` unchanged. Verified the fix is not a
+  behaviour regression by running the same three candidates with and without
+  `arango_topology`: both give `effective_evidence 0.0` on 2026-06-01, so the
+  earlier inflation only arose where a self-shock coincided with a supply edge.
+  `scripts/capture_showcase.py` now runs a real `graph.astream` and the trace is
+  observed rather than synthesised: `Send` fan-out, `leader_state` and
+  `vector_retriever` landing at identical `t_ms` (genuinely parallel), the
+  rejoin at `context_fusion`, and — with `halt_on_contradicted=True` on
+  **2026-05-11** — `__interrupt__`, the `review` gate firing on TSLA, and the
+  resume through to `publisher`. That date was chosen because it is the only
+  sampled one producing all three verdicts (AAPL neutral, AVGO corroborated,
+  TSLA contradicted); the interrupt had never been demonstrable before because no
+  capture had ever produced a contradiction.
+- **Status:** Accepted
+
+### D-82 — The vector retriever had no point-in-time guard at all
+- **When:** 2026-09-08T00:45:00-05:00
+- **Decision:** `NewsIndex.search` takes the candidate's `as_of` and filters
+  `a.date < @as_of` — strictly before — and `vector_retriever` passes `c.as_of`.
+  The predicate is combined into the *same* `FILTER` as the symbol test, not a
+  second clause.
+- **Why:** PHASE-7 replaced the Alpaca news call with the vector index and
+  carried over no date bound. `_SEARCH_AQL` filtered on symbol intersection and
+  nothing else, so a candidate assessed as of 2026-05-11 retrieved an article
+  published **2026-06-04** — 24 days of future information. Every other retrieval
+  path in this project is point-in-time by construction: the traversal's
+  `ALL`-quantified per-path `filing_date` guard, and `news_comention` being kept
+  a view precisely so a caller cannot forget to bound it (D-16). The vector half
+  was the one hole, and the showcase page states "the traversal cannot see a
+  filing that had not happened" two sections above the leaked row.
+  The single-`FILTER` form is not stylistic: ArangoDB's optimiser refuses
+  `APPROX_NEAR_COSINE` when two separate `FILTER` statements sit between it and
+  the `SORT`/`LIMIT` (`ERR 1554: Vector search could not be applied`), so the
+  alternative — a second filter line — does not run at all. Established against
+  the live instance by the `red-asof` agent before green began.
+- **Outcome:** Closed and verified in data, not just in tests. `FILTER
+  LENGTH(INTERSECTION(a.symbols, @symbols)) > 0 AND a.date < @as_of`; suite 89
+  passed / 0 skipped with the live instance, `check_baseline.py --synthetic`
+  unchanged. A fresh capture at as-of 2026-05-11 retrieves 0 of 18 articles on or
+  after that date, latest 2026-04-21 — previously 2026-06-04.
+- **Status:** Accepted
+
+  **How it was found, which matters more than the fix.** Not by the test suite —
+  80 tests passed over it. Not by me; I wrote and reviewed the wiring. It was
+  found by an outside reviewer reading the *retrieved data* on a published page
+  and noticing a date. Every guard in this project is enforced by construction
+  except this one, which was enforced by a docstring: `vector_retriever` has
+  claimed "only articles published strictly before the candidate's date are
+  retrieved" since PHASE-5, and that sentence was aspiration for two phases.
+
+### D-83 — The news query was near-contentless, and `direction` made it worse
+- **When:** 2026-09-08T00:55:00-05:00
+- **Decision:** `vector_retriever` asks
+  `f"{symbol} catalyst: earnings, demand, guidance, production, regulation"`.
+  The candidate's **direction is deliberately excluded** from the retrieval
+  query, reversing the specification this project set two phases ago.
+- **Why:** `f"news relevant to a {direction} move in {symbol}"` is almost
+  contentless, and the nearest neighbours of a contentless query are contentless
+  headlines: 18 of 18 retrieved articles across three candidates were the same
+  `"Market-Moving News for <date>"` template. Every assessment this pipeline has
+  ever made used market-wrap noise as its news context, so this is a production
+  defect, not a presentation one. Probed against the live index to locate the
+  fault: the corpus and the embeddings are fine — `"iPhone production cuts,
+  component orders and supplier demand"` returns Ming-Chi Kuo on iPhone Air demand
+  at 0.713 against the same filter and `as_of`.
+  **Direction was measured, not assumed, and it loses.** With it, AVGO returns
+  "Smart Money Is Betting Big In AVGO Options" three times and TSLA returns
+  "Trade Strategy For SPY, QQQ, AAPL..." three times — speculative trading
+  chatter, the same pathology reintroduced. Without it, all three candidates get
+  on-company substance (*Apple Earnings Are Imminent*, *Broadcom Slides 4%
+  Despite Q4 Beat*, *Tesla's Q4 Earnings Looms*). Direction belongs to the thesis
+  being assessed, not to what context to retrieve: news is not written
+  directionally, so asking for it retrieves people speculating about direction.
+  **The score falls and that is correct.** `catalyst` scores 0.516 where the old
+  query scored 0.567. Cosine measures proximity to the query, not usefulness — a
+  vague query sits near the corpus centroid and therefore scores well against
+  almost everything, so the *high* number was the symptom. Optimising the visible
+  score would have selected the worse retriever; the alternative form (`drivers`)
+  scored highest at 0.700 and returned generic stock chatter.
+  The query is also uneven across candidates — thinner for AVGO than for AAPL or
+  TSLA — and that is kept rather than tuned away. AVGO genuinely has less
+  retail-facing coverage, and tuning a template until it flatters three chosen
+  seeds is the cherry-picking this project has spent its whole life avoiding.
+- **Outcome:** pending
+- **Status:** Accepted — supersedes the query specification in D-77's PHASE-7
+
+### D-84 — "Already responded" is a separate axis from "contradicted", and the ratio is signed
+- **When:** 2026-09-08T18:22:00-05:00
+- **Decision:** A scan-discovered candidate `X` now carries two new fields
+  alongside its verdict: `origin_status` (`"open"` | `"responded"` |
+  `"opposed"` | `None`) and `room` (`float | None`). `fuse_evidence` classifies
+  on two **signed** quantities computed the same way for both symbols —
+  `y_component = z_Y * want`, `x_component = z_X * want`, where `Y` is the
+  candidate's `origin_leader` and `want` is `+1`/`-1` for an up/down thesis:
+  `y_component <= 0` skips entirely (no evidence, both fields `None`);
+  `x_component < 0` is **opposed** (`room=None`, one contradicting
+  `Evidence(kind="lag_response", weight=1.0)`); `x_component >= y_component` is
+  **responded** (`room=0.0`, and **no `Evidence` at all**); otherwise **open**
+  (`room = 1 - x_component/y_component`, one corroborating unit). The tie
+  `x_component == y_component` lands in *responded*, not open-with-zero-room.
+- **Why:** the alternative that lost was an unsigned single formula,
+  `responded = |z_X| / |z_Y|`. It is shorter and needs no sign handling, but it
+  is sign-blind: a candidate that moved 1σ *against* the thesis and one that
+  moved 1σ *with* it but has not caught up both yield `0.5`, so a room-sorted
+  list would rank a refuted thesis in the middle of the "still has room" names
+  instead of at the bottom. That collapses the exact distinction this whole
+  change exists to keep. Emitting no `Evidence` for *responded* (rather than a
+  contradicting one) is the same distinction on the verdict side: the
+  opportunity is spent, not refuted, so it must not be able to push `verdict`
+  to `"contradicted"` on its own. Reusing the existing three-way `verdict`
+  string for this also lost — `"neutral"` already means "insufficient
+  evidence, or a tie", and overloading it would make one string mean two
+  unrelated things.
+  `room` is deliberately built from z-scores only and multiplies by **no**
+  transfer coefficient, measured or assumed: D-74's pooled slope for exactly
+  this customer→supplier relationship is `b=-0.0015` against a pre-registered
+  `0.02` threshold — a null on the wrong side of zero — so any assumed fraction
+  of `Y`'s move appearing in `X` would present as fact the one quantity this
+  project measured and did not find. It orders candidates against each other
+  and is never shown as an expected return, target, or bp/% figure. This also
+  keeps the change clear of `LagEdge.beta` entirely (Q-39).
+- **Outcome:** **Built, and it does change verdicts — but not in the way the
+  design expected.** Exercised on the real 2026-05-11 scan (3,204 symbols swept,
+  255 movers, 19 candidates): the new input changed the verdict for **11 of 19**,
+  because those 11 had *no* correlated-neighbour evidence at all and were
+  previously unassessable — that is D-85's gate change doing the work, not the
+  classification. Where both inputs existed, all **8 of 8** agreed, which is
+  weak reassurance since both read the candidate's own move (Q-40).
+  Two findings against the design:
+  **(1) the `responded` bucket was empty — 0 of 19.** `x_component >= y_component`
+  means "the candidate moved at least as far as a company that just moved ≥2σ",
+  which almost nothing clears in a 3-session window. The state the user actually
+  asked for ("we don't care much about candidates that moved too much already")
+  therefore never fires. Logged as Q-41.
+  **(2) `origin_status` is perfectly collinear with `verdict` on this data** —
+  8 `open` → all `corroborated`, 11 `opposed` → all `contradicted`, exactly. The
+  label carries no information the verdict does not. The only genuinely new
+  quantity is `room`'s *magnitude*, which does spread (0.9859 … 0.3896, median
+  0.7453) and does order the open names against each other.
+  The falsifiability check the plan cared about still holds in the code
+  (`test_lag_response_already_responded_does_not_read_as_contradicted`); it just
+  has no real-data instance yet to exercise it.
+- **Status:** **Superseded by D-87.** Measured over 432 scan dates and
+  replicated independently: `room`'s denominator is unfounded and the ordering
+  does not predict. The "empty bucket" reasoning in this entry's Outcome was
+  also wrong — see Q-41.
+
+### D-85 — `fuse_evidence`'s `if not leaders: continue` gate now admits the origin-leader path
+- **When:** 2026-09-08T18:22:00-05:00
+- **Decision:** the guard becomes
+  `if not leaders and not (c.origin_leader and c.origin_leader in shocks): continue`,
+  with `shocks`/`movers` built above it rather than below. A candidate with
+  `origin_leader=None` and no correlation neighbours still skips, byte-identically
+  to before.
+- **Why:** found by reading the code during execution, not written into
+  PLAN-2026-09-08-unresponded-lag, which is why it is logged separately. The old
+  gate ran before `shocks` was even built, so a scan candidate with no
+  correlation neighbours never reached fusion, got no `_by_key` entry, and was
+  dropped by `assess()` under D-27 — meaning a `lag_response` unit could never
+  be the *only* evidence for a candidate. That would have made the "responded
+  alone cannot manufacture a verdict" and "lag_response weight alone clears
+  `MIN_EFFECTIVE`" tests unwritable, because there would be no `Assessment` to
+  assert on at all. Leaving the gate and weakening those two tests was the
+  alternative; it would have removed the only checks that pin `lag_response`'s
+  independent behaviour.
+- **Outcome:** **Correct, but it never fires on real data — and I mis-reported
+  why it mattered.** I claimed this gate change made 11 of 19 candidates
+  assessable that D-27 had been dropping. That was wrong: I conflated `leaders`
+  with `movers`. Measured on the real 2026-05-11 scan, **every one of the 19
+  candidates has exactly 20 `leaders`** (`topk=20` against a 3,204-symbol
+  universe), so `not leaders` is never true and the old gate never dropped any
+  of them. What was 11-of-19 is `movers == 0` — the neighbours existed and none
+  of them moved. The gate change is still correct in principle (a candidate
+  whose only route in is `origin_leader` should reach fusion) and harmless, but
+  it changed nothing observable, and the "11 of 19" figure attached to it in
+  D-87 and in commit `b4fa3d7`'s message is wrong for the same reason.
+  The only way `leaders` is empty is a candidate absent from the price file or
+  short of history, and `route_on_neighbourhood` sends that to `END` before
+  fusion is reached.
+- **Status:** Accepted — but see the corrected Outcome; the justification
+  originally given for it was measured wrong
+
+### D-86 — A missing candidate move is an explicit no-result, not `room = 1.0`
+- **When:** 2026-09-08T19:05:00-05:00
+- **Decision:** `fuse_evidence` skips the D-84 lag-response classification
+  entirely when `c.symbol` has no `Shock` — no `Evidence`, no `room_by_key`
+  entry, no `origin_status_by_key` entry — and appends a message to a new
+  `"errors"` list it now returns, in `graph_retriever`'s existing house style
+  (`f"{c.symbol} {c.as_of}: no shock for candidate's own move"`).
+- **Why:** `cand_z = shocks[c.symbol].sigma if c.symbol in shocks else 0.0`
+  fed `x_component`, so an absent candidate shock read as `x_component == 0`,
+  which D-84 classifies as **open with `room = 1.0`** — the maximum. Missing
+  data about the candidate's own move therefore masqueraded as the strongest
+  possible signal and sorted to the *top* of the ranked list, with nothing to
+  indicate anything was wrong. The alternative was leaving it: verified latent
+  (0 of 19 on the real 2026-05-11 scan, no `NaN` rooms), so nothing published
+  is affected. Rejected because the failure mode is silent and inverted —
+  the worst kind — and CLAUDE.md requires a silent path be given an explicit
+  outcome rather than a plausible-looking default.
+  Deliberately **not** widened to the pre-existing `leader_move` loop, which
+  keeps its own `else 0.0` fallback: that branch feeds published
+  corroboration-mode results, and changing it would move them. Scoped to the
+  lag-response block only.
+- **Outcome:** Verified. The real 2026-05-11 scan is byte-identical after the
+  change — same 19 candidates, same 8 open / 11 opposed, same rooms
+  (0.9859 … 0.3896) — with `errors` empty, confirming the guard costs nothing
+  when the data is present. 118 passed, 9 skipped; `check_baseline.py
+  --synthetic` unchanged at 6 identical rows.
+- **Status:** Accepted
+
+### D-87 — `room` and `origin_status` are deleted: the denominator is unfounded and the ordering does not predict
+- **When:** 2026-09-09T03:50:00-05:00
+- **Decision:** Remove `room`, `origin_status`, `rank_by_room`, and the
+  `opposed` `lag_response` `Evidence` unit. Replace with **description only** —
+  a plain sentence naming the candidate's own thesis-signed move in its own
+  sigma units and the leader that surfaced it. No threshold, no bucket, no
+  denominator, no ordering, no implied magnitude. `Candidate.origin_leader`
+  (D-84's PHASE-1) is kept; the description needs it.
+- **Why:** two independent reconstructions agree — a quant consult over 432
+  scan dates / 13,063 supplier-events, and a separate rebuild over 30 dates /
+  209 linked events from a different data file and different code.
+  **(1) The denominator assumes what D-84 claimed it avoided.** D-84 states
+  `room` "multiplies by no transfer coefficient, measured or assumed." That is
+  incorrect: `1 - x/y` divides one z by another, which *is* the assumption that
+  the candidate should move as many of its own sigmas as the leader moved of
+  its — a standardised pass-through of exactly 1.0. Measured, that coefficient
+  is +0.18 contemporaneously and statistically zero forward, and its
+  interaction with the leader's shock size is null (−0.050 (0.223), z=−0.22;
+  −0.031 (0.101), z=−0.31 on the replication). The quantity `room` treats as
+  proportional to `y_component` is not proportional to it at all, so the
+  division is arithmetic, not economics.
+  **(2) The ordering does not predict.** Thesis-signed forward return regressed
+  on the ratio: −0.036 (0.112), z=−0.32; replication +0.022 (0.275), z=+0.08.
+  Flat, both signs, neither significant.
+  **(3) The buckets are interchangeable.** Linked-minus-control forward premium
+  is *identical* for `open` and `opposed` in both samples (+0.084/+0.084;
+  −0.206/−0.206) — and the two samples disagree on the sign, which is itself the
+  finding: the level is sampling noise.
+  The alternative that lost was keeping `room` "honestly labelled" with the
+  nulls stated on the page. Rejected because a sort key presented at all is a
+  claim about which names deserve attention, and this null is now *measured*,
+  not merely unmeasured — the distinction this project has drawn everywhere
+  else. Deleting only the `responded` bucket also lost: it would have left the
+  unfounded denominator in place.
+  Scope note, logged as two different claims: `room`'s magnitude is
+  **unfounded** (assumes a contradicted coefficient); the open/opposed sign
+  test is **sound in construction but non-predictive in fact** — it never
+  divides, so it assumes no pass-through; it is deleted on (3), not on (1).
+- **Outcome:** Done, in `b4fa3d7`. `room`, `origin_status`, `rank_by_room` and
+  the `lag_response` `Evidence` unit are gone (`grep -rn 'lag_response' src/`
+  returns nothing); each scan card now carries one inert sentence, e.g.
+  "COHR has moved +0.03σ toward the thesis; surfaced by DELL." Verified on a
+  live scan: descriptions render, no card prints `null`, and the pre-existing
+  verdict pills still colour correctly. 111 passed / 9 skipped (from 118),
+  `check_baseline.py --synthetic` unchanged at 6 identical rows at every phase
+  boundary. The falsifiable pin that `description` never votes is
+  `test_description_flows_through_to_assessment_without_affecting_verdict`'s
+  exact `effective_evidence == 1.0`.
+  Two side effects worth recording: Q-40 became moot (nothing left to collide
+  with), which in turn let the replacement tests call `retrieve_neighbourhood`
+  for real — closing the old suite's caveat that its "end-to-end" only held
+  from `leader_state` onward. And the D-85 admit gate was kept in simplified
+  form (`if not leaders and not c.origin_leader`). **Correction:** the
+  "11-of-19 candidates it made visible" claim repeated here is wrong — see
+  D-85's corrected Outcome. Those 11 had 20 neighbours each and were always
+  being assessed; what they lacked was any neighbour that *moved*. The gate
+  change is right in principle and observably inert. D-27 governs evidence
+  *sourcing*, not display, and a description cannot manufacture confluence
+  because it is not evidence.
+- **Status:** Accepted — supersedes D-84
+
+### D-88 — The supply graph's contemporaneous effect is a selection artefact, not a supply-chain effect
+- **When:** 2026-09-09T03:50:00-05:00
+- **Decision:** Record that the linked-vs-control co-movement this project has
+  been reading as a supply-chain effect is explained by trailing correlation,
+  and **do not act on it in this change** — the page's claims about the graph
+  need revisiting on their own terms, not as a side effect of removing `room`.
+- **Why:** suppliers of a shocked leader are, first and foremost, names with
+  much higher trailing correlation to that leader. Date-paired linked minus
+  matched control, netting out each pair's own trailing 60-day correlation
+  (`resid = x_component − ρ·y_component`):
+
+  | | consult (432 dates) | replication (30 dates) |
+  |---|---|---|
+  | trailing ρ with leader | +0.176 (0.007), z=+24.85 | +0.245 (0.025), z=+9.98 |
+  | `x_component` | +0.360 (0.035), z=+10.17 | +0.363 (0.112), z=+3.23 |
+  | residual `x − ρ·y` | −0.093 (0.031), z=−2.98 | −0.317 (0.125), z=−2.54 |
+
+  The raw co-move agrees to three decimals across two independent
+  reconstructions, and once ρ is removed the supply-specific excess is not
+  merely absent but **negative and significant in both** — linked names respond
+  *less* than their own trailing correlation predicts. At this horizon the
+  supply graph is a correlation filter with extra steps, and the correlation
+  path was already nulled (README: −4.6 bp, z=−0.72; D-59/D-60 found the lag-0
+  edge tautological). This does not automatically condemn the scan — the graph
+  supplies *direction* and an interpretable rationale, and the forward
+  membership premium (+0.084σ, z≈1.6, not established) is not derived from ρ —
+  but the contemporaneous number can no longer be cited as evidence the graph
+  adds anything over a correlation screen. Logged rather than acted on because
+  it bears on the whole GraphRAG premise and deserves its own measurement, the
+  way Q-38 did.
+- **Outcome:** pending — see Q-42
+- **Status:** Accepted
+
+### D-89 — A join node whose in-edges land in different supersteps fires twice; the news node stays where it is
+- **When:** 2026-09-09T05:05:00-05:00
+- **Decision:** `vector_retriever` keeps fanning out from `route_on_neighbourhood`,
+  in the same `Send` wave as `leader_state`. The proposal to dispatch it from
+  `START` — so news retrieval runs concurrently with `graph_retriever` rather
+  than after it — is **rejected as unsafe**, not deferred.
+- **Why:** the proposal assumed LangGraph runs a join node once regardless of
+  which superstep each input arrives in. That is false on the installed
+  version. Reproduced twice independently, with a minimal graph mirroring this
+  one's exact shape (`START -Send-> {A,V}`; `A -Send-> L`; `L,V -> J`):
+
+      J fired 2 time(s):
+        a_out=['a:X']         v_out=['v:X']    <- partial, L had not run
+        a_out=['a:X','l:X']   v_out=['v:X']    <- full
+
+  `context_fusion` runs exactly once today *because* both its sources are Sent
+  by the single `route_on_neighbourhood` call and therefore complete in one
+  superstep. Moving `vector_retriever` to `START` would put it a full superstep
+  ahead of `leader_state` (which genuinely depends on `graph_retriever`), so
+  `context_fusion` would fire once on partial state — `leader_shocks` not yet
+  written, every `movers` list empty, and a spurious "no shock for candidate's
+  own move" error appended for `origin_leader` candidates whose shock simply
+  had not arrived — and again on complete state. Because `evidence` and
+  `errors` use `Annotated[..., add]`, the two passes are **concatenated, not
+  replaced**. `evidence_by_key` would self-heal (dict `_merge`, last write
+  wins); the flat channels several tests read directly would not.
+  Two alternatives lost: reopening `defer=True` (declined by D-35, and this is
+  not a strong enough reason to reverse it), and making `fuse_evidence`
+  idempotent (rewrites the well-tested Q-12 cluster-discount logic to buy
+  diagram accuracy — disproportionate).
+  A third, narrower change was offered and also declined: ungating
+  `vector_retriever` from `lag_edges` so dropped candidates still get news.
+  It is safe, but it does **not** move the node in the diagram — which was the
+  entire motivation — and it buys an invisible gap (no surface displays news
+  for an unassessed candidate) at the cost of a vector query per dropped
+  candidate plus a phantom `news_by_key` entry. Declined as work that does not
+  serve its own stated goal.
+  What remains true and is worth stating plainly: `vector_retriever` has **no
+  data dependency** on the graph half (D-83 reduced its query to `c.symbol`
+  alone), so its position is a scheduling artefact, not a requirement. The
+  pipeline is ordered the way it is because of how the join is built, not
+  because news needs the graph. That is now a presentation problem, handled by
+  rewriting the page's narrative rather than the topology.
+- **Outcome:** pending — no code changed; `src/lagmatrix/graph/nodes/vector_retriever.py`'s
+  docstring was corrected in `829d279` to stop claiming the node reads the
+  leader list.
+- **Status:** Accepted
+
+### D-90 — The pipeline has no lag in it, and the premise it is named for has been tested twice and failed
+- **When:** 2026-09-09T05:40:00-05:00
+- **Decision:** State plainly, in the log and on the page, that the shipped
+  pipeline is a **contemporaneous co-movement detector with a supply-chain
+  overlay** — not a lead-lag engine — and build the symbol-in mode the project's
+  stated purpose implies as a **descriptive** feature: relationships and
+  history, never a prediction.
+- **Why:** the user restated the goal as "given a leader, find followers it
+  affected historically, and show how the leader might move them." Checked
+  against the code, none of that is implemented as stated:
+  `graph_retriever.py:61` creates every correlation edge with
+  `lag_days=0,  # contemporaneous correlation; lag estimation is future work`,
+  and `lag_days` on a supply edge is graph *hops*, not time. Nothing in
+  `src/` computes a lagged relationship at all; the only shifted-series code is
+  in one-off `scripts/` experiments.
+  The premise itself is not merely unbuilt — it is measured null at both scales
+  anyone has tried, each pre-registered before the data was seen:
+  **D-59/D-60** (intraday, 1,174,267 minute bars, 83 candidate-dates, funds
+  excluded): 89.2% of dates peak at **lag 0**, sign test 16 up / 25 down,
+  **p = 1.000**; and **D-73/D-74** (daily, `supplier_excess(t+1) = a + b ·
+  customer_excess(t)`, threshold |b| >= 0.02): pooled **b = −0.0015**, z = +0.43.
+  D-88 then showed the contemporaneous supply co-move is explained by trailing
+  correlation with a *negative* residual. D-60's own words: "Genuine non-fund
+  peers move **with** the candidate at minute resolution, not before it, so the
+  condition the pipeline looks for — neighbours moved while the candidate has
+  not — barely occurs."
+  The alternative that lost was building the propagation estimate anyway, in
+  some softened form. Rejected for the same reason D-87 deleted `room`: it
+  would assert the one quantity this project has now gone looking for three
+  times and not found. What is left, and is genuinely worth building, is the
+  half that needs no forecast — a symbol-in front door (absent today; there is
+  no way to ask "given AAPL, show me its followers") and a per-pair track record
+  drawn from history, with its `n` stated, whose most likely honest reading is
+  "nothing consistent here".
+- **Outcome:** pending — planned in `docs/plans/PLAN-2026-09-09-leader-in.md`.
+- **Status:** Accepted
+
+### D-91 — Expose how many neighbours were checked, so a negative result reads as one
+- **When:** 2026-09-09T05:50:00-05:00
+- **Decision:** `fuse_evidence` returns `neighbours_by_key: dict[str, int]` —
+  `len(leaders)`, the count of price-correlated neighbours considered — threaded
+  onto `Assessment.neighbours: int`. The card can then say "20 related companies
+  checked, none moved unusually" instead of a bare
+  `0 supporting · 0 contradicting · effective evidence 0`.
+- **Why:** the user's objection was that a reader cannot tell "we looked and
+  found nothing" from "we didn't look". Investigating that produced a
+  correction to my own earlier claim (see D-85's Outcome): the second state
+  essentially does not occur — `topk=20` against a 3,204-symbol universe gives
+  every candidate 20 neighbours, and all 19 on the 2026-05-11 scan had exactly
+  20. So the real problem is narrower and simpler than stated: the *common*
+  outcome, "checked twenty, none moved", is currently indistinguishable from
+  nothing having happened at all. Exposing the count makes a null result legible
+  as a null result rather than as an absence.
+  `len(movers)` is deliberately **not** exposed: every mover produces exactly
+  one `Evidence`, so `len(movers) == n_supporting + n_contradicting`, which the
+  card already shows. One new number, not two.
+  The alternative that lost was rewording `rationale`, which already exists and
+  is already displayed. Rejected because `rationale` is prose assembled for the
+  contradicted case and is not machine-readable; a caller wanting the count
+  would have to parse English out of it.
+  **The invariant, and the reason it is stated here rather than assumed:** this
+  count carries no weight, never enters `effective_evidence`, and is never
+  rendered as a quality or confidence score. D-87 deleted `room` for being a
+  presented number that implied a claim the measurements did not support; a
+  neighbour count is a fact about what the pipeline did, and must stay that.
+  Pinned by a test asserting `effective_evidence` is unchanged across two runs
+  whose neighbour counts differ.
+- **Outcome:** Done. The count reaches the card, which was the whole point and
+  was missing until now — the field shipped in `889a3f2` but was never put in the
+  SSE payload, so it existed and nobody could see it. A scan card now reads
+  `0 supporting · 0 contradicting · effective evidence 0 · 20 related companies
+  checked, none moved unusually` instead of trailing off after the zero. The
+  invariant holds: `test_neighbours_count_never_affects_effective_evidence`
+  still requires 1.0 with three leaders and with one.
+- **Status:** Accepted
+
+### D-92 — Pre-registration: does a shock propagate along the supply chain with a hop-dependent delay?
+- **When:** 2026-09-09T06:05:00-05:00
+- **Decision:** Run one test, specified in full **before any result is seen**,
+  of the project's central and still-untested claim. D-73/D-74 tested exactly
+  one cell of the relevant grid — hop 1, t+1, pooled, `b = −0.0015`. This tests
+  the *shape* across hops and horizons instead.
+
+  **Population.** The 818 `supplies_to` edges: 76 customers, 105 suppliers.
+  Hop 1 = a direct supplier of the leader; hop 2 = a supplier of one of those.
+  A (leader, follower, episode) triple is admitted only when the linking
+  filing's `filing_date <= ` the episode date (D-16 point-in-time, the same
+  guard `laggers_of` applies). Measured before writing this: **741 hop-1 pairs,
+  14,416 triples**, 67 leaders with ≥2σ episodes, median 18 episodes per pair
+  over 2016-09-06..2026-09-04. Hop-2 counts are not yet measured and are part
+  of the run.
+
+  **Episode.** A leader's non-overlapping 3-session window with `|z| >= 2.0`
+  on `shocks.standardised_moves` against a 60-session baseline — the same
+  definition `MarketScan.shocked_leaders` already uses, so the test measures the
+  thing the product actually keys on.
+
+  **Response.** For each follower, thesis-signed market-excess return over
+  `h ∈ {1, 2, 3, 5, 10}` sessions after the episode window, normalised by that
+  follower's own trailing volatility, market-excess against the equal-weighted
+  universe — matching D-73/D-74's construction so results are comparable.
+
+  **Primary test, one only.** Pooled OLS
+
+      excess(F, h) = a + b1·hop2 + b2·late + b3·(hop2 × late)
+
+  where `late = 1` for `h ∈ {5, 10}` and `0` for `h ∈ {1, 2}`. The propagation
+  story predicts **b3 > 0**: a hop-2 follower's response is relatively more
+  concentrated at longer horizons than a hop-1 follower's. This is a single
+  prediction about *ordering*, deliberately chosen over testing 20 grid cells
+  separately, where roughly one would clear α=.05 by chance.
+
+  **Economic threshold, declared now: b3 >= 0.25σ.** Chosen for cost, not for
+  significance: below roughly 0.25 of a follower's own sigma (~0.5%) a timing
+  differential cannot survive a round trip, whatever its p-value.
+
+  **Errors clustered by date** — every chain shares one market shock on a given
+  session. D-71's lesson, applied in advance rather than discovered afterwards.
+
+  **Mandatory secondary, from D-71:** the same interaction estimated per year,
+  with Cochran's Q and I². A pooled estimate resting on one regime is reported
+  as such.
+
+  **Decision rule, pre-committed.** Claim hop-dependent propagation only if
+  `b3 >= 0.25` **and** `z >= 2` with date-clustered errors **and** I² < 75%.
+  Any other outcome — including a large but heterogeneous estimate, or the right
+  sign below threshold — is reported as a null and closes the question.
+
+  **Power, stated before running.** D-88 established the binding constraint is
+  chains, not dates: 105 suppliers co-move, so effective independent information
+  is far below 14,416. The run reports its own realised MDE alongside the
+  estimate; if MDE exceeds the 0.25 threshold the test could not have detected
+  the effect it was looking for and is reported as **underpowered, not null** —
+  the distinction D-73 got wrong and D-74 existed to fix.
+- **Why:** the alternative was looking at the grid first and pre-registering
+  only if it looked promising. Rejected: D-59's own record notes that silently
+  amending a design after seeing the result "would be choosing the analysis
+  after seeing the result", and this project's credibility rests on not having
+  done that. Registering costs one commit.
+- **Outcome:** **Run, and the honest verdict is UNDERPOWERED, not null — the
+  graph is one hop deep.** `scripts/experiment_hops_days.py`, 14,115 triples,
+  67 leaders, 98 followers, 461 dates.
+
+      hop-1 pairs 117      hop-2 pairs 6
+      n per cell: hop 1 -> 2,797     hop 2 -> 26
+
+      PRIMARY (date-clustered)
+        hop2 x late  +0.1232 (0.1387)  z = +0.89
+        realised MDE = 0.3884 sigma    threshold = 0.25   -> UNDERPOWERED
+      SECONDARY  4 yearly estimates, Q = 0.8, I^2 = 0%
+                 per-year b3: +0.34  -0.24  +0.07  +0.24
+
+  `b3` carries the **predicted sign** but the realised MDE (0.39) exceeds the
+  pre-declared threshold (0.25), so by D-92's own rule this cannot be reported
+  as a null: the test could not have detected the effect it was looking for.
+  Recording it as a null would repeat exactly the error D-73 made and D-74 was
+  written to correct.
+
+  **The cause is structural and is the finding worth keeping.** A hop-2 path
+  needs a supplier who is themselves a customer with suppliers. Measured:
+  **4 of 105 suppliers qualify (4%)** — BKR, GEV, HWM, QRVO — which is why only
+  6 hop-2 pairs exist. The graph is 76 stars of median 3 suppliers, not a
+  network, because only the *customers'* 10-K disclosures were ever ingested and
+  their suppliers were left as leaves. The hops dimension the product's whole
+  premise rests on is not testable against this graph at any sample size, and no
+  amount of additional price history changes that (D-88's "chains, not dates",
+  now with a specific cause).
+
+  **What it would take**, stated concretely so it is actionable: ingest the
+  customer-concentration disclosures of the 105 existing suppliers, turning
+  leaves into interior nodes. That is the same `edgar/relations.py` pipeline
+  already built and audited (D-78), pointed at a different set of filers — a
+  data-acquisition task with a known method, not a modelling problem.
+- **Status:** Accepted — result is *underpowered*, question remains open; see Q-45
+
+### D-93 — Pre-registration: does ANY lagged pairwise structure survive out-of-sample, across the whole history?
+- **When:** 2026-09-09T06:30:00-05:00
+- **Decision:** Test the project's premise at full scale and in its most general
+  form, specified **before any result is seen**. Not news-anchored, not
+  supply-graph-restricted: every pair of symbols, every lag, ten years.
+
+  **Data.** `data/bars-10y.parquet` — 2,183 symbols, 2,514 sessions
+  (2016-09-06..2026-09-04). Returns are **market-excess** (each session's
+  equal-weighted universe mean subtracted) before anything else. Without this
+  every pair correlates through market beta and the exercise measures the index.
+
+  **Split, by time, no shuffling.** Discovery = the first 60% of sessions.
+  Validation = the last 40%. A pair selected in discovery is tested only on
+  validation. This is the entire defence against 4.8M pairs per lag: at α=.05,
+  roughly 240,000 pairs would clear on noise alone, so in-sample significance
+  is worthless and is not used as a criterion anywhere.
+
+  **Lags.** `k ∈ {1, 2, 3, 5, 10}` sessions. For each k, the full pairwise
+  lagged correlation `corr(X_t, Y_{t+k})` over the discovery window.
+
+  **Selection.** The top 1,000 pairs by `|lagged corr|` in discovery, per lag.
+  Self-pairs excluded. Both directions of a pair are distinct (X leads Y is not
+  Y leads X).
+
+  **Primary test, one only.** Of those selected pairs, what fraction show the
+  **same sign** of lagged correlation in the validation window? Under the null
+  that discovery found only noise, this is 50%. Binomial test against 0.5.
+
+  **Economic threshold, declared now: sign-agreement >= 60%, AND mean
+  |lagged corr| in validation >= 0.03.** The second condition matters
+  independently: a 58% sign rate on correlations of 0.004 is statistically
+  detectable at n=1,000 and economically nothing. Both must hold.
+
+  **Decision rule, pre-committed.** Claim exploitable lagged structure only if
+  a lag `k` shows sign-agreement >= 60% **and** validation mean
+  `|corr| >= 0.03` **and** binomial p < 0.01. Anything else — including a
+  significant sign rate on trivial magnitudes — is a null for that lag, and a
+  null at every lag closes the question.
+
+  **Mandatory secondary.** Report the same statistics for a **shuffled control**:
+  the identical procedure with validation-window dates randomly permuted, which
+  destroys any real lead-lag while preserving each series' own distribution. If
+  the control shows a comparable sign-agreement rate, the primary result is an
+  artefact of the procedure rather than of the market, and is reported as such
+  regardless of what the primary number was.
+
+  **Power.** n=1,000 selected pairs per lag gives a standard error on the sign
+  rate of ~1.6pp, so 60% vs 50% is detectable with wide margin. Unlike D-92,
+  this test is not sample-limited — if it returns a null, that null is real.
+- **Why:** the alternative was scanning for pairs and reporting the best ones,
+  which is what almost every version of this idea does and is exactly how
+  240,000 false positives get published as a signal. Out-of-sample validation
+  costs one extra window and makes the answer trustworthy either way. The
+  shuffled control was added because a time-split alone does not protect against
+  a procedural artefact (e.g. persistent volatility clustering producing sign
+  agreement with no lead-lag content at all).
+  Also rejected: restricting to the supply graph or to news-anchored events.
+  Both are strict subsets of this test, both are coverage-limited (76 customers;
+  20 months of articles), and both have already returned nulls or underpowered
+  results (D-74, D-88, D-92). If general lagged structure does not exist, no
+  subset of it will.
+- **Outcome:** **NULL at every lag, and this one is properly powered.**
+  `scripts/experiment_lag_matrix.py`. 1,573 symbols cleared 90% coverage in both
+  windows — **2,472,756 directed pairs per lag**. Discovery 2016-09-07..
+  2022-08-31 (1,507 sessions), validation 2022-09-01..2026-09-04 (1,006).
+
+      lag  sel |c| disc  val mean |c|  sign agree      p    shuffled control
+        1       0.2059        0.0281      52.9%   3.6e-02        47.0%
+        2       0.1776        0.0248      48.2%   8.8e-01        49.6%
+        3       0.1820        0.0247      47.6%   9.4e-01        51.8%
+        5       0.2456        0.0261      50.4%   4.1e-01        74.9%
+       10       0.1663        0.0280      38.7%   1.0e+00        42.0%
+
+  No lag met any of the three pre-committed conditions. Sign agreement never
+  reached 60% (best 52.9%); validation `|corr|` never reached 0.03 (best 0.028,
+  against in-sample selections of 0.17-0.25); and the **shuffled control matched
+  or beat the real result at four of five lags** — at lag 5, 74.9% against 50.4%
+  — so what agreement exists is generated by the procedure, not by the market.
+  **This is a real null, not an underpowered one.** SE on the sign rate is
+  ~1.6pp at n=1,000; a genuine 60% effect could not have been missed. That
+  distinction is why D-93 was designed with a fixed n rather than whatever the
+  data happened to supply, after D-92 could not answer its own question.
+  The selected pairs show the mechanism directly: `TPC → TRGP` +0.379 in
+  discovery and +0.043 in validation; `BTU → PLUG` +0.359 → −0.022. `TPC` takes
+  four of the top ten slots — one series with unusual variance manufacturing
+  partners. Selecting the best of 2.47M pairs produces correlations of 0.38 that
+  are worth 0.04 the moment they are asked to predict anything.
+  **What this closes.** Supply-graph propagation (D-74, D-88, D-92) and
+  news-anchored co-movement are strict subsets of this test. A subset cannot
+  contain structure the superset does not have, so those lines of enquiry are
+  closed too — not for want of coverage, which was the D-92 story, but because
+  the thing they were looking for is not in the data at any lag. Q-45
+  (deepening the graph) would still improve coverage, but it can no longer be
+  justified as a route to finding propagation.
+  **What survives.** Everything descriptive: the supply edges and their filing
+  sentences, the news retrieval, contemporaneous co-movement, and the honest
+  reporting of all of it. What does not survive is any claim that a leader's
+  move anticipates a follower's.
+- **Status:** Accepted — the premise is answered, negatively and with power
+
+### D-94 — Two-hop chains beat a coin flip on direction and carry no magnitude; the hops idea closes
+- **When:** 2026-09-09T06:55:00-05:00
+- **Decision:** Close the multi-hop propagation line. Chains are not a route to
+  a prediction, and the product will not claim one.
+- **Why:** D-93 tested every *direct* pair and found nothing that replicates,
+  which already implies most of this — a chain is built from links, and a
+  two-hop path X→Y→Z with delays k1, k2 implies a direct X→Z relationship at
+  lag k1+k2, itself one of the 2.47M pairs D-93 nulled. But that argument does
+  not exclude a *conditional* effect: X predicting Z only when Y also moved, in
+  a way that cancels out of the marginal. That is a genuinely different
+  hypothesis, so it was tested rather than argued away
+  (`scripts/experiment_chains.py`, same windows, same market-excess
+  construction, same out-of-sample discipline).
+  890 chains formed from the 300 strongest links per leg, X-(1)->Y-(2)->Z,
+  evaluated as X→Z at lag 3:
+
+      chained X->Z             disc |c| 0.1113   val |c| 0.0250   sign 57.6%
+      random pairs, same lag   disc |c| 0.0265   val |c| 0.0248   sign 52.9%
+      binomial p vs 50%: 2.9e-06        lift over random: +4.7pp
+
+  **The sign effect is real and the magnitude effect is absent.** Chained pairs
+  agree on direction 57.6% of the time out of sample, p = 2.9e-06 — not noise.
+  But their validation `|corr|` is 0.0250 against random pairs' 0.0248: the same
+  number. Knowing the direction 57.6% of the time on an expected move of 0.025σ
+  (~0.05%) is not tradeable and is not a basis for any claim on the page.
+  Note also that random pairs score 52.9%, not 50% — the same procedural bias
+  D-93's shuffled control exposed at four of five lags. Measured against that
+  honest baseline the chain lift is **+4.7pp, not +7.6pp**, which is the number
+  that would have been reported by anyone comparing to a theoretical 50%.
+  Recorded as a null by the pre-committed standard (sign >= 60%, p < 0.01,
+  lift > 5pp): it fails the sign threshold and the lift threshold, and has no
+  magnitude at all.
+- **Outcome:** Verified. Together with D-93 this closes the premise: no direct
+  lagged structure, and no conditional structure via chains beyond a
+  sign-only effect with no size. What remains defensible is descriptive —
+  relationships, filings, news, contemporaneous co-movement — none of it
+  predictive.
+- **Status:** Accepted
+
+### D-95 — Contemporaneous co-movement replicates out of sample; the graph should be built from it
+- **When:** 2026-09-09T07:15:00-05:00
+- **Decision:** Build the graph from **measured co-movement over price history**,
+  with a calibrated out-of-sample confidence interval on every edge, rather than
+  from 10-K disclosures alone. The confidence number describes **how reliably two
+  names move together**, never what one does after the other.
+- **Why:** every lagged test failed (D-74, D-88, D-92, D-93, D-94). Nobody had
+  tested **lag 0** out of sample, and D-60 had already hinted it was the live
+  quantity — genuine peers at median rho 0.505 against 0.226 for controls,
+  peaking at lag 0 on 89.2% of dates. Run through D-93's own machinery, same
+  windows (discover 2016-09..2022-08, validate 2022-09..2026-09), 1,573 symbols:
+
+      lag 0, top 1000 pairs   disc |c| 0.8268  val |c| 0.7834  retained 94.8%
+      lag 1 (D-93)            disc |c| 0.2059  val |c| 0.0281  retained 14%
+
+  And across **1,236,371 pairs**, with same-company artefacts screened
+  (`|disc corr| >= 0.95` removed — 7 pairs: GOOGL/GOOG, Z/ZG, FOX/FOXA,
+  NWS/NWSA, plus NATL/LINE at exactly +1.000 flipping to −0.325, which is a data
+  artefact, not a market fact), `corr(discovery, validation) = 0.640`:
+
+      disc band        n        val mean   val sd   sign holds
+      0.3-0.40   115,155           0.260    0.121        98.7%
+      0.4-0.50    39,990           0.350    0.139        98.1%
+      0.5-0.60    12,291           0.460    0.164        96.2%
+      0.6-0.70     4,707           0.587    0.167        98.1%
+      0.7-0.95     2,214           0.712    0.129        99.5%
+
+  A pair measured at 0.6-0.7 lands at 0.587 ± 0.167 four years later with its
+  sign intact 98% of the time. The shrinkage is mild and consistent, which is
+  what makes an interval honest rather than decorative.
+  **Two things stated so they are not mistaken later.** (1) D-93's shuffled
+  control is **invalid at lag 0** — permuting dates permutes both series
+  together and preserves contemporaneous correlation exactly. It scored an
+  identical 99.6% and tests nothing here; the out-of-sample split is the real
+  control. (2) The confidence is about the *relationship*, not a forecast.
+  Same-day co-movement replicates at 0.640; next-day prediction replicates at
+  0.028. The product may state the first and must never imply the second.
+  Coverage, which blocked everything else: **1,573 symbols** with measurable
+  relationships against **76 customers** in the filings graph — about 20x — and
+  it needs no new data collection, which is what Q-45 would have required.
+- **Outcome:** Built and in production use. `src/lagmatrix/comovement.py`
+  (14 tests), persisted via `upsert_comovement` into `moves_with` (23,857 edges
+  as of 2026-09-04), read by `/followers`, and driving `CoMovementFollowers` as a
+  third `CandidateSource`. Coverage is 1,709 symbols against the filings graph's
+  76. Face validity on real data is the strongest evidence it works: PANW returns
+  CRWD/FTNT/OKTA/TENB/ZS, PFG returns MET/LNC/PRU/VOYA/CNO/AMP, JBL returns
+  AEIS/BHE/LRCX/KN/FN — sectors nobody encoded anywhere.
+  **Corrected by D-100:** every `0.640` above is the figure as measured on
+  2026-09-09 and is wrong. Eleven corrupt returns (>1000%) inflated it; the
+  replication coefficient is **0.586**. The conclusion — co-movement replicates
+  out of sample, next-day prediction does not — is unchanged. Read D-100 before
+  quoting any number from this entry.
+- **Status:** Accepted
+
+### D-96 — A shocked symbol's own next move is a coin flip; show the distribution, not a direction
+- **When:** 2026-09-09T07:35:00-05:00
+- **Decision:** The leader carries its own probabilistic move on the page, stated
+  as a **distribution centred on zero**, never as an expected direction.
+- **Why:** measured on the D-93/D-95 split, 40,545 held-out episodes across
+  2,153 symbols, thesis-signed market-excess in the symbol's own sigma units:
+
+      h    disc mean   val mean   val sd    val n   val P(continue)
+      1      -0.0442    -0.0137    1.802   40,545        48.3%
+      3      -0.0324    -0.0041    1.447   40,545        48.7%
+      5      +0.0046    +0.0151    1.426   40,545        49.4%
+     10      +0.0021    -0.0741    1.401   40,545        48.0%
+
+  After a >= 2σ move a symbol goes nowhere in particular: mean within ±0.015σ of
+  zero at every horizon, sd ~1.4σ, and it continues in its own direction 48-49%
+  of the time — very slightly *against* continuation. No monotone pattern by
+  shock size either (2-2.5σ: 48.9%; 4-6σ: 52.2%; 6σ+: 49.6%). At n=40,545 this
+  is well powered, not a shrug.
+  The honest presentation is therefore the spread, not a point: "after moves this
+  size this name has historically gone nowhere in particular — 68% of outcomes
+  within ±1.4σ, continuing 48% of the time." That tells a reader not to chase,
+  which is real information, and it is the only probabilistic statement about a
+  single symbol this data supports.
+- **Outcome:** Done. Shown in the explorer beneath the follower list, as a
+  distribution rather than a direction: "it continued in the same direction 48.7%
+  of the time — a coin flip — with a spread of ±1.43σ around zero".
+- **Status:** Accepted
+
+### D-97 — The loaders drop collections; nothing may run daily until they upsert
+- **When:** 2026-09-09T07:35:00-05:00
+- **Decision:** Before any scheduled ingest, `load_vectors.py` and
+  `load_arango.py` must become **incremental and non-destructive**: upsert by
+  stable key, never `_drop`. `load_news.py` is already correct and is the model.
+- **Why:** found while scoping the daily pipeline.
+  `load_vectors.py:84` runs `if (db._collection("article")) { db._drop("article"); }`
+  and `load_arango.py:89` does the same for its collections — full rebuilds, not
+  updates. `load_arango.py:85` already carries the comment recording that this
+  exact pattern "destroyed 47,640 embeddings and their vector index". Scheduling
+  them daily would re-embed the entire corpus every night and drop live
+  collections each time, converting a one-off accident into a nightly one.
+  `load_news.py` shows the shape that works: stage into a temp table, merge with
+  `ON CONFLICT DO NOTHING`, record coverage per (symbol, window) so a resumed run
+  skips what it has. That is what the other two need.
+- **Outcome:** Done, in `43d424e`. Both loaders create-if-absent and never drop;
+  `grep -n '_drop' scripts/load_arango.py scripts/load_vectors.py` now returns only
+  docstrings explaining what was removed. Documents upsert on stable keys —
+  articles on their Alpaca id, supply edges on `f"{supplier}->{customer}"`, and
+  co-mentions likewise — so a re-run refreshes what it touched, and two filings
+  restating the same relationship collapse to one edge instead of doubling the
+  graph. The JS text and the document shaping are extracted as importable
+  functions and tested directly (6 tests), since the
+  `ssh -> kubectl -> arangosh` transport is not exercisable here (Q-43's gap).
+  148 passed, 0 skipped.
+- **Status:** Accepted
+
+### D-98 — ArangoDB is a tunnelled k8s pod, not a local container; a reboot needs two commands
+- **When:** 2026-09-09T08:20:00-05:00
+- **Decision:** Record the recovery procedure in the log, because a host reboot
+  breaks it silently and the failure mode looks like data loss.
+- **Why:** the dev machine restarted mid-session and ArangoDB "disappeared". It
+  had not. The database is a pod in a k8s cluster on another host and is reached
+  through **two** forwarding hops, both of which die with the machine:
+
+      remote:  kubectl -n lagmatrix port-forward deploy/arangodb 19999:8529
+      local:   ssh -f -N -L 19999:127.0.0.1:19999 ridopark@192.168.10.123
+
+  `docker ps` shows nothing relevant, which is what makes it look like the
+  container was lost. After restoring both hops: `equity` 514, `supplies_to`
+  818, `co_mentioned` 2,129, `article` 47,640 — everything intact, pod uptime
+  33h. The command is documented at `scripts/capture_showcase.py:151`; this
+  entry exists so it is also findable from the log.
+  **The suite's behaviour during the outage was correct and worth noting**: the
+  9 live tests skipped rather than failing, which is exactly the default Q-43
+  chose for a machine with no tunnel, and `LAGMATRIX_REQUIRE_LIVE=1` is what
+  turns that into an error when a database is expected. The co-movement work
+  (D-95) reads parquet only, so `/movers` and `/followers` kept working
+  throughout — worth knowing that the new direction has no hard dependency on
+  the graph store being up.
+- **Outcome:** Verified — restored and confirmed, 148 passed 0 skipped after.
+  **It then died a second time, unprompted, within the hour**, which changed
+  this from a reboot procedure into a script: `scripts/arango_tunnel.sh`,
+  idempotent, safe to re-run.
+  Two things learned the second time that the first recovery missed.
+  **(1) `nohup` is not enough on the remote** — the `kubectl port-forward`
+  did not survive its ssh session closing; it needs
+  `setsid nohup … </dev/null &  disown`.
+  **(2) A listening socket is not proof the path works.** The local ssh tunnel
+  stays up and keeps accepting connections after the remote forward dies, so
+  `serve.arango_db()`'s TCP pre-check reported "reachable" while every query
+  aborted with `ConnectionAbortedError`. The script probes the HTTP endpoint
+  instead. That pre-check in `serve.py` has the same weakness and is left
+  alone for now — it degrades to an empty follower count rather than a crash,
+  and `/followers` is unaffected because co-movement reads parquet.
+- **Status:** Accepted
+
+### D-99 — Pre-registration: after a shock, do the shocked name's co-movement partners move the next day?
+- **When:** 2026-09-09T12:10:00-05:00
+- **Decision:** Test the one form of the lag hypothesis the earlier tests did not
+  cover, specified **before any result is seen**.
+
+  **Why this is not already answered.** D-93 tested lagged correlation
+  *unconditionally* over all 2.47M pairs and found nothing. D-96 tested what the
+  *shocked symbol itself* does next and found a coin flip. Neither tested the
+  conditional, partner-directed version: *given X moved >= 2σ on day t, do the
+  names that reliably move WITH X move on day t+1?* An unconditional null can
+  coexist with a tail effect that only fires after large moves, so this is a
+  distinct hypothesis and worth one test.
+
+  **Population.** Every shock episode in `data/bars-10y.parquet` (2,183 symbols,
+  2,514 sessions): a non-overlapping 3-session window with `|z| >= 2.0` against a
+  60-session baseline — the same definition `MarketScan.shocked_leaders` uses.
+  Partners are that symbol's co-movement edges at `|corr| >= 0.5` measured over
+  the 250 sessions ending **strictly before** the episode (D-16; the partner set
+  is chosen on past data only, so nothing is selected on the outcome).
+
+  **Response.** Each partner's market-excess return on the **single session after
+  the episode window**, normalised by its own trailing volatility, and signed to
+  the thesis: `sign(z_X) * sign(corr)` — a negatively correlated partner is
+  expected to move the other way, and gets the opposite sign.
+
+  **Control.** For every episode, an equal number of symbols drawn at random from
+  the same session's universe that are **not** partners of X, measured
+  identically. This is the D-88 lesson: without a control, any market-wide day
+  looks like an effect.
+
+  **Primary test, one only.** Mean partner response minus mean control response,
+  errors **clustered by date** (D-71 — every chain shares one market shock).
+
+  **Economic threshold, declared now: >= 0.10σ.** Below roughly a tenth of a
+  partner's own sigma (~0.2%) the move cannot survive a round trip, whatever the
+  p-value.
+
+  **Decision rule, pre-committed.** Claim next-day propagation only if the
+  partner-minus-control difference is `>= 0.10σ` **and** `z >= 2`. Anything else
+  is a null, including the right sign below threshold.
+
+  **Power, reported with the result.** The run states its realised MDE. If the
+  MDE exceeds 0.10 the test could not have found what it sought and is reported
+  as underpowered rather than null — the distinction D-92 had to make and D-93
+  was designed to avoid.
+- **Why:** the alternative was answering from the earlier nulls by analogy. That
+  would have been wrong: the conditional hypothesis is genuinely untested, the
+  machinery to test it already exists, and the cost is one script.
+- **Outcome:** **NULL, and this one is adequately powered.** 1,316,228 partner
+  observations against 1,351,974 controls, over **751 date clusters**,
+  2017-09-07..2026-08-31:
+
+      partner (next session)   -0.0001σ
+      control                  -0.0006σ
+      partner - control = +0.0005 (0.0174)   z = +0.03
+      realised MDE = 0.0487σ   against a 0.10 threshold
+
+  The difference is +0.0005σ — indistinguishable from zero — and the realised MDE
+  is **half** the pre-declared threshold, so an effect of tradeable size could not
+  have been missed. This is not an underpowered shrug like D-92.
+  **Getting here required two data bugs to be found first**, and both are worth
+  recording because the first run reported a mean of 11,612σ:
+  (1) the eleven >1000% returns of D-100; and (2) symbols whose trailing
+  volatility is essentially zero — `EVER` sat at **3.67e-11** for stretches of
+  2018, so market-excess subtraction alone gave it a "response" of 593 million
+  sigma. A `sd > 0` guard is not sufficient; the script now floors volatility at
+  0.1%/day. Note the second bug was invisible to a check on *raw* returns, whose
+  worst `|r/vol|` is a harmless 7.75 — it only appears once the market is
+  subtracted.
+  This makes **four** pre-registered tests of the lag hypothesis, all null:
+  D-59/D-60 (intraday), D-73/D-74 (supply chain, t+1), D-93/D-94 (all pairs, all
+  lags, out of sample), and now D-99 (shock-conditional partners, t+1). The
+  conditional form was the last shape that could plausibly have hidden an effect
+  the unconditional tests missed. It does not.
+- **Status:** Accepted
+
+### D-100 — Eleven corrupt returns inflated D-95's headline from 0.586 to 0.640
+- **When:** 2026-09-09T12:30:00-05:00
+- **Decision:** Correct the record: co-movement's out-of-sample replication is
+  **0.586**, not the 0.640 published today, and screen implausible returns inside
+  `comovement_edges` rather than only in one-off analysis.
+- **Why:** `data/bars-10y.parquet` holds **11 returns with `|pct_change| > 10`** —
+  GPOR +526x (2021-05-18), LINE +448x (2024-07-25), SN +116x, DBD +81x, VAL +71x,
+  CORZ +45x, and five smaller. Every one is a bankruptcy emergence, reverse split
+  or ticker reuse: a price-series discontinuity, not a return. They are not
+  outliers to respect, they are wrong numbers.
+  Found while debugging D-99, whose first run produced mean responses of
+  **11,612σ** — a 526x return divided by a 2% volatility. That absurdity was the
+  symptom; the same rows had been sitting quietly inside every other measurement
+  taken today.
+  Re-running D-95's exact procedure with those 11 rows masked:
+
+      as measured today (D-95)        1,236,371 pairs   corr(disc,val) = 0.640
+      with corrupt returns removed    1,236,372 pairs   corr(disc,val) = 0.586
+
+  **The conclusion is unchanged and still comfortable** — 0.586 against 0.03 for
+  the lagged version is the same qualitative gap, and every sector result
+  (PANW→CRWD/FTNT, PFG→MET/LNC/PRU) is unaffected because none of the 11 rows
+  falls in a recent 250-session window. But the number quoted on the live page
+  and in D-95 is inflated by data errors and must be corrected rather than
+  quietly left.
+  The alternative was fixing it only in the experiment scripts. Rejected: the
+  production `comovement_edges` reads the same file, so any `as_of` whose
+  trailing window spans one of those dates would carry the same distortion into
+  a stored edge. The screen belongs in the module.
+- **Outcome:** Done. The screen is in `comovement_edges` (`8a843f2`), and the
+  figure is corrected to **0.586** everywhere it was published — `serve.py`,
+  `comovement.py`, `adapters/candidates.py` and three places on the live page.
+  The plan documents keep the old number, since they are a record of what was
+  believed when they were written.
+  The page also now *explains* the correction rather than silently swapping the
+  digit: a showcase built on measurement discipline should show its own number
+  moving. Verified in the browser — the only two remaining "0.64" mentions are
+  inside that explanation.
+  Production impact was small and checked: 23,855 edges against 23,857, 3.8s,
+  and PANW/PFG return the same sectors.
+  A second data fault was found in the same investigation and is recorded under
+  D-99's Outcome rather than here: symbols whose trailing volatility is
+  effectively zero (`EVER` at 3.67e-11), where market-excess subtraction alone
+  produced a 593-million-sigma "response". That one bites any volatility-
+  normalised statistic and is **not** screened inside `comovement.py`, because
+  correlation is scale-invariant and therefore immune to it — but any future
+  code that divides by a trailing sigma needs a floor, not a `> 0` check.
+- **Status:** Accepted
+
+### D-101 — fastembed replaces sentence-transformers: identical vectors, 1.2 GB less image
+- **When:** 2026-09-09T23:10:00-05:00
+- **Decision:** Swap `sentence_transformers` for `fastembed` (ONNX/onnxruntime) in
+  `adapters/vector.py`, `scripts/load_vectors.py` and `scripts/capture_showcase.py`,
+  so the deployable image does not carry torch.
+- **Why:** `adapters/vector.py:16` imports `SentenceTransformer` at module scope,
+  so *any* import of the graph pulls torch — 1.2 GB inside a 6.0 GB venv. The
+  homelab node is shared and memory-tight (the sibling repo's manifest records
+  it at "~87% on limits"), and that repo already solved the same problem the
+  same way, noting the node "may have no egress".
+  The risk that had to be cleared first was **embedding-space compatibility**:
+  the 47,640 stored vectors were produced by
+  `sentence-transformers/all-MiniLM-L6-v2`, and a replacement that embedded into
+  a different space would silently make the corpus unsearchable rather than
+  fail loudly. Verified against the live data rather than assumed — 40 real
+  articles pulled from the `article` collection, each embedded with both
+  encoders and compared to its own stored vector:
+
+      fastembed vs sentence-transformers : min 1.000000  mean 1.000000
+      fastembed vs STORED vectors        : min 1.000000  mean 1.000000
+      sentence-transformers vs STORED    : min 1.000000  mean 1.000000
+
+  Identical to six decimal places: same ONNX weights, same mean pooling, both
+  L2-normalised 384-dim. This is a runtime swap, not a corpus migration, and
+  `APPROX_NEAR_COSINE` results are unchanged because the query vector is
+  bit-comparable.
+  Two alternatives lost. Keeping torch and accepting a ~2 GB image: rejected
+  because the constraint is the node's memory, not the registry's disk.
+  Splitting into a torch-free web image and a torch-carrying ingest image:
+  rejected as unnecessary once the dependency is gone entirely — though whether
+  web and ingest still warrant *separate* images for credential and PVC-write
+  reasons is a live question for the deployment plan, not settled here.
+- **Outcome:** **Implemented 2026-09-10**, and the compatibility claim now holds
+  inside this repo rather than in a scratch venv: fastembed reproduces the
+  **stored** vectors at cosine **1.000000** across 8 real articles, unit norm,
+  so the 47,829 embeddings already in the corpus stay valid and nothing needs
+  re-embedding. `torch` and `sentence_transformers` are both absent from
+  `sys.modules` after importing `lagmatrix.adapters.vector`, and neither name
+  appears in `src/`, `scripts/` or `tests/` outside the test that must name them
+  to check for them. 248 passed.
+  **Measured, not estimated:** `.venv` went **6.0G → 574M**, about 10.5x — the
+  lockfile dropped torch, transformers, scipy, scikit-learn, sympy, triton and
+  the nvidia-cu13 wheels, and gained fastembed, onnxruntime, pillow, mmh3 and
+  py-rust-stemmers. That is larger than this entry's own "~7x" figure, which
+  counted dependency weight rather than resident venv size.
+  A detail nobody had recorded, found while writing the test: the stored vectors
+  were built from `headline + ". " + summary[:600]` (`load_vectors.py:107`), not
+  from headlines. Embedding a headline alone reproduces the stored vector at only
+  0.89–0.99. The `600` is load-bearing — change it and every future embedding
+  silently stops matching the corpus, with no error anywhere.
+  Originally: pending — verified compatible, not yet implemented; TDD, and the
+  red test must pin agreement with the *stored* vectors rather than merely that
+  the module imports. Confirmed still unimplemented on 2026-09-09: `uv.lock` has
+  zero `fastembed` entries and two `torch` ones, `pyproject.toml:22` still pins
+  `sentence-transformers>=6.0.1`, and `adapters/vector.py:16` still imports
+  `SentenceTransformer` at module scope. **Consequence for deployment:** the
+  homelab plan's halt condition — stop if `torch` is in `sys.modules` after
+  importing `lagmatrix.adapters.vector` — fires on the first image build. The
+  guard is working as designed; the point is that the build blocks on this,
+  and that is better known now than at build time.
+- **Correction to the reasoning above,** on two points others measured after
+  this entry was written. (1) "The constraint is the node's memory, not the
+  registry's disk" is **backwards**. torch costs about **104 MiB resident**, not
+  1.2 GB — the 1.2 GB is on-disk venv weight. The case for dropping it is image
+  size and pull time on a home-network-connected node, plus the roughly 7x cut
+  in dependency weight; it is not a memory argument. (2) The cited "~87% on
+  limits" from the sibling repo's manifest is **stale**. Measured directly:
+  memory limits sum to **114% of the node**, actual usage 79%, about **3.2 GiB
+  genuinely free**, on a single-node k3s box carrying 41 pods across 10
+  namespaces. The conclusion — drop torch — survives both corrections; the
+  argument for it does not.
+- **Status:** Accepted
+
+### D-102 — One unauthenticated GET can exhaust the node; request parameters get clamped
+- **When:** 2026-09-09T23:40:00-05:00
+- **Decision:** Clamp `min_abs_corr`, `top_n` and `limit` at the HTTP handlers,
+  **and** enforce a floor inside `comovement_edges` itself so no caller — not
+  just no HTTP caller — can request the full pairwise matrix. Reject non-finite
+  input rather than clamping it.
+- **Why:** found by a security review of the deployment, and verified directly.
+  `serve.py:569` passes `min_abs_corr` through a bare `float()` with no bound.
+  `comovement.py:88` filters on `abs(c) < min_abs_corr`, so:
+
+      min_abs_corr=0.5  ->     23,855 edges,   3.9s
+      min_abs_corr=0    ->  2,381,653 edges, 100.5s, peak RSS 3,560 MB
+
+  and **`min_abs_corr=nan` is identical to 0**, because `abs(c) < nan` is always
+  `False` — confirmed against `corr=0.0001`, where `0.0`, `-1.0` and `nan` all
+  keep the edge and only `0.5` drops it. `ThreadingHTTPServer` spawns a thread
+  per connection, so concurrent requests multiply it linearly.
+  **The reason this is not merely a performance bug:** the target is a
+  single-node cluster that also runs the owner's real-money trading system in
+  namespace `copytrade`. A namespace is not a memory or CPU boundary — driving
+  the node to OOM-kill degrades or evicts the trading pods regardless. The
+  comment at `infra/k8s/10-arangodb.yaml:5` claiming its own namespace means
+  "nothing here can touch the trading workloads" is **false for CPU and memory**,
+  and should be corrected when that manifest is next touched.
+  Two mitigating facts, recorded so the risk is not overstated: nothing is
+  exposed today (the server binds localhost and no Service exists yet), and the
+  HTTP surface never writes to ArangoDB — `upsert_comovement` is reachable only
+  from `daily_ingest.py`. What raises the stakes is `serve.py:116-117`: the
+  process holds the ArangoDB **root** password and connects as root, so anything
+  achieving code execution in the pod gets root on the database.
+  The alternative was relying on k8s `limits` alone. Rejected as insufficient on
+  its own: a limit converts node-wide exhaustion into a pod OOM-kill, which is
+  better but still a self-inflicted outage on every request, and it does nothing
+  for a caller who is merely careless rather than hostile. Both layers, not one.
+- **Outcome:** pending — TDD in flight; the test must assert the edge *count*
+  stays bounded, since that is the property under attack.
+- **Status:** Accepted
+
+### D-103 — A value stored in ArangoDB reached psql inside the trading namespace
+- **When:** 2026-09-09T23:55:00-05:00
+- **Decision:** Validate `--since` as a date at **both** ends of the ingest loop,
+  validate tickers before interpolating them, and add the missing
+  `ON_ERROR_STOP=1` so `load_vectors.py` matches the other two loaders.
+- **Why:** found by a security review of the deployment and verified line by
+  line. `load_vectors.py:82` built SQL by f-string —
+  `WHERE a.created_at >= '{args.since}'` — and piped it to
+  `kubectl -n copytrade exec -i postgres-0 -- psql -U temporal -d orchestrator`.
+  That is the **trading system's own database, in another namespace**.
+  `--since` is not always operator-typed. `daily_ingest.py:107-109` sets it from
+  `last_article_date()`, which reads it back out of ArangoDB
+  (`FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi`). So anything
+  written into `article.date` became SQL executed as `temporal` against
+  `orchestrator` — a second-order injection whose source is our own datastore.
+  Aggravating: `load_vectors.py` was the **only one of three loaders without
+  `-v ON_ERROR_STOP=1`** (compare `load_arango.py:35`, `load_news.py:38`), so an
+  injected statement would not abort and the job would report success.
+  Reachability, stated honestly rather than dramatised: it needs ArangoDB
+  **write** access first, and the HTTP surface has none — `upsert_comovement`
+  is reachable only from `daily_ingest.py`, and `ArangoTopology.upsert_edge` is
+  `NotImplementedError`. So it is not remotely triggerable today. It is the
+  mechanism that would convert a `lagmatrix` foothold into SQL execution inside
+  `copytrade`, which is precisely the adjacency that made the review worth doing.
+  **I introduced the reachable half of this today** when `daily_ingest.py` began
+  feeding a database-derived value into a script that had always interpolated it.
+  The script's f-string predates the ingest job; what was new was the loop that
+  closed it.
+  The alternative was validating only in `load_vectors.py`, at the point of use.
+  Rejected: `daily_ingest.py` also validates now, because a value coming back out
+  of a datastore deserves the same suspicion as one arriving from a user, and
+  trusting it merely because we wrote it is the assumption that created this.
+- **Outcome:** Fixed and verified. `date.fromisoformat` rejects
+  `"2026-09-07'; DROP TABLE x; --"`, `"2026-09-07 OR 1=1"` and `""`, accepting
+  only a real ISO date; tickers must match `[A-Z][A-Z.\-]{0,9}`; all three
+  loaders now carry `ON_ERROR_STOP=1`. 170 passed, baseline unchanged, ingest
+  dry-run still resumes correctly from 2026-09-07.
+  Two things deliberately NOT changed here, recorded so they are not lost:
+  `serve.py:116` still connects to ArangoDB as **root** when the serving process
+  needs only reads (a dedicated read-only grant is the right fix and is its own
+  change), and there is no NetworkPolicy restricting who may reach
+  `arangodb.lagmatrix:8529`.
+- **Status:** Accepted
+
+### D-104 — An unknown `source` returned invented data instead of an error
+- **When:** 2026-09-09T18:20:00-05:00
+- **Decision:** `load()` names `synthetic` explicitly and raises `ValueError` at
+  the end of the function. A `leader:` symbol is checked for shape and for
+  presence in the price file before it reaches pandas.
+- **Why:** `scripts/serve.py` ended `load()` with an unguarded
+  `return closes, ExternalSignals(SYNTHETIC_FIRES).candidates(), frozenset()`.
+  There was **no `if source == "synthetic"` anywhere** — synthetic data was
+  reached only by falling off the end, so `'nonsense'`, `'leader'` without a
+  colon, and `''` each returned six synthetic candidates as though the caller
+  had got what they asked for. Measured, not inferred, before any test was
+  written. Separately, `'leader:ZZZZZZ'` and `'leader:A B'` reached a pandas
+  column lookup and raised `KeyError: "None of [Index(['ZZZZZZ'], ...)] are in
+  the [columns]"` — an internal leaking out as a generic failure. Two failure
+  shapes, and the silent one is the worse: a typo in `?source=` produced a
+  plausible-looking run over data nobody asked for. Same class as D-100 and
+  Q-43 — a wrong answer delivered quietly instead of an error delivered loudly.
+  The alternative that lost was blocklisting the known-bad strings while keeping
+  the fallback; a test probing `'synthetic '` with one trailing space forecloses
+  it, since that matches no branch either and would have kept returning
+  synthetic data. The leader shape check reuses the `.isalnum()` rule
+  `/followers`, `/network` and `/graph` already applied (`serve.py:553-554`,
+  `:565-566`, `:578-579`); `/run` was the one entry point without it, and that
+  inconsistency is what started the cycle.
+- **Outcome:** 198 passed. Verified against a live server rather than by
+  reading: `/run?source=nonsense` and `?source=leader:ZZZZZZ` and
+  `?source=leader:AB;DROP` each return a clean SSE `event: error` naming the bad
+  value, with no traceback and no pandas internals; `?limit=99999` returns 400;
+  `?source=leader:PANW&as_of=2026-09-04` still streams CRWD/FTNT/OKTA over 36
+  events with zero errors.
+- **Status:** Accepted
+
+### D-105 — `/network`'s `top_n` is deliberately not readable from the query
+- **When:** 2026-09-09T18:22:00-05:00
+- **Decision:** Reverted, hours after adding it. `/network` keeps its default of
+  40 and ignores `top_n` in the query string; the parameter stays wired on
+  `/followers`, where a client actually sends it.
+- **Why:** my own brief for D-102 listed `top_n (1, 500)` under `/network`
+  without checking whether the handler read it. It did not — it silently used
+  the function default. Wiring it made a previously unreachable parameter
+  reachable. Checked against the actual client afterwards:
+  `serve_index.html:1091` sends `top_n` to `/followers`, `:1292` sends it to
+  `/movers`, and `:1274` sends `/network` only `symbol`, `as_of` and
+  `min_abs_corr`. So nothing wanted it, and exposing it hands an
+  unauthenticated caller a lever to make an endpoint that does real correlation
+  work build a 500-node graph where it could previously build 40 — widening
+  surface in the same week the exposure of this service is under review. The
+  alternative that lost was keeping it because it was already bounded and
+  tested. Bounded is not the same as warranted.
+- **Outcome:** Reverted with a comment at the call site saying why, so it is not
+  re-added by someone reading the other two handlers. 198 passed.
+- **Status:** Accepted
+
+### D-106 — Throwaway test databases are per-process, answering Q-46
+- **When:** 2026-09-09T18:24:00-05:00
+- **Decision:** `arango_db_or_skip` suffixes every throwaway database with the
+  xdist worker id or the pid, and a `pytest_sessionfinish` hook drops the ones
+  this process created.
+- **Why:** Q-46 logged this as real but declined to fix it, on two grounds that
+  both turned out to be wrong. It said the collision was "**not** reproducible
+  in normal use" — it reproduces on demand. Two suites started together gave
+  `6 failed, 184 passed, 8 errors` and `3 failed, 195 passed`, every failure in
+  a live-ArangoDB file, while either run alone was green. And it estimated "the
+  fix touches five files"; it touches one, because the per-process suffix
+  belongs in the shared helper rather than in each file's `ARANGO_DB_NAME`.
+  The five files hardcoded `test_comovement_store`, `test_arango_topology`,
+  `test_vector_index`, `test_market_scan`, `test_loader_idempotency`, and each
+  fixture truncates its collection per test — so a second process's truncate
+  lands in the middle of the first's test. Found by running the suite while an
+  agent was running it too, getting one failure that passed in isolation, and
+  reproducing it deliberately instead of writing it off as a flake. That is the
+  cost being paid: a shared name makes the suite report failures unrelated to
+  the code under test, which teaches you to distrust red. Q-43 fixed the mirror
+  image — tests green while verifying nothing.
+- **Outcome:** Three concurrent suites: 198, 198, 198, zero failures. Teardown
+  confirmed against the live instance — the 15 scoped databases those runs
+  created are gone, `lagmatrix` untouched. A guard rejects any name not starting
+  with `test_`, so a typo can never point the suite at the real database. The
+  five old fixed-name databases are now orphaned and were left in place rather
+  than dropped unasked.
+- **Status:** Accepted
+
+
+### D-107 — A mistyped `as_of` on `/graph` returned filings from years later
+- **When:** 2026-09-09T18:40:00-05:00
+- **Decision:** `neighbourhood()` parses `as_of` with `date.fromisoformat`
+  before it reaches ArangoDB — one line, the same idiom `movers()`,
+  `followers()`, `network()` and `load()` already used.
+- **Why:** `neighbourhood()` was the only endpoint that took `as_of` as a
+  string and never parsed it. The AQL compares dates as strings
+  (`capture_showcase.py:54`, `FILTER p.edges[*].filing_date ALL <= @as_of`),
+  which is correct against ISO input and arbitrary against anything else.
+  Measured against the live graph, WMT at hops 2, **before** the fix:
+
+      as_of='2019-01-01'  (correct ISO)   ->  2 edges   <- the truth
+      as_of='2019-1-1'    (unpadded)      ->  8 edges
+      as_of='Jan 1 2019'                  -> 13 edges   <- the whole 2026 graph
+      as_of='2026-09-04'  (today)         -> 13 edges
+
+  `2019-1-1` is an ordinary way to type a date, and it silently returned
+  filings from years **after** the date asked about. That is a lookahead bug —
+  D-82's exact class — reachable from the UI's own `/graph` endpoint, and it
+  violates D-16 ("point-in-time by construction"). It produced no error and no
+  warning; the page would simply have shown a richer 2019 than 2019 had.
+  Found by a deployment security review that flagged the missing validation as
+  a hardening gap. It is **not** primarily a security issue — an attacker gains
+  nothing they could not get by passing today's date. It is a **correctness**
+  issue, and filing it as hardening would have understated it.
+  The alternative that lost was validating in the `/graph` handler alongside
+  its existing `.isalnum()` check. Rejected because `neighbourhood()` is the
+  thing that must not query on a bad date; a guard in the caller leaves the
+  function itself unsafe. A test spies on `db.aql.execute` and asserts it is
+  never reached, so "rejects" means "before querying", not merely "raises".
+- **Outcome:** 207 passed. Verified live after the fix: `2019-01-01` returns
+  2 edges (HRL, TSN), `2026-09-04` returns 13, and both `2019-1-1` and
+  `Jan 1 2019` return a clean error instead of 8 and 13.
+- **Status:** Accepted
+
+### D-108 — Errors detectable before the response begins are a 400, answering Q-47
+- **When:** 2026-09-09T18:50:00-05:00
+- **Decision:** `/graph` and `/movers` catch `ValueError` and `send_error(400)`
+  before their general handler, matching what `/followers` and `/network`
+  already did.
+- **Why:** the rule, stated once so it stops being re-derived per endpoint:
+  **an error detectable before `send_response` is called is a 400.** `/graph`
+  and `/movers` build their whole body in memory first, so a `ValueError` there
+  can still choose its status — they were routing it through `_json`, which
+  hardcodes `send_response(200)`, so D-107's new malformed-`as_of` error came
+  back as 200 carrying an error body and a status-only client could not tell bad
+  input from a clean run.
+  `/run` is **not** an exception to this rule, which is the part I had wrong
+  when I framed the cycle. `red-status` corrected it: `/run`'s `limit` check
+  already 400s *because* it runs before the SSE headers are flushed, and only
+  what `stream()` discovers afterwards is structurally stuck in the body. One
+  rule, no carve-out.
+  The catch is deliberately narrow — `ValueError`, not `Exception`. An ArangoDB
+  outage or a missing parquet file is not bad input and must keep its existing
+  path. Verified by exercising a genuine non-input failure: a server started
+  without `--allow-real` raises `PermissionError` from `movers()`, and that
+  still returns 200 with an error body, unchanged.
+- **Outcome:** 216 passed. Live: `/graph?as_of=2019-1-1` and `/movers?as_of=zzzz`
+  both 400; `/graph?as_of=2019-01-01` returns its real 2 edges (HRL, TSN) with
+  disclosure sentences and 7 two-hop entries; `/movers?as_of=2026-09-04` returns
+  44 movers found from 3,201 swept.
+- **Status:** Accepted
+
+### D-109 — `default_as_of()` derives from the frame co-movement actually reads
+- **When:** 2026-09-09T19:05:00-05:00
+- **Decision:** `default_as_of()` returns `COMOVE_CLOSES()`'s last session
+  instead of re-reading `data/bars.parquet` itself.
+- **Why:** the two disagreed, and the disagreement was invisible. `default_as_of()`
+  read `bars.parquet`; `COMOVE_CLOSES()` prefers `bars-10y.parquet`. They agreed
+  by coincidence until the first real `daily_ingest.py` run advanced one file and
+  not the other, and then:
+
+      default_as_of()                    -> "2026-09-09"
+      followers("PANW", "2026-09-04")    -> 13 followers
+      followers("PANW", default_as_of()) ->  0 followers, error=None
+
+  The page's default date silently returned nothing. Its docstring claimed it
+  returned "the last session actually present in the data" — it returned the last
+  session present in *a* file, not the one that answers the question, and the
+  docstring is corrected to say what it now guarantees.
+  Deriving from `COMOVE_CLOSES()` makes the two agree **by construction**. The
+  alternative that lost was giving `default_as_of()` its own corrected file
+  preference: that restores agreement by coincidence again, and coincidence is
+  precisely what broke.
+  **Measured cost, since this moves a large read onto a hot path.** `/config`
+  fires on every page load, so the co-movement frame is now read there rather
+  than only when a co-movement feature is invoked. On real data:
+
+      RSS before any request   155.8 MiB
+      first /config  (cold)    200 in 1.280s  -> 337.6 MiB   (+182 MiB)
+      second /config (warm)    200 in 0.0016s
+
+  One-time per process and cached. Note the +182 MiB is the *steady* cost; it is
+  not the 650 MiB–1,030 MiB figure the deployment work uses, which is peak during
+  the pivot. Both numbers are real and they measure different things — worth
+  keeping straight, since a pod limit has to cover the peak.
+- **Outcome:** 220 passed. `default_as_of()` returns 2026-09-04 and
+  `followers("PANW", default_as_of())` returns 13 with no error. This is PHASE-2
+  of `PLAN-2026-09-09-ingest-coherence.md`, executed ahead of the rest of that
+  plan because the broken default date was live and user-visible.
+- **Status:** Accepted
+
+### D-110 — The ingest refuses to claim success when its data cannot answer
+- **When:** 2026-09-10T00:10:00-05:00
+- **Decision:** `session_available(closes, as_of, trail)` in
+  `src/lagmatrix/comovement.py`, checked by `node_comovement` **before**
+  `comovement_edges` runs. A failure returns an `errors` entry naming both dates
+  and never reaches `upsert_comovement`.
+- **Why:** tonight's first real ingest advanced `bars.parquet` to 2026-09-09 and
+  left `bars-10y.parquet` — the file co-movement reads — at 2026-09-04. Tomorrow's
+  run would have asked for a session that file does not contain, received `[]`,
+  written nothing, and printed:
+
+      {'done': ['comovement: 0 edges upserted as of 2026-09-09']}
+
+  Reproduced on synthetic data as the red test, then verified in-process against
+  the real frame. After the fix, the same call returns:
+
+      {'errors': ['comovement: 2026-09-09 not found in data
+                   (last session available: 2026-09-04)']}
+      upsert_comovement called: []
+
+  and a good date still returns 23,855 edges upserted, unchanged.
+  **The distinction this deliberately preserves.** A quiet trading day producing
+  zero edges from a *fully available* window is a real result, not a failure.
+  `session_available` runs before `comovement_edges` and therefore cannot see the
+  edge count, so the two cases cannot be conflated. The alternative that lost was
+  checking `len(edges) == 0` after the fact, which is simpler and wrong — it would
+  trade a silent wrong answer for a noisy false one.
+  Additive by design: `comovement_edges`'s existing return-`[]` contract is
+  untouched, so a later, wider change to that contract in the deployment work
+  cannot collide with this.
+- **Outcome:** 230 passed. PHASE-1 of `PLAN-2026-09-09-ingest-coherence.md`.
+  Does **not** by itself make tomorrow's run correct — it makes tomorrow's run
+  *fail loudly* instead of silently. PHASE-3 and PHASE-4 are what actually keep
+  the long file current.
+- **Status:** Accepted
+
+### D-111 — An unreachable database is not "start from the beginning"
+- **When:** 2026-09-10T00:45:00-05:00
+- **Decision:** `last_article_date()` returns `(ok, since, reason)`. `node_news`
+  and `node_vectors` both refuse to run when `ok` is false, and neither reaches
+  its subprocess.
+- **Why:** the function collapsed three situations into `None` — ArangoDB
+  unreachable, `article` genuinely empty, and a stored date failing
+  `date.fromisoformat` — and both callers read `None` as "start from scratch".
+  `node_news` dropped `--start` and fetched ten years across 500 symbols;
+  `node_vectors` fell back to a hardcoded `2025-01-01` and re-embedded
+  everything since. Both then reported `done`.
+  Found by comparing two `--dry-run` outputs minutes apart: one printed
+  `news: from the beginning`, the other `news: from 2026-09-09`. The only
+  difference was that ArangoDB was unreachable for the first. **Not a
+  hypothetical** — Q-49 records the pod being OOM-killed 8 times in two days, so
+  an unattended 3am run will meet a dead database.
+  The empty-collection case still starts from the beginning, because a genuine
+  first run must. Two negative controls pin that, and they are the reason the
+  fix could not simply be "error on any falsy result".
+  The outer `except Exception` is gone with it. Previously a failure *during*
+  the query — which is exactly what an OOM-kill mid-query looks like — was
+  swallowed into the same silent refetch. It now propagates, is retried by the
+  graph's `RetryPolicy(max_attempts=3)`, and then fails.
+  `node_vectors` was nearly missed: it calls the same function at a second call
+  site that no test covered, and a tuple is always truthy, so the change would
+  have left `since or "2025-01-01"` silently dead. The red agent flagged it
+  rather than leaving it for green to notice.
+- **Outcome:** 245 passed. All three data nodes — `comovement` (D-110), `news`
+  and `vectors` — now fail loudly on the same class of condition rather than
+  proceeding on a guess.
+- **Status:** Accepted
+
+### D-112 — Two bars files, kept apart on purpose
+- **When:** 2026-09-10T00:55:00-05:00
+- **Decision:** `data/bars.parquet` and `data/bars-10y.parquet` stay separate.
+  The wide file is refetched whole each run; the long file is extended
+  incrementally with a corporate-actions split guard.
+- **Why:** the obvious simplification is one file, and it loses on two counts.
+  They differ in *history* (159 vs 2,514 sessions) and in *universe* (3,201 vs
+  2,183 symbols, the wide one drifting with a liquidity screen, the long one
+  pinned for reproducibility — D-95's replication is measured against that fixed
+  set). Merging would either impose the long file's cost on every wide read or
+  the wide file's drift on the replication baseline.
+  It also turns out the split immunity is a property of *how* each is fetched,
+  not of anything either file does: `fetch_bars.py` never reads the existing
+  file, so every row it writes shares one adjustment basis. The long file cannot
+  afford that — a nightly 10-year, 2,183-symbol refetch — which is exactly why
+  it needs the split guard the wide one does not.
+  Closes `PLAN-2026-09-09-ingest-coherence.md`. The plan completed a spec that
+  had already been written and skipped once: `PLAN-2026-09-09-daily-ingest.md`
+  PHASE-2 defined `merge_bars`/`daily_watermark`/`fetch_daily_bars.py` and none
+  of it existed. That is the same pattern as D-101 (verified, never
+  implemented) and the ten plans that carried no status line until today — work
+  recorded as done that was not.
+- **Outcome:** Verified by a real run, not a dry one. `bars-10y.parquet` went
+  2026-09-04 → 2026-09-09 (+4,366 rows), APH and RUSHA were refetched for live
+  splits, `as_of` resolved to 2026-09-09 *after* the fetch, and co-movement
+  wrote 24,104 edges for that date. `default_as_of()` now returns 2026-09-09 and
+  `followers("PANW", ...)` returns 11 — CRWD, FTNT, OKTA, TENB, ZS, S.
+- **Status:** Accepted
+
+### D-113 — `/health` reports the process, never its dependencies
+- **When:** 2026-09-10T01:30:00-05:00
+- **Decision:** `/health` returns `{"status": "ok"}` unconditionally — no
+  ArangoDB, no parquet, no `--allow-real`. Readiness stays on `/config`, which
+  already reports `graphrag: arango_db() is not None` non-fatally. No second
+  endpoint.
+- **Why:** a liveness probe that fails on a *dependency* outage gets the pod
+  killed for something a restart cannot fix, and Q-49 shows that outage is
+  routine rather than hypothetical. Separately, `default_as_of()` now routes
+  through `COMOVE_CLOSES()` (D-109), a ~650MiB read — a probe touching that
+  every 10 seconds would be its own outage. The tests enforce both by
+  monkeypatching `arango_db`, `COMOVE_CLOSES` and `read_parquet` to **raise**,
+  so a future `/health` that reaches a dependency fails loudly rather than
+  merely getting slow.
+- **Outcome:** 251 passed. Container verified, not just built:
+  `curl /health` → `{"status": "ok"}` 200, and `docker ps` reports
+  `Up 34 seconds (healthy)`.
+- **Status:** Accepted
+
+### D-114 — `serve.ALLOW_REAL` is restored after every test
+- **When:** 2026-09-10T01:30:00-05:00
+- **Decision:** an autouse fixture in `tests/conftest.py` saves and restores
+  `serve.ALLOW_REAL` around every test.
+- **Why:** it is module-level global state and several tests flip it to `True`
+  to reach real-data paths. **None restored it**, so whether a test depending on
+  the default (`serve.py:93`, `ALLOW_REAL = False`) passed came down to
+  alphabetical file order. Caught when `tests/test_serve_health.py` passed alone
+  (3 passed) and failed in the full suite — the failure looked like a bad
+  `/health` implementation and was not. Autouse rather than a per-test
+  `monkeypatch` because the point is that a test written next month cannot
+  reintroduce it by forgetting; six existing call sites had already forgotten.
+  Third isolation defect in the suite today, after Q-46 (concurrent runs sharing
+  a database) and Q-43 (live tests skipping silently). Same root: shared mutable
+  state with no one responsible for putting it back.
+- **Outcome:** 251 passed, and the two pairings that previously failed —
+  `test_serve_source.py` + `test_serve_health.py`, and
+  `test_serve_default_as_of_coherence.py` + `test_serve_health.py` — now pass.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-52 | A stale `.ruff_cache` reported a lint error as clean, locally, for an unknown period | trust in every local `ruff check` result | CI failed PR #1 on `I001` in `tests/test_edgar_relations.py`, a file nobody had touched. Locally `ruff check` said **All checks passed**; `ruff check --no-cache` on the same bytes found the error. Same ruff (0.16.6), same config, same file content in HEAD and the working tree — the cache alone differed. Likely cause: `[tool.ruff] src = ["src", "tests"]` makes isort classify `lagmatrix` as first-party, and the cached verdict predates the environment change that made that resolvable (the fastembed re-sync reinstalled the project); ruff's cache key did not capture it. **Unverified**, and worth verifying before relying on any local lint result again. The consequence is the part that matters: every "ruff clean" reported in this session's commit messages was taken from the cached path and was not trustworthy. CI is unaffected — a fresh runner has no cache, which is why it caught this and local runs did not. Options: run `--no-cache` locally before pushing, drop the cache in a pre-commit hook, or treat CI as the only authority on lint. Not decided. |
+| Q-50 | Nothing schedules `daily_ingest.py`; there is no "tomorrow's run" | the entire point of a *daily* ingest | Checked 2026-09-10: no crontab entry, no systemd timer, and `kubectl -n lagmatrix get cronjobs` returns **No resources found**. The pipeline is correct and verified end to end, but it executes only when a human types the command. Every "tomorrow's run will now fail loudly instead of silently" claim in D-110/D-111 is conditional on something invoking it, and today nothing does. Three options, none chosen: a local cron on the dev box (unreliable — it is WSL, not always running), a systemd timer (same caveat), or the k8s CronJob that `PLAN-2026-09-09-homelab-deploy.md` PHASE-5 specifies, which is the real answer and is blocked behind containerisation and D-101's unimplemented torch swap. Worth deciding before treating the ingest as operational. |
+| Q-51 | The two bars files cover different universes: 3,201 vs 2,183 symbols | which symbols co-movement can ever see | `data/bars.parquet` carries 3,201 symbols (a liquidity screen, median $vol >= $10M or a candidate, refreshed every run) while `data/bars-10y.parquet` carries 2,183 (pinned when it was first built). So roughly a thousand symbols appear in the wide file — and in `/movers`, which swept 3,201 — that co-movement can never return as a follower, because they have no long history stored. Whether the long file's universe should be refreshed, and what that costs against D-95's replication being measured on the fixed 2,183, is undecided. Raised by `plan-ingest`, which declined to guess rather than rationalising it. Related to the universe question already open under `PLAN-2026-09-09-daily-ingest.md` PHASE-7. |
+| Q-49 | ~~ArangoDB is being OOM-killed~~ **PARTLY ANSWERED 2026-09-10**: limit raised 1500Mi -> 2560Mi after measuring it at **942Mi at rest** (not the 244Mi seen earlier — the corpus grew during the day), i.e. already 63% of its ceiling before any load. Pod restarted clean at 265Mi, 0 restarts. **Not fully answered:** `load_vectors.py` rebuilds the entire ANN index every run (`indexed: 47829 articles`) and the corpus grows daily, so the ceiling will be reached again — the durable fix is incremental indexing, not a bigger number. Also unmeasured: which of the index rebuild or the 24,104-edge upsert actually causes the spike. Original text follows. ArangoDB is being OOM-killed roughly every few hours, and each kill silently breaks the dev tunnel | the graph store, the live test suite, and any deployment sized from these numbers | Measured on the cluster 2026-09-09: the `arangodb` pod shows **8 restarts in 2d2h**, `Last State: Terminated, Reason: Error, Exit Code: 137` — OOMKilled — against its own `limits.memory: 1500Mi`. This is **not** node pressure: the node was at 77% with about 3.2 GiB free at the time. The pod idles at 244Mi, so something in our own workload spikes it past 1500Mi; the vector index (47,829 articles x 384 dims, rebuilt by every `load_vectors.py` run) and the 23,855-edge `upsert_comovement` are the candidates, unmeasured as to which. **Two consequences beyond the restarts.** (1) Each kill invalidates the remote `kubectl port-forward`, so `localhost:19999` keeps listening while nothing answers — that turned 13 live tests into silent skips, caught only because Q-43's guard exists. Restarting the SSH leg is not enough; the remote forward must be restarted too. (2) `1500Mi` is already known-insufficient, so any deployment sizing that inherits it inherits the crash. Not answered: whether to raise the limit, bound the workload, or both — and raising a limit on the host that runs real-money trading is the user's call, not one to make from here. |
+| Q-48 | `--dry-run` cannot catch the failure D-110 was built for | nothing today; the value of a dry run as a pre-flight check | `node_comovement` returns `{"done": ["comovement: DRY"]}` at `daily_ingest.py:130-131`, before it reaches `serve.COMOVE_CLOSES()` or `session_available`. So `--dry-run` prints four green nodes even when the real run would now error. That is exactly the blind spot that let tonight's incident through: the dry run passed all four nodes, and the real run still left the product worse. Every node has the same shape, so this is not specific to comovement — a dry run currently verifies that the *plumbing* is wired, not that the *data* can answer. Deciding what a dry run should mean is the real question; making it read the frame would cost a ~650MiB read, which may or may not be worth it for a pre-flight. |
+| Q-47 | ~~`/graph` and `/movers` answer errors with HTTP 200~~ **ANSWERED by D-108** | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |
+| Q-46 | ~~The live tests share fixed database names, so two concurrent suites collide~~ **ANSWERED by D-106** — fixed in `tests/conftest.py` alone, and the two grounds given below for not fixing it were both wrong: it *is* reproducible on demand, and it touched one file, not five. | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |
+| Q-45 | Can the supply graph be deepened enough to test hop-dependent propagation at all? | D-92, D-88, D-78, `src/lagmatrix/edgar/relations.py` | D-92 could not answer its own question: only **4 of 105 suppliers (4%)** are themselves customers with suppliers, giving **6 hop-2 pairs** and a realised MDE of 0.39 against a 0.25 threshold. The graph is 76 depth-1 stars because only customers' 10-K concentration disclosures were ingested. Answered by ingesting the same disclosures for the 105 suppliers — the `edgar/relations.py` classifier and its migration script already exist and were audited at D-78, so this is acquisition, not new method — then re-running `scripts/experiment_hops_days.py` unchanged and re-reading its realised MDE. **Pre-commit before collecting:** the D-92 design, threshold and decision rule are re-used verbatim; deepening the graph must not be an excuse to re-specify the test. Worth knowing the ceiling first: if the second ingest still yields under ~50 hop-2 pairs, the MDE will stay above 0.25 and the question should be closed as unanswerable with 10-K-derived structure rather than pursued further. |
+| Q-44 | Should the graph be reshaped so retrieval that has no data dependency can actually run concurrently? | D-89, D-35, `graph/builder.py` | D-89 establishes that `vector_retriever`'s position after `graph_retriever` is a scheduling artefact — it needs only `c.symbol` (D-83) — but that it cannot simply be moved, because `context_fusion`'s join fires once per superstep in which any in-edge fires, and `evidence`/`errors` use concatenating reducers. So the pipeline serialises two independent lookups and the live page's own latency numbers understate what the design could do. Answered by one of: making `fuse_evidence` idempotent so a double firing is harmless (the honest general fix, and the one that would also make the graph robust to future joins); reconsidering `defer=True`, which D-35 declined for reasons that predate this evidence; or deciding the serialisation is acceptable and saying so on the page rather than leaving the diagram to imply a dependency that does not exist. Not urgent: the measured cost is one superstep of wall-clock on runs that complete in ~3 seconds. |
+| Q-43 | The 9 ArangoDB-dependent tests cannot pass in this environment and skip silently — how should live tests fail loudly instead? | `tests/test_arango_topology.py`, `tests/test_vector_index.py`, `tests/test_market_scan.py`, `scripts/serve.py:52` | Measured 2026-09-09, two independent faults, both rendering as a clean `skip`: **(a)** the tests default to `http://localhost:8529` (`test_arango_topology.py:57`) while the app defaults to `http://localhost:19999` (`serve.py:52`) — 8529 is closed, 19999 is the live tunnel; **(b)** pointed at the correct URL they get `[HTTP 401][ERR 11] bad username/password`, because the tests do not read the credential from `~/.lagmatrix-arango-pw` the way `serve.py:72` does. So the whole graph layer — `ArangoTopology`, `MarketScan`'s live path, `NewsIndex` — has never been exercised by a passing test here, while the suite reports `111 passed, 9 skipped` and looks healthy. This is the same pathology already seen once in this project (a stale listener made live tests skip rather than fail); the skip-if-unreachable guard is doing exactly what it was written to do, which is the problem. Related but distinct: **nothing under `tests/` imports `scripts/serve.py` or `scripts/capture_showcase.py` at all**, so a broken import there leaves the suite fully green — demonstrated 2026-09-09 when deleting `rank_by_room` broke `serve.py`'s import and the suite still reported 111 passed. Answered by deciding what a live test should do when the dependency is absent: skip is right for a laptop with no tunnel, but there is currently no mode in which its absence is an error, so nobody ever learns the tests are dead. Options: an opt-in `LAGMATRIX_REQUIRE_LIVE=1` that converts skip to failure, aligning the default URL and credential lookup with `serve.py`'s, and a one-line import smoke test for the two scripts. |
+| Q-42 | If the supply graph is a correlation filter with extra steps, what does the GraphRAG premise actually buy? | D-88, D-74, `adapters/arango.py`, `scripts/serve_index.html` | D-88 shows the contemporaneous linked-vs-control co-move is fully explained by trailing correlation, with a *negative* residual (−0.093, z=−2.98; −0.317, z=−2.54 on replication). The live page presents the supply graph as the thing that finds non-obvious candidates. If a correlation screen selects the same names more cheaply, that framing needs to change or be defended. Three things the graph plausibly still buys, none yet measured: **direction** (the sign of the thesis, which correlation alone does not give), **an interpretable rationale** (a filing sentence a human can check, which is the actual product), and **candidates a correlation screen would rank too low to surface**. Answered by running the scan with the supply traversal replaced by a top-k trailing-correlation screen on the same dates and comparing the candidate sets and their forward returns — if the sets largely coincide and neither predicts, the graph is doing presentational work, which is a legitimate answer but a different claim from the one the page makes. Note the binding constraint from D-88's consult: **chains, not dates** — 105 distinct suppliers across 67 leaders cannot resolve a D-74-sized effect at any date count. |
+| ~~Q-41~~ | The `responded` bucket never fires — is `x >= y` the wrong bar for "already moved too much to enter"? | D-84, D-87 | **The premise was wrong, and the correction matters more than the question.** This was logged from a single scan date (2026-05-11, 0 of 19) and generalised into a structural claim. Measured over 432 dates, `responded` fires on **7.7%** of supplier-events; reproduced on the production code path over 13 sampled dates at **4 of 76 (5.3%)**, firing on 3 of those 13 dates. 69% of dates with >= 8 candidates have zero `responded`, so 0-of-19 is the *modal* outcome, not an anomaly (P = 0.22 under independence), and 40% of dates have a max ratio below that scan's 0.61. The bar was never the problem. Answered by D-87, which deletes the bucket for an entirely different and measured reason — non-predictiveness — not for being unreachable. Lesson worth keeping: one date is not a sample, and this entry asserted a property of the design from n=1. |
+| ~~Q-40~~ | Are `lag_response` and correlation `leader_move` evidence independent enough to sit in one weighted sum? | D-84, `graph/nodes/context_fusion.py`, Q-12 | `Y` itself never double-counts — Q-37's `signal_universe` fix keeps the originating leader out of `X`'s own correlation pool — but a *third* symbol highly correlated with `Y` still contributes an ordinary `leader_move` unit alongside the `lag_response` unit, and the two are not weighted against each other. The independence discount (Q-12) operates within the correlation bloc only; it does not see `lag_response` at all, so a candidate discovered from `Y` and also neighboured by `Y`'s bloc can reach `MIN_EFFECTIVE` on what is arguably one observation counted twice. **Sharpened 2026-09-08 — when the two do land on the same symbol the interaction is not merely un-weighted, it is destructive, and it was demonstrated, not theorised.** Building PHASE-4's fixtures through a real `retrieve_neighbourhood` put `Y` in `X`'s own correlation top-k, and the two units then collide: in the *opposed* case `leader_move(Y, supports=True)` (that check reads the leader's sign, never the candidate's) exactly cancels `lag_response(Y, supports=False)`, `w_pro == w_con == 1.0`, and a genuine reversal reads **neutral instead of contradicted**; in the *responded* case the lone surviving `leader_move(Y, supports=False)` makes it read **contradicted** — precisely the spent-vs-refuted conflation D-84 exists to prevent. Reproduced directly, not inferred. **Latent, not live:** on the real 2026-05-11 scan, 0 of 19 candidates had their `origin_leader` appear as a `leader_move` unit, because Q-37's `signal_universe` union keeps shocked leaders out of every candidate's correlation pool. But that is the *only* thing preventing it, set at two call sites (`serve.py`, `pipeline/runner.py`); any caller that builds a `MarketScan` without that union reintroduces both failures silently. It also forced PHASE-4's fixtures to hand-build `lag_edges` rather than call `retrieve_neighbourhood`, so Success Criterion 4's "end-to-end" is satisfied from `leader_state` onward, not from retrieval — the plan's own PHASE-4 halt condition prescribes exactly this remedy. Answered by extending the cluster-size discount to cover the origin leader's bloc, or by making the exclusion an invariant of `MarketScan` itself rather than a caller's responsibility. **Moot as of D-87 (2026-09-09).** `lag_response` no longer exists, so there is no second unit for a `leader_move` unit to be summed with or cancelled against, and the destructive cancellation demonstrated above cannot occur. Closed by deletion rather than by resolution — the underlying general question (Q-12: correlated neighbours are one observation seen several times, and the independence discount only operates within the correlation bloc) is unchanged and remains open. Worth keeping on the record because the reproduction was real: it is the reason PHASE-4's fixtures could not call `retrieve_neighbourhood`, a limitation D-87's replacement removes, since `description` emits no `Evidence` to collide with anything. |
+| Q-39 | `LagEdge.beta` carries two incompatible quantities, and the correlation one looks inverted — which is right? | `graph/nodes/graph_retriever.py:62`, `adapters/arango.py:63`, PLAN-2026-09-08-unresponded-lag | Two defects, both currently latent. **(a)** On a correlation edge `beta = corr * std(leader) / std(cand)`; on a supply edge it is `pct_revenue / 100`, an accounting ratio. One field, a volatility ratio and a revenue share, distinguished only by `relation`. **(b)** The correlation form is the reciprocal of the conventional beta for predicting the candidate from the leader (`corr * std(cand) / std(leader)`), so it appears inverted for the direction the pipeline cares about. Neither bites today: `grep -rn '\.beta\b' src/ tests/ scripts/` finds exactly one reader, a test asserting the supply edge's `pct_revenue`. Nothing in production reads it. The unresponded-lag work deliberately computes `room` from z-scores alone so it never touches `beta` — which is why this is logged rather than fixed inline. Answered by deciding what `beta` is *for*: if it is the transfer coefficient the lag hypothesis would want, it needs one meaning, the right orientation, and a test; if nothing will read it, it should be removed rather than left as a trap. |
+| Q-37 | Does `pipeline/runner.py` have the same leader re-entry hole as the live UI did? | D-23, `pipeline/runner.py`, REQ-7 | `runner.py:80` builds `signal_universe = {c.symbol for c in signals.candidates()}` — the identical pattern `serve.py` had before PHASE-5 fixed it. It is not a live bug today, because `runner.py` type-hints `signals: ExternalSignals | None` and no caller passes a `MarketScan`. It becomes one the moment scan mode is wired into the batch runner. Answered by either unioning `shocked_leaders()` there too, or by making the runner refuse a `MarketScan` until it does. **Answered 2026-09-08 by unioning.** It was worse than latent: line 80
+called `signals.candidates()` with no `as_of`, which `MarketScan.candidates(as_of: date)` cannot
+accept, so a scan source raised `TypeError` there — and it recomputed the whole candidate list a
+second time, meaning a second full 3,204-symbol sweep. Fixed by capturing the list once (preserving
+that `signal_universe` is built from *all* candidates, not the `limit`-truncated ones) and unioning
+`shocked_leaders(as_of)` duck-typed, matching `serve.py`. Duck-typed rather than on the
+`CandidateSource` protocol, so `ExternalSignals` is not forced to expose scan-only machinery. One
+pre-existing test changed with it: `test_run_uses_injected_signals_for_both_candidate_lookups`
+pinned the double call as correct and now pins a single lookup. |
+| Q-38 | Should `leader_state.py` use a non-overlapping baseline like `shocks.standardised_moves` specifies? | `graph/nodes/leader_state.py`, `adapters/candidates.py`, D-23 | `MarketScan` reads `standardised_moves`' contract literally — *"baseline must end strictly before returns begins"* — and passes adjacent, non-overlapping windows. `leader_state.py` passes an overlapping one, so its sigma is estimated from a sample that includes the move being measured, which shrinks the z-score of exactly the shocks it is looking for. The two now disagree about the same function. Deliberately not fixed here: changing it moves every published corroboration-mode result. Answered by measuring how much the z-scores differ on real data, then deciding whether the historical results need re-running. **Attempted 2026-09-08 and parked — it is bigger than the z-scores suggest.** The
+window fix itself is three lines (patch kept at `q38-leader_state.patch`), but: (a) it forces a
+rename, since `from lagmatrix import shocks` shadows `leader_state`'s local `shocks: list[Shock]`
+and raises `UnboundLocalError`; (b) the new window needs `trail + move_win` sessions, and several
+committed fixtures were sized for `trail` alone — `_shocked_closes` (62 rows), `_self_edge_closes`,
+and `test_fanout`'s two-bloc fixture — so `returns.iloc[ti - 63 : ti - 3]` comes out **empty**, not
+merely shifted, and the node produces no shocks at all; (c) that cascades into 9 failures across
+`test_nodes`, `test_fanout` and `test_review`, plus the expected baseline move
+(`2026-04-27 SYNA up: n_supporting 16 -> 20`). So the real work is lengthening fixtures so they
+stay meaningful rather than merely passing — a test change, and the reason this was parked rather
+than rushed alongside a commit. The measured "99% of classifications unchanged" holds for real
+data with 159 sessions, where the history bound never binds; it does not describe short unit
+fixtures. |
+| Q-36 | `capture_showcase.py` and `lagmatrix.edgar.relations` now split sentences and read percentages differently — which is canonical? | D-78, `scripts/capture_showcase.py`, `src/lagmatrix/edgar/relations.py` | Two fixes went into the capture script for the page and not into the tested module: (a) the initials guard `(?<![A-Z])` blocked splitting after "Form 10-K.", gluing an unrelated clause to CGNX's disclosure; (b) "10% or more" is the ASC 280 *threshold*, not the counterparty's share — JBL's filing says "10% or more" then tables Apple at 11%, so the stored `pct_revenue=10` is wrong and the page now says 11. The duplication is the real defect: the page and the database disagree about the same filing. Answered by fixing both in `relations.py` under TDD and having `capture_showcase.py` import `classify` instead of carrying its own copy, then re-running the reclassification. |
+| ~~Q-35~~ | Do D-73/D-74's supply-chain nulls hold on the audited 818-edge graph? | D-73, D-74, README | Both pre-registrations ran when 31% of edges were competitor lists, acquisitions and reversed relations (D-78). Re-running is cheap — the scripts exist and the edges are reloaded. Direction of the error is knowable (dropping non-supply edges removes noise, so a null stays null or sharpens; it cannot flip to a false positive this way), but the magnitude is not, and D-74's pooled estimate of +0.0000 was computed over chains that partly did not exist. Answered by re-running `experiment4.py`/`experiment5.py` against the reclassified graph and comparing b, z and I². **Answered 2026-09-07:** yes — pooled b = -0.0015 (was +0.0000), I² = 44% (was 0%), still far below the 0.02 threshold. The null holds; its heterogeneity rose. |
 | ~~Q-34~~ | Does the directed supply-chain edge predict, where correlation did not? | D-72, D-63, spike 14 | The whole reason for building it: correlation is symmetric and was a powered null, co-mention is undirected, this is neither. Untestable until the relation labels are trustworthy (needs the LLM pass, hence an API key) and the crawl is wide enough that supplier-side edges reach the alert tickers. Must be pre-registered exactly as D-63 was — the graph looking economically sensible is not evidence, which is what correlation taught. **Answered by D-73/D-74: no effect detectable, estimate stable at zero, but underpowered against a 0.02 threshold.** Direction did not rescue the mechanism — though unlike the correlation nulls, this one shows no heterogeneity and no artefacts, so it is a clean measurement rather than a contested one. |
 | ~~Q-01~~ | How is the leader→lagger topology built in the first place? | — | Answered by D-16: derived from Alpaca bars (statistical lag) and News API co-mention, recomputed on trailing windows. Supply-chain sourcing abandoned. Residual question is edge *quality* → Q-14. |
 | ~~Q-02~~ | Does Qdrant filtered search hold the latency budget with `symbol IN (...)` + recency filter? | D-03 | Moot — Qdrant dropped. Answered by D-13; the filtering concern survives as Q-09 |

@@ -32,7 +32,7 @@ import pandas as pd
 
 HOST = "ridopark@192.168.10.123"
 PG = ("kubectl -n copytrade exec -i postgres-0 -- "
-      "psql -U temporal -d orchestrator -q -t -A -F'\x1f'")
+      "psql -U temporal -d orchestrator -q -t -A -v ON_ERROR_STOP=1 -F'\x1f'")
 DB = "lagmatrix"
 
 
@@ -77,25 +77,82 @@ def bulk(collection: str, docs: list[dict], chunk: int = 2000) -> None:
         arango_js(f'db.{collection}.insert({part}, {{overwriteMode:"replace"}});\n')
 
 
+def ensure_collections_js(want: dict[str, int]) -> str:
+    """JS that creates each collection in `want` if absent -- never drops one.
+    `want` maps collection name to python-arango's numeric type (2 document,
+    3 edge), the same shape `db._collection`'s `.type()` returns.
+
+    D-97: the loop this replaces (`if (db._collection(name)) { db._drop(name);
+    }`) destroyed 47,640 embeddings and their vector index on a re-run --
+    see the comment at the call site below.
+    """
+    return f"""
+      var want = {json.dumps(want)};
+      for (var name in want) {{
+        if (!db._collection(name)) {{
+          db._create(name, {{}}, want[name] === 3 ? "edge" : "document");
+        }}
+      }}
+    """
+
+
+def supply_edge_docs(rows) -> list[dict]:
+    """Shape `supplies_to` edges with a deterministic `_key`, so a second run
+    upserts the same relationship instead of inserting a duplicate edge. Two
+    rows for the same (supplier, customer) -- e.g. a restated filing --
+    collapse to one document, keyed on the pair."""
+    docs: dict[str, dict] = {}
+    for r in rows:
+        key = f"{r.supplier}->{r.customer}"
+        docs[key] = {
+            "_key": key,
+            "_from": f"equity/{r.supplier}", "_to": f"equity/{r.customer}",
+            "filing_date": r.filing_date, "pct_revenue": r.pct or None,
+            "passage": r.passage[:900], "counterparty": r.counterparty,
+            "relation": "supplies_to"}
+    return list(docs.values())
+
+
+def comention_edge_docs(rows) -> list[dict]:
+    """Mirror of `supply_edge_docs` for `co_mentioned` edges, keyed `a~b` in
+    the row's own order (the upstream query already fixes an order per row;
+    re-sorting here would add a branch nothing depends on)."""
+    docs: dict[str, dict] = {}
+    for r in rows:
+        key = f"{r.a}~{r.b}"
+        docs[key] = {
+            "_key": key,
+            "_from": f"equity/{r.a}", "_to": f"equity/{r.b}",
+            "articles": int(r.n), "pmi": float(r.pmi),
+            "first_seen": r.first_seen, "last_seen": r.last_seen,
+            "relation": "co_mentioned"}
+    return list(docs.values())
+
+
 def main() -> None:
     argparse.ArgumentParser().parse_args()
     ensure_db()
     arango_js("""
-      var want = {equity:2, supplies_to:3, co_mentioned:3, article:2};
-      for (var name in want) {
-        if (db._collection(name)) { db._drop(name); }
-        db._create(name, {}, want[name] === 3 ? "edge" : "document");
-      }
+      // deliberately NOT touching `article`: this script does not load it, and
+      // dropping it here destroyed 47,640 embeddings and their vector index on a
+      // re-run. scripts/load_vectors.py owns that collection.
+    """ + ensure_collections_js({"equity": 2, "supplies_to": 3, "co_mentioned": 3}) + """
+      if (!db._collection("article")) { db._create("article"); }
       db.supplies_to.ensureIndex({type:"persistent", fields:["filing_date"]});
       db.co_mentioned.ensureIndex({type:"persistent", fields:["pmi"]});
       print("collections created");
     """)
 
     print("  loading supply-chain edges (directed, dated)…")
-    sup = pg("""SELECT supplier, customer, filing_date,
-                       coalesce(pct_revenue::text,''), passage
-                FROM lagmatrix.supply_edge;""")
-    sup.columns = ["supplier", "customer", "filing_date", "pct", "passage"]
+    # counterparty = the name AS WRITTEN in the filing ("Apple Inc."). Needed to
+    # find the sentence that actually names the customer: picking the nearest
+    # percentage instead returns Amkor's "ten largest customers accounted for
+    # 69%" rather than "Direct sales to Apple Inc. accounted for 27.7%".
+    sup = pg("""SELECT filer_ticker, cp_ticker, filing_date,
+                       coalesce(pct_revenue::text,''), passage, counterparty
+                FROM lagmatrix.filing_mention
+                WHERE relation='customer' AND cp_ticker IS NOT NULL;""")
+    sup.columns = ["supplier", "customer", "filing_date", "pct", "passage", "counterparty"]
     syms = set(sup.supplier) | set(sup.customer)
 
     print("  loading co-mention edges (PMI-weighted, dated)…")
@@ -118,17 +175,8 @@ def main() -> None:
 
     print(f"  {len(syms)} equity vertices, {len(sup)} supply edges, {len(com)} co-mention edges")
     bulk("equity", [{"_key": s, "symbol": s} for s in sorted(syms)])
-    bulk("supplies_to", [
-        {"_from": f"equity/{r.supplier}", "_to": f"equity/{r.customer}",
-         "filing_date": r.filing_date, "pct_revenue": r.pct or None,
-         "passage": r.passage[:600], "relation": "supplies_to"}
-        for r in sup.itertuples()])
-    bulk("co_mentioned", [
-        {"_from": f"equity/{r.a}", "_to": f"equity/{r.b}",
-         "articles": int(r.n), "pmi": float(r.pmi),
-         "first_seen": r.first_seen, "last_seen": r.last_seen,
-         "relation": "co_mentioned"}
-        for r in com.itertuples()])
+    bulk("supplies_to", supply_edge_docs(sup.itertuples()))
+    bulk("co_mentioned", comention_edge_docs(com.itertuples()))
 
     out = arango_js("""
       print(JSON.stringify({

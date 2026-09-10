@@ -3,224 +3,1383 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LagMatrix — live</title>
+<title>LagMatrix — live GraphRAG</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%95%B8%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
 <style>
 :root{
-  --paper:#F7F6F3; --raised:#fff; --ink:#16202B; --ink-2:#4A5765; --ink-3:#7C8592;
-  --rule:#DEDBD3; --rule-2:#EDEBE5; --accent:#3D4E8C; --accent-soft:#E7E9F4;
-  --pro:#1B7A5A; --pro-soft:#E2F0EA; --con:#A8443A; --con-soft:#F6E7E4;
-  --flat:#7C8592; --flat-soft:#ECEDEF;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* Without this the page's own colours are dark but every piece of browser
+     chrome stays light: scrollbars, the date picker and its calendar glyph, an
+     open <select>, number-input spinners, focus rings, autofill. One line puts
+     the native UI in the same theme as the page. */
+  color-scheme: dark;
+  accent-color:#4FE3C1;
+
+  --void:#0A0D13; --panel:#141A24; --panel2:#1B222E; --line:#242C3A; --line2:#1A212C;
+  --ink:#E8EDF5; --ink2:#9AA7B8; --ink3:#647287;
+  --graph:#4FE3C1; --vector:#B78AFF; --warn:#F2B45C; --bad:#F2726B;
+  --disp:"Archivo",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
 }
-@media (prefers-color-scheme:dark){:root{
-  --paper:#0E141B; --raised:#161F29; --ink:#E9E7E2; --ink-2:#A9B3BF; --ink-3:#7C8592;
-  --rule:#27333F; --rule-2:#1D2731; --accent:#9AAAE8; --accent-soft:#1E2740;
-  --pro:#5FC9A3; --pro-soft:#122A23; --con:#E08A7E; --con-soft:#2E1B18;
-  --flat:#8A93A0; --flat-soft:#1C242E;
-}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);
-  font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
-.wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem 4rem}
-h1{font-size:1.35rem;margin:0;letter-spacing:-.01em}
-.sub{color:var(--ink-3);font-size:.85rem;margin:.3rem 0 0}
-header{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;
-  flex-wrap:wrap;border-bottom:1px solid var(--rule);padding-bottom:1.1rem}
+::selection{background:rgba(79,227,193,.25);color:var(--ink)}
+:focus-visible{outline:2px solid var(--graph);outline-offset:2px;border-radius:3px}
+*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px;
+  border:2px solid var(--void)}
+::-webkit-scrollbar-thumb:hover{background:#33405280}
+/* Safari/Chrome still paint the calendar glyph dark-on-dark under color-scheme */
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.75);cursor:pointer}
+input[type=date]::-webkit-calendar-picker-indicator:hover{filter:invert(1)}
+body{margin:0;background:var(--void);color:var(--ink);font:15.5px/1.6 var(--body);
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:2.4rem 1.4rem 4rem}
+h1{font:700 2rem/1.1 var(--disp);letter-spacing:-.02em;margin:0 0 .5rem}
+h2{font:600 .98rem/1.3 var(--disp);margin:0 0 .25rem}
+.eyebrow{font:500 .66rem/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink3);margin:0 0 .7rem}
+.lede{color:var(--ink2);margin:0}
+.sub{color:var(--ink3);font-size:.86rem;margin:.3rem 0 0}
+section{margin-top:2.8rem}
+hr{border:0;border-top:1px solid var(--line2);margin:2.8rem 0 0}
+code{font-family:var(--mono);font-size:.92em}
 
-.bar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:1.25rem 0}
-button,select,input{font:inherit;font-size:.86rem}
-button{cursor:pointer;border:1px solid var(--ink);background:var(--ink);
-  color:var(--paper);padding:.45rem 1.1rem;border-radius:3px}
-button[disabled]{opacity:.45;cursor:default}
-select,input{background:var(--raised);color:var(--ink);border:1px solid var(--rule);
-  border-radius:3px;padding:.4rem .55rem}
-label{font-size:.78rem;color:var(--ink-3)}
-.status{font-family:var(--mono);font-size:.82rem;color:var(--ink-2);margin-left:auto}
+.bar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:1.5rem 0 0}
+button,select,input{font:inherit;font-size:.84rem;font-family:var(--body)}
+button.go{cursor:pointer;border:1px solid var(--graph);background:var(--graph);color:var(--void);
+  padding:.5rem 1.3rem;border-radius:4px;font-weight:600}
+button.go[disabled]{opacity:.4;cursor:default}
+select,input{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:4px;padding:.42rem .55rem}
+label{font-size:.74rem;color:var(--ink3);font-family:var(--mono)}
+.status{font-family:var(--mono);font-size:.78rem;color:var(--ink2);margin-left:auto}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ink3);
+  margin-right:.4rem;vertical-align:middle}
+.dot.on{background:var(--graph)} .dot.off{background:var(--bad)}
+.dot.pulse{animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.28}}
+@media(prefers-reduced-motion:reduce){.dot.pulse{animation:none}}
+.wait{background:var(--panel2);border:1px solid var(--line);color:var(--ink2);
+  padding:.6rem .8rem;border-radius:4px;font-size:.82rem;margin-top:1rem}
 
-.topo{display:flex;gap:.4rem;overflow-x:auto;padding:.5rem 0 1rem;align-items:center}
-.node{border:1px solid var(--rule);background:var(--raised);border-radius:4px;
-  padding:.55rem .75rem;min-width:8.5rem;transition:.15s}
-.node .n{font-family:var(--mono);font-size:.75rem;font-weight:600}
-.node .c{font-size:.68rem;color:var(--ink-3);min-height:1em;margin-top:.1rem}
-.node.hot{border-color:var(--accent);background:var(--accent-soft)}
-.node.seen{border-color:var(--rule)}
-.arw{color:var(--ink-3);font-family:var(--mono);font-size:.8rem}
-.par{border-left:2px solid var(--rule);padding-left:.5rem;display:grid;gap:.35rem}
+.dia{margin-top:1.3rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:1rem .6rem .5rem}
+.dia svg{display:block;width:100%;height:auto}
+.zoomable{position:relative}
+.zoomable svg{cursor:grab;touch-action:none}
+.zoomable svg.grabbing{cursor:grabbing}
+.zoomable svg:focus-visible{outline:2px solid var(--graph);outline-offset:-2px}
+.zctl{position:absolute;top:.5rem;right:.5rem;display:flex;gap:.25rem;z-index:2}
+.zctl button{width:26px;height:26px;padding:0;border-radius:4px;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--line);color:var(--ink2);
+  font:500 .9rem/1 var(--mono)}
+.zctl button:hover{border-color:var(--graph);color:var(--graph)}
+.zhint{position:absolute;bottom:.45rem;right:.6rem;font:400 .66rem/1 var(--mono);
+  color:var(--ink3);pointer-events:none;opacity:.75}
+text.nl{font:500 10px var(--body);fill:var(--ink)}
+text.nc{font:400 8px var(--mono);fill:var(--ink3)}
+text.br{font:400 8.5px var(--mono);fill:var(--ink3)}
+text.sl{font:400 8.5px var(--mono);fill:var(--ink2)}
+rect.nd{fill:var(--panel2);stroke:var(--line);stroke-width:1;rx:4;transition:.25s}
+rect.nd.done{stroke:var(--graph)} rect.nd.v.done{stroke:var(--vector)}
+rect.nd.i.done{stroke:var(--warn)}
+rect.nd.live{stroke:var(--graph);fill:rgba(79,227,193,.14)}
+rect.nd.ghost{fill:none;stroke:var(--line);stroke-dasharray:4 4}
+path.ed{fill:none;stroke:var(--line2);stroke-width:1.1;transition:.25s}
+path.ed.on{stroke:var(--graph)} path.ed.vv{stroke:var(--vector)}
+rect.sp{rx:2} rect.sp.g{fill:rgba(79,227,193,.55)} rect.sp.v{fill:rgba(183,138,255,.55)}
+rect.sp.o{fill:rgba(154,167,184,.42)}
+line.gl{stroke:var(--line2);stroke-width:1}
+.legend{display:flex;gap:1rem;flex-wrap:wrap;margin-top:.6rem;padding-left:.3rem}
+.legend span{font:400 .7rem/1 var(--mono);color:var(--ink3);display:flex;align-items:center;gap:.3rem}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
 
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-top:.5rem}
-@media(max-width:820px){.cols{grid-template-columns:1fr}}
-h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);
-  font-weight:600;margin:0 0 .6rem;font-family:var(--mono)}
-.log{font-family:var(--mono);font-size:.78rem;border-top:1px solid var(--rule-2);
-  max-height:22rem;overflow-y:auto}
-.row{display:grid;grid-template-columns:4.4rem 8.6rem 1fr;gap:.6rem;padding:.32rem .2rem;
-  border-bottom:1px solid var(--rule-2)}
-.row .t{color:var(--ink-3);text-align:right;font-variant-numeric:tabular-nums}
-.row .d{color:var(--ink-2);text-align:right}
-.row.new{background:var(--accent-soft)}
+.story{margin:1.1rem 0 0;padding:0;list-style:none;counter-reset:st;
+  display:grid;gap:.75rem}
+.story li{counter-increment:st;position:relative;padding-left:2.1rem;
+  font-size:.88rem;line-height:1.55;color:var(--ink3)}
+.story li::before{content:counter(st);position:absolute;left:0;top:.05rem;
+  width:1.45rem;height:1.45rem;border-radius:50%;background:var(--panel2);
+  color:var(--ink2);font:500 .74rem/1.45rem var(--mono);text-align:center}
+.story li b{color:var(--ink);font-weight:500}
+.story .cnt{color:var(--graph);font:400 .78rem var(--mono)}
+.steps{margin:1rem 0 0;display:grid;grid-template-columns:auto 1fr;gap:.55rem 1.2rem;
+  align-items:baseline}
+.steps dt{font:500 .86rem/1.4 var(--body);color:var(--ink);white-space:nowrap}
+.steps dt code{display:block;font-size:.7rem;color:var(--ink3);font-weight:400}
+.steps dd{margin:0;color:var(--ink3);font-size:.85rem}
+.steps dd b{color:var(--ink2);font-weight:500}
+@media(max-width:680px){.steps{grid-template-columns:1fr;gap:.15rem}
+  .steps dd{margin-bottom:.7rem}}
+.ck{display:flex;gap:.28rem;flex-wrap:wrap;margin-top:.9rem}
+.ck code{font-size:.66rem;background:var(--panel2);border:1px solid var(--line);
+  color:var(--ink3);padding:.26rem .38rem;border-radius:3px}
+.note{color:var(--ink3);font-size:.84rem;margin-top:1rem}
+.note b{color:var(--ink2);font-weight:500}
+blockquote.rat{margin:.9rem 0 0;padding:.85rem 1rem;background:var(--panel);
+  border-left:2px solid var(--warn);border-radius:0 5px 5px 0;color:var(--ink2);font-size:.86rem}
 
-table{border-collapse:collapse;width:100%;font-size:.82rem}
-th{text-align:left;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--ink-3);padding:0 .6rem .45rem 0;
-  border-bottom:1px solid var(--rule)}
-td{padding:.45rem .6rem .45rem 0;border-bottom:1px solid var(--rule-2)}
-td.s{font-family:var(--mono);font-weight:600}
-.pill{font-family:var(--mono);font-size:.68rem;padding:.15rem .5rem;border-radius:2px;
-  white-space:nowrap}
-.corroborated{background:var(--pro-soft);color:var(--pro)}
-.contradicted{background:var(--con-soft);color:var(--con)}
-.neutral,.no_assessment{background:var(--flat-soft);color:var(--flat)}
-.num{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2)}
-.empty{color:var(--ink-3);font-size:.82rem;padding:.8rem 0}
-.err{background:var(--con-soft);color:var(--con);padding:.6rem .8rem;border-radius:3px;
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-top:1.3rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card>header{padding:.75rem 1rem;border-bottom:1px solid var(--line);display:flex;
+  align-items:baseline;gap:.5rem}
+.card>header b{font:500 .96rem/1 var(--mono)}
+.card>header span:not(.verdict){font-size:.7rem;color:var(--ink3)}
+/* the meta span above must not swallow the verdict pill: at (0,1,2) it
+   outranks .v-* and was silently greying every one of them out. */
+.lane{padding:.8rem 1rem}
+.verdict{font:500 .68rem/1 var(--mono);padding:.24rem .45rem;border-radius:3px;margin-left:auto}
+.v-corroborated{background:rgba(79,227,193,.13);color:var(--graph)}
+.v-contradicted{background:rgba(242,114,107,.13);color:var(--bad)}
+.v-neutral{background:var(--panel2);color:var(--ink3)}
+.hl{font-size:.82rem;color:var(--ink2);margin:0}
+.hl+.hl{margin-top:.4rem;padding-top:.4rem;border-top:1px dotted var(--line2)}
+.score{font:400 .7rem/1 var(--mono);color:var(--ink3);margin-left:.3rem}
+
+.sg{display:grid;grid-template-columns:1fr 300px;gap:1rem;margin-top:1.2rem}
+@media(max-width:780px){.sg{grid-template-columns:1fr}}
+.sgbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.7rem}
+circle.v{fill:var(--panel2);stroke:var(--graph);stroke-width:1.3;cursor:pointer}
+circle.v.u{stroke:var(--ink3);stroke-dasharray:2 2}
+circle.v.hub{fill:rgba(79,227,193,.14);stroke-width:1.8}
+circle.v.sel{fill:rgba(79,227,193,.3)}
+text.vl{font:500 9px var(--mono);fill:var(--ink);pointer-events:none}
+line.se{stroke:var(--line);stroke-width:1} line.se.sel{stroke:var(--graph);stroke-width:1.6}
+.insp h4{margin:0 0 .45rem;font:500 .64rem/1 var(--mono);letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink3)}
+.insp .sym{font:500 1rem/1 var(--mono);color:var(--graph)}
+.insp .meta{font:400 .72rem/1.5 var(--mono);color:var(--ink3);margin:.3rem 0 .55rem}
+.insp .q{font-size:.82rem;color:var(--ink2)}
+.err{background:rgba(242,114,107,.12);color:var(--bad);padding:.6rem .8rem;border-radius:4px;
   font-family:var(--mono);font-size:.78rem;margin-top:1rem}
-.note{color:var(--ink-3);font-size:.78rem;margin-top:1.5rem;border-top:1px solid var(--rule-2);
-  padding-top:1rem}
+.empty{color:var(--ink3);font-size:.83rem;font-style:italic}
+/* --- leader explorer: pick a date, pick a mover, see what moves with it --- */
+.expl{display:grid;grid-template-columns:minmax(0,20rem) minmax(0,1fr);gap:1.1rem;
+  margin-top:1.1rem;align-items:start}
+@media(max-width:820px){.expl{grid-template-columns:1fr}}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.pane>h3{margin:0;padding:.6rem .8rem;font:500 .78rem/1.3 var(--body);color:var(--ink2);
+  border-bottom:1px solid var(--line2);background:var(--panel2)}
+.pane>h3 span{color:var(--ink3);font:400 .72rem var(--mono)}
+.mv{max-height:26rem;overflow:auto}
+.mv button{display:grid;grid-template-columns:4.6rem 1fr auto;gap:.55rem;align-items:center;
+  width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);
+  padding:.42rem .8rem;color:var(--ink);font:400 .8rem/1.3 var(--mono);cursor:pointer}
+.mv button:hover{background:var(--panel2)}
+.mv button[aria-current="true"]{background:rgba(79,227,193,.10);color:var(--graph)}
+.mv .z{font-variant-numeric:tabular-nums;color:var(--ink2)}
+.mv .z.up{color:var(--graph)} .mv .z.dn{color:var(--bad)}
+.mv .cov{font:400 .68rem var(--mono);color:var(--ink3)}
+.fl{padding:.55rem .8rem .8rem}
+.frow{display:grid;grid-template-columns:4.6rem 1fr 7.5rem;gap:.6rem;align-items:center;
+  font:400 .78rem/1.5 var(--mono);padding:.16rem 0}
+.frow b{font-weight:500}
+.ftrack{position:relative;height:9px;background:var(--panel2);border-radius:2px}
+.ftrack i{position:absolute;top:0;height:9px;border-radius:2px;background:var(--graph)}
+.ftrack i.neg{background:var(--bad)}
+.ftrack u{position:absolute;top:-2px;height:13px;border-left:1px solid var(--ink3);
+  border-right:1px solid var(--ink3);opacity:.55}
+.frow span:last-child{color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums;
+  font-size:.72rem}
+.emptyp{padding:1rem .8rem;color:var(--ink3);font-size:.82rem;line-height:1.6}
+.netwrap{position:relative;background:var(--void);border-bottom:1px solid var(--line2)}
+.netwrap svg{display:block;width:100%;height:340px}
+.nn{cursor:pointer}
+.nn circle{stroke:var(--void);stroke-width:1.5}
+.nn text{font:400 .62rem var(--mono);fill:var(--ink2);pointer-events:none}
+.nn.lead circle{stroke:var(--graph);stroke-width:2}
+.nn.lead text{fill:var(--ink);font-weight:500}
+.nn.sel circle{stroke:var(--ink);stroke-width:2}
+.ne{stroke-linecap:round}
+.nettools{display:flex;gap:.5rem;align-items:center;padding:.45rem .8rem;
+  border-bottom:1px solid var(--line2);font:400 .72rem var(--body);color:var(--ink3)}
+.nettools button{background:var(--panel2);border:1px solid var(--line);color:var(--ink2);
+  border-radius:3px;padding:.2rem .5rem;font:400 .7rem var(--body);cursor:pointer}
+.nettools button[aria-pressed="true"]{background:rgba(79,227,193,.14);color:var(--graph);
+  border-color:var(--graph)}
+.netnote{padding:.5rem .8rem;color:var(--ink3);font-size:.74rem;line-height:1.55;
+  border-bottom:1px solid var(--line2)}
+.netnote b{color:var(--ink2);font-weight:500}
+.bars{display:grid;gap:.35rem;margin-top:1.2rem}
+.abar{display:grid;grid-template-columns:9.5rem 1fr 3.4rem;gap:.65rem;align-items:center;
+  font:400 .76rem/1 var(--mono)}
+.abar i{display:block;height:10px;border-radius:2px;background:var(--line)}
+.abar.keep i{background:var(--graph)}
+.abar span:last-child{color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums}
+footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
+  color:var(--ink3);font-size:.78rem}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <div>
-      <h1>LagMatrix — live</h1>
-      <p class="sub">Each run streams from a real <code>graph.astream</code>. Timings are wall-clock.</p>
-    </div>
-  </header>
 
+<header>
+  <p class="eyebrow">LangGraph · ArangoDB · GraphRAG · live</p>
+  <h1>What moved today, and what moves with it</h1>
+  <p class="lede">Pick a day. See which companies moved unusually for them. Click one, and see
+    which other companies have actually moved with it — measured over a decade, with a confidence
+    interval on every number.</p>
+  <p class="sub" style="margin-top:.8rem"><b>The honest version of what this is.</b> This project
+    set out to find companies that move <i>after</i> a leader does — a tradeable lag. It does not
+    exist in this data. We tested it properly: every pair in the universe, 2.47 million of them,
+    at five different delays, over ten years, choosing the pairs in one window and checking them
+    in a completely separate one. A relationship worth 0.21 when you pick it is worth
+    <b>0.03</b> when you test it. Chains of relationships fare no better. Three pre-registered
+    tests, all null.</p>
+  <p class="sub" style="margin-top:.5rem"><b>What is there instead, and it is not small.</b> The
+    <i>same-day</i> version of the same measurement survives that test almost intact:
+    <b>0.59</b>. Companies that have moved together reliably keep moving together, and that holds
+    up across four years of data the measurement never saw. So this page shows you that, and
+    stops there. It will tell you Palo Alto Networks moves with CrowdStrike and Fortinet; it will
+    not tell you which one moves first, because we looked and nothing does.</p>
+  <p class="sub" style="margin-top:.5rem"><b>Isn't that circular?</b> A fair challenge, and it
+    is why this project spent months on the supply chain instead. Picking neighbours <em>because</em>
+    they correlate and then citing their correlation as evidence for a forecast <b>is</b>
+    circular. But "these two have moved together, and here is how precisely that is measured" is
+    a description, not a forecast — and it is falsifiable: measure it on 2016–2022, check it on
+    2022–2026, see whether it holds. It does. That is the difference between the number below and
+    the one this project could not find.</p>
+  <div id="err"></div>
+</header>
+
+<hr>
+
+<section>
+  <p class="eyebrow">Start here</p>
+  <h2>Pick a day, pick something that moved, see what moves with it</h2>
+  <p class="sub">Two steps, both live. <b>One:</b> sweep every company's own price history for the
+    day you choose and keep the ones whose last three sessions were unusually large for them.
+    <b>Two:</b> click one, and see the companies whose prices have actually moved with it over the
+    past year — measured, with a confidence interval on every number.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What the number is, and is not.</b> It is a
+    correlation: how reliably these two have moved <i>together</i>, same day. It is not a forecast.
+    We tested whether one company's move anticipates another's — every pair in the universe, five
+    lags, ten years, out of sample — and it does not: the relationship that looks like 0.21 in one
+    window is worth 0.03 in the next. Same-day co-movement is the opposite: it holds up at 0.59.
+    So the bars below say "these move together", never "this one moves next".</p>
+  <div class="bar" style="margin-top:1rem">
+    <label for="xdate">date</label>
+    <input id="xdate" type="date">
+    <label for="xcorr">min correlation</label>
+    <input id="xcorr" type="number" min="0.1" max="0.95" step="0.05" value="0.5"
+      style="width:5rem">
+    <button class="go" id="xgo">Scan</button>
+    <span class="status" id="xstatus"></span>
+  </div>
+  <div class="expl">
+    <div class="pane">
+      <h3>What moved <span id="xmvmeta"></span></h3>
+      <div class="mv" id="xmovers">
+        <p class="emptyp">Press Scan.</p>
+      </div>
+    </div>
+    <div class="pane">
+      <h3>Moves with it <span id="xflmeta"></span>
+        <button class="go" id="xrun" style="float:right;padding:.16rem .5rem;font-size:.7rem"
+          hidden>Assess these →</button></h3>
+      <div class="nettools" id="xnettools" hidden>
+        <button id="xbackbone" aria-pressed="false">backbone only</button>
+        <span id="xnetmeta"></span>
+      </div>
+      <div class="netwrap" id="xnetwrap" hidden><svg id="xnet" role="img"
+        aria-label="co-movement network around the selected leader"></svg></div>
+      <p class="netnote" id="xnetnote" hidden></p>
+      <div class="fl" id="xfollowers">
+        <p class="emptyp">Pick a company on the left.</p>
+      </div>
+    </div>
+  </div>
+  <p class="note" id="xownmove" hidden></p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">The run</p>
+  <h2>How a company ends up on this list</h2>
   <div class="bar">
     <label for="src">source</label>
-    <select id="src"><option value="synthetic">synthetic universe</option></select>
+    <select id="src"><option value="synthetic">alert feed, invented data — corroboration-first</option></select>
     <label for="lim">limit</label>
-    <input id="lim" type="number" min="1" placeholder="all" style="width:5.5rem">
-    <button id="go">Run</button>
-    <span class="status" id="status">idle</span>
+    <input id="lim" type="number" min="1" value="3" style="width:4.5rem">
+    <button class="go" id="go">Run</button>
+    <span class="status" id="status"><span class="dot" id="rag"></span><span id="ragtxt">checking…</span></span>
+  </div>
+  <p class="sub" style="margin-top:.7rem"><b>"limit"</b> is how many companies to assess — one
+    independent branch each, so 3 means three running at once. It changes how much work you watch,
+    never an answer. A large limit looks frozen briefly: the graph finishes a whole stage for every
+    company before reporting anything, so with 50 nothing appears for ten seconds and then it all
+    arrives at once. The counter keeps ticking so you can tell it is working.</p>
+  <p class="sub" style="margin-top:.5rem"><b>Which data?</b>
+    <b style="color:var(--ink2)">Synthetic</b> is invented companies with invented prices —
+    <code>SYNA</code>, <code>SYNB</code> — shipped with the source so anyone can clone the
+    repository and press Run with no credentials. Nothing under that option is a real quote.</p>
+  <p class="sub" style="margin-top:.5rem" id="realnote"><b style="color:var(--ink2)">Real market
+    data</b> is genuine share prices and the genuine options-alert feed this project was built to
+    evaluate. Both are licensed vendor data and a private feed, so <b>neither is in the
+    repository</b> — the option appears only when the server is started with <code>--allow-real</code>
+    on a machine that already holds those files. Nothing is uploaded anywhere.</p>
+  <p class="sub" style="margin-top:.5rem" id="scannote"><b style="color:var(--ink2)">Scan-first</b>
+    sweeps every company's price history for the ones that just moved, then asks the supply graph
+    whether a real supplier of that mover exists on paper — a company that named it as a customer
+    in an SEC filing, dated before the day in question. It is the strictest thing here, and also
+    the narrowest: the graph holds 76 customers, so on a typical day only a handful of movers have
+    any disclosed supplier at all. <b>Co-movement above covers far more</b> — 36 of 43 movers on
+    2026-09-04, against 2 by filings. The filing is better evidence about any single pair; there
+    are just very few pairs.</p>
+  <p class="sub">Four steps. The first two decide <i>which</i> companies are worth looking at; the
+    last two decide <i>what to think</i> about each one. Everything below is drawn from the run
+    itself — a box lights up only once that step has actually finished.</p>
+  <ol class="story">
+    <li><b>Find out what moved.</b> Sweep every company in the price file and keep the ones that
+      moved by an unusual amount in the last three sessions. Nothing about the graph is consulted
+      yet. <span id="s1n"></span></li>
+    <li><b>Ask who is connected to them.</b> For each of those movers, walk the supply graph to the
+      companies that named it as a customer in an annual report. Those become the candidates.
+      <span id="s2n"></span></li>
+    <li><b>Gather what is known about each candidate.</b> One lane per candidate, all running at
+      once. Each lane looks up the company's price-correlated neighbours and checks whether any of
+      them moved, and — at the same time — searches the news for the company itself.</li>
+    <li><b>Weigh it and answer.</b> The lanes merge, related companies that always move together
+      are discounted so one sector-wide wobble is not counted five times, and each candidate gets
+      one of three answers.</li>
+  </ol>
+  <p class="sub" style="margin-top:.8rem" id="ordernote"><b>Steps 1 and 2 only exist in
+    scan mode.</b> With an alert feed as the source, a company arrives already chosen and the run
+    starts at step 3 — the diagram below begins at <code>START</code> with nothing above it.</p>
+  <p class="sub" style="margin-top:.8rem">The dashed line is a route the code offers but this run
+    didn't take: a company with no related companies at all stops there instead of continuing.
+    <span style="color:var(--ink3)">(In LangGraph terms: <code>Send</code> fan-out per candidate,
+    parallel retrieval rejoining at <code>context_fusion</code>, and a conditional edge to
+    <code>END</code>.)</span></p>
+  <div class="dia zoomable">
+    <div class="zctl">
+      <button data-z="out" title="Zoom out (−)" aria-label="Zoom out">−</button>
+      <button data-z="in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      <button data-z="fit" title="Fit to view (0)" aria-label="Fit to view">⤢</button>
+    </div>
+    <span class="zhint">scroll to zoom · drag to pan</span>
+    <svg id="topo" viewBox="0 0 960 300" role="img" tabindex="0"
+       aria-label="LangGraph execution graph, zoomable and pannable"></svg>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--graph)"></i>graph path</span>
+    <span><i style="background:var(--vector)"></i>vector path</span>
+    <span><i style="background:var(--warn)"></i>interrupt gate</span>
   </div>
 
-  <div class="topo" id="topo">
-    <div class="node" data-n="START"><div class="n">START</div><div class="c" data-c></div></div>
-    <div class="arw">Send→</div>
-    <div class="node" data-n="graph_retriever"><div class="n">graph_retriever</div><div class="c" data-c></div></div>
-    <div class="arw">→</div>
-    <div class="par">
-      <div class="node" data-n="leader_state"><div class="n">leader_state</div><div class="c" data-c></div></div>
-      <div class="node" data-n="vector_retriever"><div class="n">vector_retriever</div><div class="c" data-c>off (no news)</div></div>
-    </div>
-    <div class="arw">→</div>
-    <div class="node" data-n="context_fusion"><div class="n">context_fusion</div><div class="c" data-c></div></div>
-    <div class="arw">→</div>
-    <div class="node" data-n="assessor"><div class="n">assessor</div><div class="c" data-c></div></div>
-    <div class="arw">→</div>
-    <div class="node" data-n="review"><div class="n">review</div><div class="c" data-c></div></div>
-    <div class="arw">→</div>
-    <div class="node" data-n="publisher"><div class="n">publisher</div><div class="c" data-c></div></div>
-  </div>
+  <h2 style="margin-top:2rem">The same four steps, in detail</h2>
+  <p class="sub">The name in grey under each one is the pipeline node, if you want to read the
+    code.</p>
+  <dl class="steps">
+    <dt>1 · find out what moved <code>MarketScan.shocked_leaders</code></dt>
+    <dd>Sweeps every company in the price file and keeps those whose last three sessions are large
+      relative to their own recent volatility. This is where a run starts: no company is proposed
+      until something has actually happened to it.</dd>
 
-  <div class="cols">
-    <div>
-      <h2>Node events</h2>
-      <div class="log" id="log"><div class="empty">Press Run.</div></div>
-    </div>
-    <div>
-      <h2>Assessments</h2>
-      <div id="res"><div class="empty">Populated when the run completes.</div></div>
-    </div>
-  </div>
+    <dt>2 · ask who is connected <code>MarketScan.candidates</code></dt>
+    <dd>Walks the supply graph from each mover to the companies that named it as a customer in an
+      annual report, using only filings dated before the day being assessed. Each candidate
+      remembers which mover surfaced it.</dd>
 
-  <div id="err"></div>
-  <p class="note">Synthetic tickers are invented and so are their prices; nothing here
-    is a real quote or position. With <code>--allow-real</code> the server also offers
-    the local Alpaca bars, which are not part of the repository.</p>
+    <dt>3a · see how neighbours moved <code>graph_retriever → leader_state</code></dt>
+    <dd>Looks up the companies whose share price has historically moved with this one, then checks
+      whether any of them moved unusually in the days before. On most days most of them did not,
+      which is why so many runs come back "neutral". The lookup has to come first here — you
+      cannot ask how a company's neighbours moved before knowing who they are.</dd>
+
+    <dt>3b · search the news <code>vector_retriever</code></dt>
+    <dd>Searches 47,640 real headlines for the ones closest in meaning to this company's
+      situation. It needs only the company's ticker, so it runs at the same time as 3a rather than
+      after it. (It is still dispatched after the neighbour lookup, for a scheduling reason rather
+      than a real dependency — see <code>D-89</code>.)</dd>
+
+    <dt>4 · weigh it <code>context_fusion</code></dt>
+    <dd>Merges the lanes and decides how much each moving company counts for. Companies that always
+      move together are discounted, so one sector-wide wobble is not counted five times as five
+      independent signals. <b>Only the price movements are counted here.</b> The news is attached
+      and shown to you, but carries a weight of exactly zero — see the note under the verdicts.</dd>
+
+    <dt>4 · answer <code>assessor</code></dt>
+    <dd>Turns that weighted evidence into <b>corroborated</b>, <b>contradicted</b>, or
+      <b>neutral</b>.</dd>
+
+    <dt>pause if contradicted <code>review</code></dt>
+    <dd>If any verdict came back contradicted, the run stops and waits for confirmation before
+      anything is published. This is the step that makes the pipeline resumable — it can halt
+      mid-run and pick up later from a saved snapshot.</dd>
+
+    <dt>write the results <code>publisher</code></dt>
+    <dd>Writes the finished assessments out. Nothing reaches this step until the pause above has
+      been cleared.</dd>
+
+    <dt>stop early <code>END</code></dt>
+    <dd>The dashed route. A company with no related companies at all has nothing to assess, so
+      that branch stops instead of continuing.</dd>
+  </dl>
+
+  <h2 style="margin-top:2.2rem">Where the work overlapped</h2>
+  <p class="sub"><b>Why this chart is here:</b> "these ran in parallel" is easy to claim and hard
+    to prove. Each bar is one step, drawn from when it started to when it returned. Where bars
+    overlap left to right, those steps were genuinely running at the same moment — that is
+    measured, not asserted.</p>
+  <div class="dia"><svg id="spans" viewBox="0 0 960 120" role="img"
+     aria-label="task spans"></svg></div>
+  <div class="ck" id="ckpts"></div>
+  <p class="note" id="cknote">Checkpoints appear here as the run saves them.</p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">What it concluded</p>
+  <h2>What it decided — and the number it refuses to give</h2>
+  <p class="sub"><b>What a verdict means:</b> the pipeline looks at how each company's neighbours
+    moved <i>over the same window</i>, and asks whether they moved consistently with this company.
+    Three outcomes: <b>corroborated</b> (the neighbours agree), <b>contradicted</b> (they point the
+    other way), or <b>neutral</b> (not enough moved to say). It is a reading of what happened, in
+    the past tense throughout — the forward-looking version of this question was tested three times
+    and came back null, which is the subject of the last section on this page.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What actually decides it — and it is one thing, in
+    every mode.</b> Of everything retrieved above, the verdict turns on a single input: <b>how
+    price-correlated neighbours moved</b>. Measured on its own, that input is worth nothing —
+    −4.6&nbsp;bp, z&nbsp;=&nbsp;−0.72. A card from a scan run also carries a one-line
+    <b>description</b> of what the company itself has already done and who surfaced it. Like the
+    news below, it is shown because a person judging the verdict should see it, and it is not
+    allowed to change it.</p>
+  <p class="sub" style="margin-top:.6rem"><b>There used to be a second input here. We measured it
+    and removed it.</b> It scored each scan candidate by how much of its leader's move was still
+    ahead of it — a ratio, sorted, with the least-moved names on top. Two independent measurements
+    killed it: a study over <b>432 scan dates and 13,063 supplier-events</b>, and a separate
+    rebuild over 30 dates and 209 linked events using different data and different code. Dividing
+    one company's move by another's quietly assumes the first should travel the second's full
+    distance; measured, that pass-through is <b>+0.18 the same day and about zero forward</b>, and
+    it does not grow with the size of the leader's shock in either sample. The ordering it existed
+    to produce was flat against forward returns in both. And the names it called "still has room"
+    earned <b>exactly what the names it called "moved against" earned</b> (+0.084 vs +0.084 in one
+    sample, −0.206 vs −0.206 in the other) — the split carried nothing the correlation vote above
+    did not already have. The co-movement it treated as a supply-chain effect turns out to be the
+    same trailing price correlation that vote already uses.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What replaced it is deliberately inert.</b> A sentence:
+    how far this company has already moved, in its own volatility units, and which shocked company
+    surfaced it. No threshold, no category, no ratio, no ranking — a fact about what already
+    happened, not a claim about what happens next. Removing a number is cheaper than defending one
+    that a measurement says is noise, and the finding is kept on the page rather than quietly
+    deleted with the code.</p>
+  <p class="sub" style="margin-top:.6rem"><b>What still does not vote.</b> The news is fetched,
+    scored, attached to the result and displayed, and then given a weight of <code>0.0</code> — it
+    is context for a human reading the output. The supply-chain links do not vote either: those
+    run customer&nbsp;→&nbsp;supplier, so a supplier moving says nothing about its customer, and
+    the code filters them out of the count on purpose. Both are retrieved because a person judging
+    the verdict should see them; neither is allowed to change it. That is a deliberate choice,
+    not an oversight — nothing here has been shown to predict returns, so weighting it would be
+    inventing confidence.</p>
+  <div class="cards" id="verdicts"><p class="empty">Run to populate.</p></div>
+  <blockquote class="rat" id="rationale" hidden></blockquote>
+  <p class="note" id="ratnote" hidden><b>Read the last sentence of that.</b> The pipeline works
+    out how much evidence points each way — and then refuses to turn it into a probability,
+    because no test we ran would justify one. It would be easy to print "73% confident" here. It
+    would also be made up.</p>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">The graph, live</p>
+  <h2>Every edge traces to a sentence in a filing</h2>
+  <p class="sub"><b>What you are clicking:</b> each line is one company that named another as a
+    customer in an annual report. Click a supplier and you get the actual sentence out of that
+    filing — you are never asked to take a connection on trust. A dashed circle means the link is
+    probably real but the stored text is a table row or page header, so there is nothing quotable
+    to show you; the page says so rather than dropping it or quoting a fragment.</p>
+  <p class="sub" style="margin-top:.5rem">The <b>two-hop</b> results below use a different kind of
+    link: two companies mentioned together in enough news stories that the pairing is unlikely to
+    be coincidence. Index funds are excluded — an ETF gets mentioned alongside everything it
+    holds, which would make any two holdings look related.
+    <span style="color:var(--ink3)">(Both queries run against ArangoDB the moment you press
+    Traverse, bounded so nothing filed after your chosen date can be seen.)</span></p>
+  <div class="bar">
+    <label for="sym">company</label>
+    <input id="sym" value="AAPL" style="width:6rem;text-transform:uppercase">
+    <label for="asof">as of</label>
+    <input id="asof" type="date">
+    <button class="go" id="fetch">Traverse</button>
+    <span class="status" id="gstatus"></span>
+  </div>
+  <div class="sg">
+    <div class="sgbox zoomable">
+      <div class="zctl">
+        <button data-z="out" title="Zoom out" aria-label="Zoom out">−</button>
+        <button data-z="in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button data-z="fit" title="Fit to view" aria-label="Fit to view">⤢</button>
+      </div>
+      <svg id="subgraph" viewBox="0 0 620 340" role="img" tabindex="0"
+         aria-label="supply-chain subgraph, zoomable and pannable"></svg>
+    </div>
+    <div class="sgbox insp" id="insp"><h4>Inspector</h4>
+      <p class="q" style="color:var(--ink3)">Traverse, then click a supplier.</p></div>
+  </div>
+  <div class="cards" id="twohop"></div>
+</section>
+
+<hr>
+
+<section>
+  <p class="eyebrow">Honest labelling</p>
+  <h2>What went wrong, and what didn't work</h2>
+  <p class="sub">Two things worth saying plainly, because a demo that only shows its good side is
+    not worth much.</p>
+  <div class="bars" id="audit"></div>
+  <p class="note"><b>First: a third of the connections were wrong.</b> The extractor originally
+    found 1,211 "this company is our customer" relationships. Re-reading each one against the
+    single sentence that actually names the other company left <b>818</b>. The rest were
+    companies listing their <em>competitors</em>, announcing <em>acquisitions</em>, or naming a
+    supplier and getting read backwards. Two were <em>South Dakota v. Wayfair</em> — a Supreme
+    Court sales-tax case that the extractor read as a business relationship.</p>
+  <p class="note"><b>Second: none of it predicts anything.</b> The obvious hope is that if a big
+    customer moves today, its suppliers move tomorrow. We tested that, having written down in
+    advance what would count as a real effect. The answer: a 1% move in the customer is followed
+    by roughly <b>&minus;0.15 basis points</b> on its suppliers the next day. We had declared
+    beforehand that we would need at least <b>2 basis points</b> to call it tradeable — so the
+    result is more than ten times too small, and pointing the wrong way. It was not consistent
+    year to year either.</p>
+  <p class="note" style="margin-top:.6rem"><b>Then we stopped testing links and tested everything.</b>
+    Rather than argue about which kind of relationship to look at, the last test took
+    <b>every pair of companies in the universe</b> — 2,472,756 of them — at five different delays,
+    over ten years, picking the strongest pairs in one window and checking them in a separate
+    four-year window the measurement had never seen. Pairs that looked like <b>0.21</b> when
+    chosen were worth <b>0.03</b> when tested. A shuffled control, which destroys any real timing
+    relationship, scored as well or better at four of the five delays. Chains of relationships
+    added nothing: they beat a coin flip on direction and carried no size at all.
+    <b>That null is the well-powered one</b> — a real effect of the size worth trading could not
+    have been missed at that sample. The same measurement done <i>same-day</i> instead of
+    next-day survives the identical test at 0.59, which is what the top of this page shows you.</p>
+  <p class="note" style="margin-top:.6rem"><b>That 0.59 was 0.64 earlier today, and the correction
+    is worth showing.</b> A separate test returned an average move of eleven thousand standard
+    deviations — obviously impossible, and chasing it found two faults in the price file. Eleven
+    "returns" above 1000%: bankruptcy emergences, reverse splits and reused tickers, where a company
+    ends and a different one inherits the symbol. And a handful of names whose price never moved for
+    months, so dividing by their volatility divided by almost zero — one produced a "move" of 593
+    million sigma. Neither is a market event; both are the data being wrong. Removing them lowers the
+    headline from 0.64 to 0.59. The conclusion does not change — 0.59 against 0.03 for the
+    next-day version is the same gap — but the number was wrong while it was on this page, and the
+    honest thing is to say so rather than quietly swap it.
+    <b>Nothing here is a trading signal.</b>
+    <span style="color:var(--ink3)">(b = &minus;0.0015 against a pre-registered threshold of
+    0.02, I&sup2; = 44%, re-run on the cleaned graph rather than inherited from the dirty
+    one.)</span></p>
+  <p class="note"><b>And one honest limitation about the graph itself.</b> A supply link has a
+    <em>direction</em> (the supplier names its customer, not the other way round) and a
+    <em>date</em> (we know when it was disclosed) — but after the cleanup above, it is only ever
+    one step deep. Going two steps needs a supplier <em>and its own supplier</em> to both name a
+    customer publicly, which almost never happens. The news link does reach two steps and is
+    dated, but it has no direction: "mentioned together" does not tell you who leads whom. So
+    each of those three properties is real here. All three at once is not something this data can
+    show, and this page does not pretend otherwise.</p>
+</section>
+
+<footer>
+  Served locally from <code>scripts/serve.py</code>. Company filings come from EDGAR and news
+  headlines from Benzinga via Alpaca; both are real. Share prices and the alert feed are the two
+  things kept out of the repository.
+</footer>
+
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
-const nodes = [...document.querySelectorAll(".node")];
-let es = null;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let es = null, SPANS = [], CKPTS = [], LANES = [], INTERRUPT = null;
+let tick = null, runStart = 0, stage = "", SCAN = null;
+function beat(){
+  const s = ((Date.now() - runStart) / 1000).toFixed(1);
+  $("#status").innerHTML = `<span class="dot on pulse"></span>${esc(stage)} · ${s}s`;
+}
+function startClock(label){
+  stage = label; runStart = Date.now(); beat();
+  clearInterval(tick); tick = setInterval(beat, 100);
+}
+function stopClock(){ clearInterval(tick); tick = null; }
 
-fetch("/config").then(r=>r.json()).then(c=>{
+/* ---------- capability probe ---------- */
+fetch("/config").then(r => r.json()).then(c => {
+  // The date comes from the data, not a constant baked into this page —
+  // the two used to drift apart silently.
+  if (c.default_as_of) {
+    $("#asof").value = c.default_as_of;
+    $("#xdate").value = c.default_as_of;
+  }
+  if (!c.allow_real) {
+    $("#realnote").insertAdjacentHTML("beforeend",
+      ` <span style="color:var(--ink3)">It is not offered in this session — the server was
+        started without <code>--allow-real</code>, so only the synthetic universe is
+        available.</span>`);
+  }
   if (c.allow_real) {
     const o = document.createElement("option");
-    o.value = "real"; o.textContent = "real data (local only)";
+    o.value = "real"; o.textContent = "alert feed, real data — corroboration-first";
     $("#src").appendChild(o);
+  }
+  if (c.allow_real && c.graphrag) {
+    // scan-first goes first and is selected: discovery is the primary story,
+    // the alert-fed sources are the older corroboration-first ordering.
+    const o = document.createElement("option");
+    o.value = "scan"; o.textContent = "scan-first — start from what moved (default)";
+    $("#src").prepend(o);
+    $("#src").value = "scan";
+  }
+  // the note is what keeps the diagram from overclaiming, so it shows whenever
+  // scan-first is selected — including at rest, before any run
+  $("#s1n").textContent = ""; $("#s2n").textContent = "";
+  drawTopo();
+  $("#rag").className = "dot " + (c.graphrag ? "on" : "off");
+  $("#ragtxt").textContent = c.graphrag
+    ? "GraphRAG online" : "graph/vector offline — correlation only";
+  if (!c.graphrag) {
+    $("#err").innerHTML = `<div class="err">ArangoDB unreachable at ${esc(c.arango_url)} — the
+      run will still execute, but with the correlation edges only. Open the tunnel to enable the
+      graph and vector retrievers.</div>`;
   }
 });
 
-// remember any caption authored in the markup (e.g. vector_retriever's "off"),
-// so a reset restores it instead of blanking it
-nodes.forEach(n=>{ n.dataset.init = n.querySelector("[data-c]").textContent; });
 
-function reset(){
-  nodes.forEach(n=>{
-    n.classList.remove("hot","seen");
-    n.querySelector("[data-c]").textContent = n.dataset.init;
+/* ---------- zoom + pan, shared by both diagrams ---------- */
+function makeZoomable(svg){
+  let base = null, view = null, touched = false, drag = null;
+  const MIN = 0.15, MAX = 8;            // relative to the fitted view
+  const apply = () => svg.setAttribute("viewBox",
+    `${view.x.toFixed(2)} ${view.y.toFixed(2)} ${view.w.toFixed(2)} ${view.h.toFixed(2)}`);
+  const at = e => {                      // pointer -> current viewBox coords
+    const r = svg.getBoundingClientRect();
+    return {x: view.x + (e.clientX - r.left) / r.width * view.w,
+            y: view.y + (e.clientY - r.top) / r.height * view.h};
+  };
+  function scale(k, cx, cy){
+    // clamp against the fitted size so you cannot zoom into empty space forever
+    const next = view.w * k;
+    if (next < base.w * MIN || next > base.w * MAX) return;
+    view.x = cx - (cx - view.x) * k; view.y = cy - (cy - view.y) * k;
+    view.w *= k; view.h *= k;
+    touched = true; apply();
+  }
+  svg.addEventListener("wheel", e => {
+    if (!view) return;
+    e.preventDefault();                  // otherwise the page scrolls instead
+    const p = at(e);
+    scale(Math.exp(e.deltaY * 0.0016), p.x, p.y);
+  }, {passive: false});
+  svg.addEventListener("pointerdown", e => {
+    if (!view || e.button !== 0) return;
+    drag = {sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false};
+    // throws if the pointer is already gone (a released or synthetic event);
+    // capture is an optimisation for dragging outside the box, not required
+    try { svg.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
   });
-  $("#log").innerHTML = ""; $("#res").innerHTML = ""; $("#err").innerHTML = "";
+  svg.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    // a few pixels of slack so clicking a node still registers as a click
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true; svg.classList.add("grabbing");
+    view.x = drag.vx - dx / r.width * view.w;
+    view.y = drag.vy - dy / r.height * view.h;
+    touched = true; apply();
+  });
+  const end = e => {
+    if (!drag) return;
+    try {
+      if (svg.hasPointerCapture?.(e.pointerId)) svg.releasePointerCapture(e.pointerId);
+    } catch { /* already released */ }
+    drag = null; svg.classList.remove("grabbing");
+  };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("keydown", e => {
+    if (!view) return;
+    const c = {x: view.x + view.w / 2, y: view.y + view.h / 2}, step = view.w * 0.12;
+    const moves = {ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+                   ArrowUp: [0, -step], ArrowDown: [0, step]};
+    if (e.key === "+" || e.key === "=") { scale(1 / 1.25, c.x, c.y); e.preventDefault(); }
+    else if (e.key === "-") { scale(1.25, c.x, c.y); e.preventDefault(); }
+    else if (e.key === "0") { api.fit(); e.preventDefault(); }
+    else if (moves[e.key]) {
+      view.x += moves[e.key][0]; view.y += moves[e.key][1];
+      touched = true; apply(); e.preventDefault();
+    }
+  });
+  const ctl = svg.closest(".zoomable")?.querySelector(".zctl");
+  if (ctl) ctl.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || !view) return;
+    const c = {x: view.x + view.w / 2, y: view.y + view.h / 2};
+    if (b.dataset.z === "in") scale(1 / 1.3, c.x, c.y);
+    else if (b.dataset.z === "out") scale(1.3, c.x, c.y);
+    else api.fit();
+  });
+  const api = {
+    // called on every redraw: follow the freshly-computed fit unless the reader
+    // has zoomed or panned, in which case leave their view alone
+    setBase(vb){ base = vb; if (!touched || !view) { view = {...vb}; apply(); } },
+    fit(){ touched = false; if (base) { view = {...base}; apply(); } },
+  };
+  return api;
 }
-function mark(name, txt){
-  nodes.forEach(n=>n.classList.remove("hot"));
-  const n = nodes.find(x=>x.dataset.n===name);
-  if(!n) return;
-  n.classList.add("hot","seen");
-  if (txt) n.querySelector("[data-c]").textContent = txt;
+const ZOOM = {};
+
+/* ---------- execution graph (top-to-bottom, canvas sized to the run) ---------- */
+const state = {};                       // "node|key" or "node" -> "done"
+// Plain-English label first, the LangGraph node name second. A reader should
+// not have to know what "context_fusion" is to follow the diagram.
+const SAYS = {
+  START: "the run begins",
+  graph_retriever: "find related companies",
+  leader_state: "see how they moved",
+  vector_retriever: "search the news",
+  context_fusion: "weigh the evidence",
+  assessor: "reach a verdict",
+  review: "pause if contradicted",
+  publisher: "write the results",
+};
+const CHAIN = [                         // the single-track tail, after the rejoin
+  {id: "context_fusion", w: 150}, {id: "assessor", w: 132},
+  {id: "review", w: 150, cls: "i"}, {id: "publisher", w: 140},
+];
+const MAX_LANES = 4;                    // drawn in full; the rest are summarised
+function drawTopo(){
+  const all = LANES.length ? LANES : ["—"];
+  // A run of 200 candidates has 200 identical branches. Drawing them all makes a
+  // canvas ~50,000px wide, which the browser then scales down until the whole
+  // diagram is a few pixels tall. The shape is the point, not the enumeration —
+  // so draw a handful properly and say how many were left out.
+  const lanes = all.slice(0, MAX_LANES);
+  const extra = all.length - lanes.length;
+  const cols = lanes.length + (extra > 0 ? 1 : 0);
+  const LW = 250, PAD = 34;             // lane width, and margin either side
+  const W = Math.max(760, cols * LW + PAD * 2);
+  const cx = i => PAD + LW / 2 + i * LW;
+  const mid = W / 2;
+  // Draw the two origination stages whenever scan-first is selected, not only
+  // once a run has reported them — otherwise the page at rest still opens with
+  // "find related companies" and reads as though a ticker were handed to it.
+  const scanMode = SCAN !== null || $("#src")?.value === "scan";
+  const PRE = scanMode ? 176 : 0;
+  const Y = {sweep: 46, trav: 126, start: 46 + PRE, fan: 156 + PRE,
+             leaf: 266 + PRE, chain: 376 + PRE};
+  const GAP = 82;                       // vertical pitch of the tail
+  const HB = 22;                        // half box height (two lines of text)
+  const H = Y.chain + GAP * (CHAIN.length - 1) + 78;
+
+  // vertical cubic: leaves the source downward, enters the target downward
+  const link = (x1, y1, x2, y2, cls, dash) => {
+    const d = Math.max(18, (y2 - y1) / 2);
+    return `<path class="ed ${cls}" ${dash ? 'stroke-dasharray="3 3"' : ""}
+      d="M${x1} ${y1} C${x1} ${y1 + d} ${x2} ${y2 - d} ${x2} ${y2}"></path>`;
+  };
+  const box = (cxx, y, w, id, label, cls) => `
+    <rect class="nd ${cls || ""} ${state[id] || ""}" x="${(cxx - w / 2).toFixed(1)}"
+      y="${y - HB}" width="${w}" height="${HB * 2}"></rect>
+    <text class="nl" x="${cxx.toFixed(1)}" y="${y - 3}"
+      text-anchor="middle">${esc(SAYS[label] || label)}</text>
+    <text class="nc" x="${cxx.toFixed(1)}" y="${y + 11}"
+      text-anchor="middle">${esc(label)}</text>`;
+
+  let out = "";
+  lanes.forEach((s, i) => {
+    const x = cx(i), lit = k => (state[`${k}|${s}`] ? "on" : "");
+    const lx = x - 58, vx = x + 58;
+    out += link(mid, Y.start + HB, x, Y.fan - HB, lit("graph_retriever"));
+    out += link(x, Y.fan + HB, lx, Y.leaf - HB, lit("leader_state"));
+    out += link(x, Y.fan + HB, vx, Y.leaf - HB,
+                state[`vector_retriever|${s}`] ? "vv" : "");
+    out += link(lx, Y.leaf + HB, mid, Y.chain - HB, lit("leader_state"));
+    out += link(vx, Y.leaf + HB, mid, Y.chain - HB,
+                state[`vector_retriever|${s}`] ? "vv" : "");
+    // the route this run declined: no neighbourhood -> END
+    out += link(x + 68, Y.fan + 8, x + 104, Y.fan + 52, "", true);
+    out += `<text class="br" x="${x + 110}" y="${Y.fan + 56}">END</text>`;
+    out += `<text class="br" x="${x}" y="${Y.fan - 29}" text-anchor="middle"
+      style="fill:var(--graph)">${esc(s)}</text>`;
+    out += box(x, Y.fan, 140, `graph_retriever|${s}`, "graph_retriever", "");
+    out += box(lx, Y.leaf, 108, `leader_state|${s}`, "leader_state", "");
+    out += box(vx, Y.leaf, 108, `vector_retriever|${s}`, "vector_retriever", "v");
+  });
+  CHAIN.forEach((n, i) => {
+    const y = Y.chain + i * GAP;
+    if (i) out += link(mid, y - GAP + HB, mid, y - HB,
+                       state[CHAIN[i - 1].id] ? "on" : "");
+    out += box(mid, y, n.w, n.id, n.id, n.cls);
+  });
+  if (extra > 0) {                      // the summarised remainder, as one column
+    const x = cx(lanes.length);
+    out += link(mid, Y.start + HB, x, Y.fan - HB, "", true);
+    out += link(x, Y.leaf + HB, mid, Y.chain - HB, "", true);
+    out += `<rect class="nd ghost" x="${(x - 96).toFixed(1)}" y="${Y.fan - HB}"
+        width="192" height="${(Y.leaf - Y.fan) + HB * 2}" rx="5"></rect>
+      <text class="nl" x="${x}" y="${(Y.fan + Y.leaf) / 2 - 4}"
+        text-anchor="middle" style="fill:var(--ink2)">+${extra} more branch${
+          extra === 1 ? "" : "es"}</text>
+      <text class="nc" x="${x}" y="${(Y.fan + Y.leaf) / 2 + 12}"
+        text-anchor="middle">identical shape, not drawn</text>`;
+  }
+  if (scanMode) {
+    out += link(mid, Y.sweep + HB, mid, Y.trav - HB, "on");
+    out += link(mid, Y.trav + HB, mid, Y.start - HB, "on");
+    out += `<rect class="nd ${SCAN ? "done" : ""}" x="${mid - 130}" y="${Y.sweep - HB}" width="260"
+        height="${HB * 2}"></rect>
+      <text class="nl" x="${mid}" y="${Y.sweep - 3}" text-anchor="middle">1 · find what just moved</text>
+      <text class="nc" x="${mid}" y="${Y.sweep + 11}" text-anchor="middle">${
+        SCAN ? `swept ${SCAN.swept.toLocaleString()} companies → ${SCAN.movers} moved`
+             : "every company's own price history"}</text>
+      <rect class="nd ${SCAN ? "done" : ""}" x="${mid - 130}" y="${Y.trav - HB}" width="260"
+        height="${HB * 2}"></rect>
+      <text class="nl" x="${mid}" y="${Y.trav - 3}" text-anchor="middle">2 · who supplies them?</text>
+      <text class="nc" x="${mid}" y="${Y.trav + 11}" text-anchor="middle">${
+        SCAN ? `graph traversal → ${SCAN.found} candidates`
+             : "who filed as their supplier?"}</text>
+      <text class="br" x="${mid + 148}" y="${Y.sweep + 4}">before the graph runs</text>`;
+  }
+  out += box(mid, Y.start, 132, "START", "START", "");
+  const rY = Y.chain + GAP * 2;
+  if (INTERRUPT) out += `<text class="br" x="${mid + 86}" y="${rY + 4}"
+    fill="var(--warn)">interrupt()</text>`;
+  out += `<text class="br" x="${mid + 74}" y="${Y.start + 4}">Send ×${all.length}</text>`;
+  out += `<text class="br" x="${mid + 86}" y="${Y.chain + 4}">rejoin</text>`;
+  out += `<text class="br" x="${PAD}" y="${H - 16}">dashed = declared branch, not taken</text>`;
+
+  const svg = $("#topo");
+  svg.innerHTML = out;
+  // the fitted box; zoom/pan owns the live viewBox from here. With many
+  // candidates the fit gets small -- that is what the zoom control is for.
+  (ZOOM.topo ||= makeZoomable(svg)).setBase({x: 0, y: 0, w: W, h: H});
 }
-function logRow(e){
-  const d = document.createElement("div");
-  d.className = "row new";
-  d.innerHTML = `<div class="t">${e.t_ms.toFixed(1)}</div>
-                 <div>${e.node}</div>
-                 <div class="d">${e.key ? e.key.split("|")[0]+" · " : ""}${e.detail||""}</div>`;
-  $("#log").appendChild(d);
-  $("#log").scrollTop = $("#log").scrollHeight;
-  setTimeout(()=>d.classList.remove("new"), 400);
+drawTopo();
+
+/* ---------- span chart ---------- */
+function drawSpans(){
+  const svg = $("#spans");
+  if (!SPANS.length){ svg.innerHTML = ""; return; }
+  const W = 960, L = 158, R = 16, top = 22, h = 13, gap = 6;
+  const maxT = Math.max(...SPANS.map(s => s.end_ms)) * 1.02;
+  const x = ms => L + (ms / maxT) * (W - L - R);
+  const cls = n => n.includes("vector") ? "v"
+                 : (n.includes("graph_") || n === "leader_state") ? "g" : "o";
+  const steps = [...new Set(SPANS.map(s => s.step))].sort((a, b) => a - b);
+  let out = "", y = top;
+  steps.forEach(st => {
+    const rows = SPANS.filter(s => s.step === st);
+    out += `<line class="gl" x1="0" y1="${y - 5}" x2="${W}" y2="${y - 5}"></line>
+      <text class="sl" x="4" y="${y + 7}" style="fill:var(--ink3)">step ${st}</text>`;
+    rows.forEach(s => {
+      const w = Math.max(2, x(s.end_ms) - x(s.start_ms));
+      out += `<rect class="sp ${cls(s.node)}" x="${x(s.start_ms).toFixed(1)}" y="${y}"
+          width="${w.toFixed(1)}" height="${h}"></rect>
+        <text class="sl" x="92" y="${y + 10}" text-anchor="end">${esc(s.node)}</text>
+        ${s.key ? `<text class="sl" x="96" y="${y + 10}"
+          style="fill:var(--ink3)">${esc(s.key)}</text>` : ""}
+        <text class="sl" x="${(x(s.end_ms) + 5).toFixed(1)}" y="${y + 10}"
+          style="fill:var(--ink3)">${(s.end_ms - s.start_ms).toFixed(0)}</text>`;
+      y += h + gap;
+    });
+    y += 5;
+  });
+  [0, .5, 1].forEach(f => {
+    out += `<text class="sl" x="${x(maxT * f).toFixed(1)}" y="${y + 10}" text-anchor="middle"
+      style="fill:var(--ink3)">${(maxT * f).toFixed(0)} ms</text>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${y + 16}`);
+  svg.innerHTML = out;
 }
-function table(rows){
-  if (!rows.length) { $("#res").innerHTML = '<div class="empty">No assessments.</div>'; return; }
-  $("#res").innerHTML = `<table><thead><tr>
-      <th>Signal</th><th>Dir</th><th>Verdict</th><th>Eff.</th><th>For/Against</th>
-    </tr></thead><tbody>` + rows.map(r=>`<tr>
-      <td class="s">${r.symbol}</td>
-      <td class="num">${r.direction}</td>
-      <td><span class="pill ${r.verdict}">${r.verdict}</span></td>
-      <td class="num">${r.effective_evidence.toFixed(3)}</td>
-      <td class="num">${r.n_supporting} / ${r.n_contradicting}</td>
-    </tr>`).join("") + `</tbody></table>`;
+function noteConcurrency(){
+  const byStep = {};
+  SPANS.forEach(s => (byStep[s.step] = byStep[s.step] || []).push(s));
+  const ov = Object.entries(byStep).map(([st, rows]) => {
+    if (rows.length < 2) return null;
+    const lo = Math.max(...rows.map(r => r.start_ms)), hi = Math.min(...rows.map(r => r.end_ms));
+    return hi > lo ? {st, n: rows.length, ov: hi - lo} : null;
+  }).filter(Boolean).sort((a, b) => b.ov - a.ov);
+  $("#ckpts").innerHTML = CKPTS.map(c => {
+    const id = c.id || "";
+    // UUIDv7: the leading block is a timestamp shared by every checkpoint in a
+    // run, so slicing the front shows the same string nine times. The second
+    // block is what actually distinguishes them.
+    const tail = id.split("-")[1] || id.slice(-4);
+    return `<code title="${esc(id)}">step ${c.step} · ${esc(tail)}</code>`;
+  }).join("");
+  $("#cknote").innerHTML =
+    (ov.length ? `<b>` + ov.map(o => `${o.n} tasks in step ${o.st} overlapped for
+       ${o.ov.toFixed(0)} ms`).join("; ") + `.</b> Measured from task start and result
+       timestamps, not inferred from two events sharing a millisecond. ` : "") +
+    (CKPTS.length ? `<b>The ${CKPTS.length} tags above are checkpoints</b> — saved snapshots of
+       the run's state, one per step. They are why the pipeline can stop halfway through, wait,
+       and then carry on from exactly where it paused instead of starting over. Hover one for its
+       full id. ` : "") +
+    (INTERRUPT ? `<b>The gate fired:</b> <code>review</code> called <code>interrupt()</code>
+       because a verdict came back contradicted, and the run halted mid-graph until it was
+       resumed with <code>Command(resume=True)</code> — programmatically, in milliseconds, not by
+       a human deliberating. The gate is the seam a human would sit in; nothing here pretends one
+       did.` : "");
 }
 
-$("#go").addEventListener("click", ()=>{
+/* ---------- run ---------- */
+$("#src").addEventListener("change", () => {
+  // the previous run's origination stages describe the source that produced
+  // them, not the one now selected — drop them rather than show them stale
+  SCAN = null;
+  $("#s1n").textContent = ""; $("#s2n").textContent = "";
+  drawTopo();
+});
+$("#go").addEventListener("click", () => {
   if (es) es.close();
-  reset();
-  $("#go").disabled = true; $("#status").textContent = "connecting…";
+  SPANS = []; CKPTS = []; LANES = []; INTERRUPT = null; SCAN = null;
+  Object.keys(state).forEach(k => delete state[k]);
+  ZOOM.topo?.fit();
+  drawTopo(); drawSpans();
+  $("#verdicts").innerHTML = '<p class="empty">running…</p>';
+  $("#rationale").hidden = $("#ratnote").hidden = true;
+  $("#err").innerHTML = ""; $("#go").disabled = true;
+  startClock("starting");
+
   const q = new URLSearchParams({source: $("#src").value});
   if ($("#lim").value) q.set("limit", $("#lim").value);
   es = new EventSource("/run?" + q);
 
-  es.addEventListener("start", ev=>{
+  es.addEventListener("start", ev => {
     const d = JSON.parse(ev.data);
-    $("#status").textContent =
-      `${d.candidates} candidates · ${d.symbols} symbols · ${d.sessions} sessions`;
-    mark("START", `${d.candidates} candidates`);
+    SCAN = d.scan || null;
+    if (SCAN) {
+      $("#s1n").innerHTML = `<span class="cnt">this run: ${
+        SCAN.swept.toLocaleString()} swept → ${SCAN.movers} moved</span>`;
+      $("#s2n").innerHTML = `<span class="cnt">this run: → ${SCAN.found} candidates</span>`;
+    }
+    drawTopo();
+    startClock(`${d.candidates} candidate${d.candidates === 1 ? "" : "s"} · working`);
+    if (d.candidates > 8) {
+      $("#err").innerHTML = `<div class="wait">Running ${d.candidates} branches. The graph
+        reports a whole stage at a time, not one branch at a time — so nothing will appear here
+        until the first stage finishes for all ${d.candidates}. That takes a few seconds per ten
+        branches. It has not stalled.</div>`;
+    }
   });
-  es.addEventListener("event", ev=>{
-    const d = JSON.parse(ev.data);
-    mark(d.node, d.detail); logRow(d);
+  es.addEventListener("span", ev => {
+    const s = JSON.parse(ev.data);
+    SPANS.push(s);
+    stage = `${SPANS.length} step${SPANS.length === 1 ? "" : "s"} done · working`;
+    $("#err").innerHTML = "";
+    if (s.node === "graph_retriever" && s.key && !LANES.includes(s.key)) LANES.push(s.key);
+    state[s.key ? `${s.node}|${s.key}` : s.node] = "done";
+    drawTopo(); drawSpans();
   });
-  es.addEventListener("done", ev=>{
+  es.addEventListener("checkpoint", ev => { CKPTS.push(JSON.parse(ev.data)); });
+  es.addEventListener("interrupt", ev => {
+    INTERRUPT = JSON.parse(ev.data).payload; drawTopo();
+  });
+  /* D-91. "0 supporting - 0 contradicting" reads like nothing happened. Usually
+     twenty companies were checked and none of them moved, which is a result. The
+     count is a fact about what was examined and never touches the verdict. */
+  function checked(a) {
+    if (a.neighbours == null) return "";
+    if (!a.neighbours) return " · no related companies to check";
+    const none = !a.n_supporting && !a.n_contradicting;
+    return ` · ${a.neighbours} related companies checked${none ? ", none moved unusually" : ""}`;
+  }
+
+  es.addEventListener("done", ev => {
     const d = JSON.parse(ev.data);
-    nodes.forEach(n=>n.classList.remove("hot"));
-    $("#status").textContent = `done in ${d.total_ms.toFixed(0)} ms`;
-    table(d.assessments);
+    stopClock();
+    noteConcurrency();
+    $("#status").innerHTML = `<span class="dot on"></span>done in
+      ${d.total_ms.toFixed(0)} ms · thread ${esc(d.thread_id || "")}`;
+    $("#verdicts").innerHTML = d.assessments.length ? d.assessments.map(a => `<div class="card">
+        <header><b>${esc(a.symbol)}</b><span>${esc(a.direction)} · ${esc(a.as_of)}</span>
+          <span class="verdict v-${esc(a.verdict)}">${esc(a.verdict)}</span></header>
+        <div class="lane"><p class="hl">${a.n_supporting} supporting ·
+          ${a.n_contradicting} contradicting · effective evidence
+          ${a.effective_evidence}${checked(a)}</p>${a.description ? `<p class="hl">${esc(a.description)}</p>` : ""}
+          </div></div>`).join("")
+      : '<p class="empty">No assessments.</p>';
+    const bad = d.assessments.find(a => a.verdict === "contradicted" && a.rationale);
+    if (bad) {
+      $("#rationale").innerHTML = `${esc(bad.rationale)}
+        <div class="meta" style="margin-top:.45rem">— ${esc(bad.symbol)}, ${esc(bad.as_of)}</div>`;
+      $("#rationale").hidden = $("#ratnote").hidden = false;
+    }
     $("#go").disabled = false; es.close(); es = null;
   });
-  es.addEventListener("error", ev=>{
+  es.addEventListener("error", ev => {
     let msg = "stream failed";
     try { msg = JSON.parse(ev.data).message; } catch (_) {}
-    $("#err").innerHTML = `<div class="err">${msg}</div>`;
-    $("#status").textContent = "error";
+    stopClock();
+    $("#err").innerHTML = `<div class="err">${esc(msg)}</div>`;
+    $("#status").innerHTML = `<span class="dot off"></span>failed`;
     $("#go").disabled = false;
     if (es) { es.close(); es = null; }
   });
 });
+
+/* ---------- leader explorer: date -> movers -> followers ---------- */
+let XLEADER = null;
+
+function xfmt(n, d = 2) { return (n >= 0 ? "+" : "") + n.toFixed(d); }
+
+function drawMovers(d) {
+  $("#xmvmeta").textContent =
+    `${d.movers_found} of ${d.swept.toLocaleString()} swept`;
+  if (!d.movers.length) {
+    $("#xmovers").innerHTML =
+      `<p class="emptyp">Nothing moved unusually on ${esc(d.as_of)}. That is a real
+       answer, not an error — most days most companies do not.</p>`;
+    return;
+  }
+  $("#xmovers").innerHTML = d.movers.map(m => `
+    <button data-sym="${esc(m.symbol)}" aria-current="false">
+      <b>${esc(m.symbol)}</b>
+      <span class="z ${m.z >= 0 ? "up" : "dn"}">${xfmt(m.z)}σ</span>
+      <span class="cov">${m.followers ? m.followers + " filed" : ""}</span>
+    </button>`).join("");
+  $("#xmovers").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => pickLeader(b.dataset.sym)));
+}
+
+function drawFollowers(d) {
+  $("#xflmeta").textContent = `${d.leader} · ${d.followers_found} at |r| ≥ ${d.min_abs_corr}`;
+  $("#xownmove").hidden = false;
+  $("#xownmove").innerHTML = `<b>${esc(d.leader)} itself moved
+    ${d.leader_z === null ? "—" : xfmt(d.leader_z) + "σ"} that day.</b>
+    What it did next, measured over 40,545 past shocks across 2,153 companies: nothing
+    in particular. It continued in the same direction ${d.own_move.continued_pct}% of the
+    time — a coin flip — with a spread of ±${d.own_move.sd_sigma}σ around zero. The
+    followers below move <i>with</i> it, on the same day; none of this says what happens
+    tomorrow.`;
+  if (!d.followers.length) {
+    $("#xfollowers").innerHTML =
+      `<p class="emptyp">No company has moved with ${esc(d.leader)} reliably enough to
+       clear |r| ≥ ${d.min_abs_corr} over the past ${d.trail} sessions. Lower the
+       threshold, or take it at face value — some names really do move on their own.</p>`;
+    return;
+  }
+  const mx = Math.max(...d.followers.map(f => Math.abs(f.corr)));
+  $("#xfollowers").innerHTML = d.followers.map(f => {
+    const w = (Math.abs(f.corr) / mx) * 100;
+    const lo = (Math.abs(f.ci_low) / mx) * 100, hi = (Math.abs(f.ci_high) / mx) * 100;
+    const a = Math.min(lo, hi), b = Math.max(lo, hi);
+    return `<div class="frow">
+      <b>${esc(f.symbol)}</b>
+      <span class="ftrack">
+        <i class="${f.corr < 0 ? "neg" : ""}" style="width:${w.toFixed(1)}%"></i>
+        <u style="left:${a.toFixed(1)}%;width:${Math.max(b - a, 0.6).toFixed(1)}%"></u>
+      </span>
+      <span>${f.corr.toFixed(2)} <span style="opacity:.6">[${f.ci_low.toFixed(2)},
+        ${f.ci_high.toFixed(2)}]</span></span>
+    </div>`;
+  }).join("") + `<p class="note" style="margin-top:.7rem">The bar is the correlation over
+    ${d.followers[0].n_sessions} sessions; the brackets are its 95% interval — how precisely
+    it is measured, not a probability about the future. A negative bar is a company that
+    reliably moves the <i>other</i> way.</p>`;
+}
+
+function pickLeader(sym) {
+  XLEADER = sym;
+  $("#xmovers").querySelectorAll("button").forEach(b =>
+    b.setAttribute("aria-current", String(b.dataset.sym === sym)));
+  $("#xfollowers").innerHTML = `<p class="emptyp">measuring ${esc(sym)}…</p>`;
+  const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
+                                 top_n: "18"});
+  fetch("/followers?" + q).then(r => r.json()).then(d => {
+    if (d.error) {
+      $("#xfollowers").innerHTML = `<p class="emptyp">${esc(d.error)}</p>`;
+      return;
+    }
+    d.min_abs_corr = parseFloat($("#xcorr").value) || d.min_abs_corr;
+    drawFollowers(d);
+    $("#xrun").hidden = !d.followers.length;
+    loadNet(sym);
+  }).catch(e => {
+    $("#xfollowers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
+  });
+}
+
+$("#xrun").addEventListener("click", () => {
+  // Hand the chosen leader to the pipeline the section below visualises: the
+  // graph is mode-agnostic (D-23), so co-movement is just another source.
+  if (!XLEADER) return;
+  const o = document.createElement("option");
+  o.value = "leader:" + XLEADER;
+  o.textContent = "co-movement — followers of " + XLEADER;
+  const prev = $("#src").querySelector('option[value^="leader:"]');
+  if (prev) prev.remove();
+  $("#src").prepend(o);
+  $("#src").value = o.value;
+  $("#asof").value = $("#xdate").value;
+  $("#lim").value = "5";
+  document.querySelector("#topo").scrollIntoView({behavior: "smooth", block: "center"});
+  $("#go").click();
+});
+
+/* ---------- co-movement network ----------
+   A ranked list says "37 followers" and implies 37 independent names. Measured,
+   PFG's 37 carry 500 of their 666 possible edges — one financials bloc wearing
+   37 labels. `context_fusion` already discounts that (Q-12: twenty names moving
+   as one bloc contribute about one unit, not twenty); the list was the only
+   place that pretended otherwise. This draws the structure instead.
+
+   Layout is Fruchterman-Reingold: repulsion between every pair, attraction along
+   edges weighted by |corr|, so distance carries meaning rather than decoration.
+   The leader is pinned at the centre. */
+let NET = null, NETSEL = null, NETBACKBONE = false;
+
+function netLayout(nodes, edges, w, h, iters = 260) {
+  /* Radial-hybrid, not a plain force layout. Distance from the centre is set
+     *exactly* by correlation to the leader — the thing a reader actually wants —
+     rather than left to emerge from a force equilibrium, which in an 83%-dense
+     cluster reduces to a ball that says little. Only the angle is relaxed by
+     force, using the follower-to-follower edges, so names that belong together
+     sit together on the ring. */
+  const by = {};
+  const cx = w / 2, cy = h / 2;
+  const rMin = 46, rMax = Math.min(w, h) / 2 - 30;
+  const fol = nodes.filter(n => !n.leader);
+  const cs = fol.map(n => Math.abs(n.corr || 0));
+  const lo = Math.min(...cs, 1), hi = Math.max(...cs, 0);
+  const span = Math.max(hi - lo, 1e-6);
+
+  nodes.forEach(n => { by[n.symbol] = n; });
+  fol.forEach((n, i) => {
+    n.ang = 2 * Math.PI * i / fol.length;
+    // strongest correlation sits nearest the centre
+    n.rad = rMin + (1 - (Math.abs(n.corr || 0) - lo) / span) * (rMax - rMin);
+  });
+
+  const among = edges.filter(e => by[e.a] && by[e.b] && !by[e.a].leader && !by[e.b].leader);
+  for (let it = 0; it < iters; it++) {
+    const step = (1 - it / iters) * 0.16 + 0.01;
+    const d = {};
+    fol.forEach(n => d[n.symbol] = 0);
+    // angular repulsion keeps labels apart
+    for (let i = 0; i < fol.length; i++) {
+      for (let j = i + 1; j < fol.length; j++) {
+        const a = fol[i], b = fol[j];
+        let s = a.ang - b.ang;
+        while (s > Math.PI) s -= 2 * Math.PI;
+        while (s < -Math.PI) s += 2 * Math.PI;
+        const f = 0.62 / (Math.abs(s) + 0.10);
+        d[a.symbol] += Math.sign(s) * f; d[b.symbol] -= Math.sign(s) * f;
+      }
+    }
+    // angular attraction along real links, so blocs land next to each other
+    among.forEach(e => {
+      const a = by[e.a], b = by[e.b];
+      let s = a.ang - b.ang;
+      while (s > Math.PI) s -= 2 * Math.PI;
+      while (s < -Math.PI) s += 2 * Math.PI;
+      const f = s * Math.abs(e.corr) * 0.55;
+      d[a.symbol] -= f; d[b.symbol] += f;
+    });
+    fol.forEach(n => { n.ang += Math.max(-0.4, Math.min(0.4, d[n.symbol])) * step; });
+  }
+
+  nodes.forEach(n => {
+    if (n.leader) { n.x = cx; n.y = cy; return; }
+    n.x = cx + Math.cos(n.ang) * n.rad;
+    n.y = cy + Math.sin(n.ang) * n.rad * 0.82;   // slight ellipse: the canvas is wide
+  });
+}
+
+function drawNet() {
+  if (!NET) return;
+  const svg = $("#xnet"), W = svg.clientWidth || 560, H = 340;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const nodes = NET.nodes, all = NET.edges;
+  const shown = NETBACKBONE ? all.filter(e => e.backbone) : all;
+  const by = {}; nodes.forEach(n => by[n.symbol] = n);
+
+  let out = "";
+  shown.forEach(e => {
+    const a = by[e.a], b = by[e.b];
+    if (!a || !b) return;
+    const lit = NETSEL && (e.a === NETSEL || e.b === NETSEL);
+    const col = e.corr < 0 ? "var(--bad)" : "var(--graph)";
+    out += `<line class="ne" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
+      x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${col}"
+      stroke-width="${(Math.abs(e.corr) * 2.4).toFixed(2)}"
+      opacity="${NETSEL ? (lit ? 0.85 : 0.07) : (e.backbone ? 0.42 : 0.13)}"></line>`;
+  });
+  nodes.forEach(n => {
+    // radius tracks |corr| to the leader: in a dense bloc every degree is
+    // near-identical, so sizing by degree encoded almost nothing.
+    const r = n.leader ? 10 : 3.5 + Math.abs(n.corr || 0) * 7;
+    const cls = "nn" + (n.leader ? " lead" : "") + (n.symbol === NETSEL ? " sel" : "");
+    // Labels radiate away from the centre rather than always sitting above the
+    // node. With every label above, text stacks wherever nodes cluster — which
+    // is precisely where a dense bloc puts them.
+    const ux = n.leader ? 0 : Math.cos(n.ang), uy = n.leader ? 1 : Math.sin(n.ang);
+    const pad = n.leader ? r + 16 : r + 11;
+    const lx = n.x + ux * pad;
+    const ly = n.y + uy * pad + 3.4;
+    const anchor = n.leader ? "middle"
+      : (ux > 0.30 ? "start" : (ux < -0.30 ? "end" : "middle"));
+    const fill = n.leader ? "var(--graph)"
+      : (n.corr < 0 ? "var(--bad)" : "var(--vector)");
+    out += `<g class="${cls}" data-sym="${esc(n.symbol)}">
+      <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}"
+        fill="${fill}" opacity="${NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9}"></circle>
+      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}"
+        text-anchor="${anchor}">${esc(n.symbol)}</text></g>`;
+  });
+  svg.innerHTML = out;
+  svg.querySelectorAll(".nn").forEach(g =>
+    g.addEventListener("click", () => {
+      NETSEL = NETSEL === g.dataset.sym ? null : g.dataset.sym;
+      drawNet(); netNote();
+    }));
+}
+
+function netNote() {
+  const n = NET.nodes.length - 1, am = NET.among_followers, poss = NET.possible_among_followers;
+  const pct = poss ? Math.round(100 * am / poss) : 0;
+  let s = `<b>${n} companies move with ${esc(NET.leader)}</b> — and with each other:
+    ${am} of their ${poss} possible pairings are themselves linked (${pct}%).
+    ${pct >= 50
+      ? "That is one bloc wearing many names, not independent evidence, which is why the pipeline discounts it rather than counting it."
+      : "Loosely connected, so these carry more independent information than a tightly linked group would."}
+    Distance is correlation; thickness is strength; red moves the other way.`;
+  if (NETSEL) {
+    const nd = NET.nodes.find(x => x.symbol === NETSEL);
+    if (nd && !nd.leader) {
+      s += `<br><b>${esc(NETSEL)}</b> — ${nd.corr.toFixed(2)} with ${esc(NET.leader)}
+        [${nd.ci_low.toFixed(2)}, ${nd.ci_high.toFixed(2)}], and linked to
+        ${nd.degree} of the ${n} names shown${nd.z != null
+          ? `. It also moved ${nd.z > 0 ? "+" : ""}${nd.z}σ itself that day.` : "."}`;
+    } else if (nd) {
+      s += `<br><b>${esc(NETSEL)}</b> is the leader${nd.z != null
+        ? `, and moved ${nd.z > 0 ? "+" : ""}${nd.z}σ that day` : ""}.`;
+    }
+  }
+  $("#xnetnote").innerHTML = s;
+}
+
+$("#xbackbone").addEventListener("click", () => {
+  NETBACKBONE = !NETBACKBONE;
+  $("#xbackbone").setAttribute("aria-pressed", String(NETBACKBONE));
+  drawNet();
+});
+
+function loadNet(sym) {
+  NET = null; NETSEL = null;
+  $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = true;
+  const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
+                                 min_abs_corr: $("#xcorr").value || "0.5"});
+  fetch("/network?" + q).then(r => r.json()).then(d => {
+    if (d.error || !d.nodes || d.nodes.length < 2) return;
+    NET = d;
+    const W = $("#xnet").clientWidth || 560;
+    netLayout(d.nodes, d.edges, W, 340);
+    $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = false;
+    $("#xnetmeta").textContent =
+      `${d.nodes.length - 1} companies · ${d.edges.length} links · click one`;
+    drawNet(); netNote();
+  }).catch(() => {});
+}
+
+$("#xgo").addEventListener("click", () => {
+  $("#xstatus").innerHTML = `<span class="dot on"></span>scanning…`;
+  $("#xfollowers").innerHTML = `<p class="emptyp">Pick a company on the left.</p>`;
+  $("#xownmove").hidden = true;
+  const q = new URLSearchParams({as_of: $("#xdate").value, top_n: "40"});
+  fetch("/movers?" + q).then(r => r.json()).then(d => {
+    if (d.error) {
+      $("#xmovers").innerHTML = `<p class="emptyp">${esc(d.error)}</p>`;
+      $("#xstatus").innerHTML = `<span class="dot off"></span>failed`;
+      return;
+    }
+    drawMovers(d);
+    $("#xstatus").innerHTML = `<span class="dot on"></span>${d.as_of}`;
+  }).catch(e => {
+    $("#xmovers").innerHTML = `<p class="emptyp">${esc(String(e))}</p>`;
+    $("#xstatus").innerHTML = `<span class="dot off"></span>failed`;
+  });
+});
+
+/* ---------- live traversal ---------- */
+let EDGES = [], TWO = [], SEL = null, HUB = "";
+$("#fetch").addEventListener("click", () => {
+  const sym = $("#sym").value.trim().toUpperCase(), asof = $("#asof").value;
+  $("#gstatus").textContent = "querying…";
+  fetch(`/graph?symbol=${encodeURIComponent(sym)}&as_of=${encodeURIComponent(asof)}`)
+    .then(r => r.json()).then(d => {
+      if (d.error) { $("#gstatus").textContent = d.error; return; }
+      EDGES = d.edges || []; TWO = d.twohop || []; HUB = d.symbol; SEL = null;
+      $("#gstatus").textContent = `${EDGES.length} edges · ${TWO.length} two-hop`;
+      drawSub(); drawTwo();
+    }).catch(e => { $("#gstatus").textContent = String(e); });
+});
+function drawSub(){
+  const svg = $("#subgraph");
+  if (!EDGES.length){
+    svg.innerHTML = `<text class="vl" x="310" y="170" text-anchor="middle"
+      fill="var(--ink3)">no supply edge survived the audit for ${esc(HUB)}</text>`;
+    $("#insp").innerHTML = `<h4>Inspector</h4><p class="q">Every edge the extractor produced for
+      ${esc(HUB)} was a divestiture, a competitor list, or a mention with no stated relation.
+      Rather than show a graph built from those, this shows none.</p>`;
+    return;
+  }
+  const HX = 470, HY = 170, SX = 108;
+  const step = Math.min(26, 280 / EDGES.length), y0 = HY - (EDGES.length - 1) * step / 2;
+  let out = "";
+  EDGES.forEach((n, i) => {
+    const y = y0 + i * step;
+    out += `<line class="se ${SEL === n.symbol ? "sel" : ""}" x1="${SX + 13}" y1="${y}"
+      x2="${HX - 26}" y2="${HY}"></line>`;
+  });
+  EDGES.forEach((n, i) => {
+    const y = y0 + i * step;
+    out += `<circle class="v ${n.verified ? "" : "u"} ${SEL === n.symbol ? "sel" : ""}"
+        cx="${SX}" cy="${y}" r="11" data-s="${esc(n.symbol)}"></circle>
+      <text class="vl" x="${SX + 18}" y="${y + 3}">${esc(n.symbol)}${
+        n.pct ? ` · ${esc(n.pct)}%` : ""}</text>`;
+  });
+  out += `<circle class="v hub" cx="${HX}" cy="${HY}" r="25"></circle>
+    <text class="vl" x="${HX}" y="${HY + 3}" text-anchor="middle">${esc(HUB)}</text>
+    <text class="br" x="${SX}" y="330" text-anchor="middle">suppliers</text>
+    <text class="br" x="${HX}" y="330" text-anchor="middle">customer</text>`;
+  svg.innerHTML = out;
+  (ZOOM.sub ||= makeZoomable(svg)).setBase({x: 0, y: 0, w: 620, h: 340});
+  svg.querySelectorAll("circle.v[data-s]").forEach(el =>
+    el.addEventListener("click", () => { SEL = el.dataset.s; drawSub(); }));
+  const n = EDGES.find(r => r.symbol === SEL);
+  $("#insp").innerHTML = n
+    ? `<h4>Inspector</h4><div class="sym">${esc((n.path || "").replace(/>/g, " → "))}</div>
+       <div class="meta">${n.pct ? esc(n.pct) + "% of revenue · " : ""}filed ${esc(n.filed)} ·
+         ${n.hops} hop${n.hops === 1 ? "" : "s"}</div>
+       ${n.sentence ? `<p class="q">“${esc(n.sentence)}”</p>`
+         : `<p class="q" style="color:var(--ink3);font-style:italic">The stored passage opens
+             mid-sentence — a page header or table row — so there is no quotable disclosure. The
+             edge is kept and marked rather than dropped.</p>`}`
+    : `<h4>Inspector</h4><p class="q" style="color:var(--ink3)">Click a supplier to read the
+        sentence in its 10-K that created the edge.</p>`;
+}
+function drawTwo(){
+  $("#twohop").innerHTML = `<div class="card">
+    <header><b>two-hop co-mention</b><span>${TWO.length} path${TWO.length === 1 ? "" : "s"}
+      · PMI ≥ 2.0 · ETF hubs excluded</span></header>
+    <div class="lane">${TWO.length ? TWO.map(r => `<p class="hl">
+        <span style="font:500 .8rem var(--mono);color:var(--graph)">${
+          esc(r.path.replace(/>/g, " → "))}</span>
+        <span class="score">PMI ≥ ${r.pmi.toFixed(2)} · ${r.articles} articles</span></p>`).join("")
+      : `<p class="empty">No two-hop path clears PMI ≥ 2.0 at this date.</p>`}</div></div>`;
+}
+
+/* ---------- audit bars ---------- */
+const AUDIT = [["customer (kept)", 818, true], ["names it, no relation", 253],
+               ["competitor list", 66], ["acquisition", 45], ["reversed", 9]];
+const amax = Math.max(...AUDIT.map(r => r[1]));
+$("#audit").innerHTML = AUDIT.map(([l, n, keep]) => `<div class="abar${keep ? " keep" : ""}">
+    <span>${esc(l)}</span><i style="width:${(100 * n / amax).toFixed(1)}%"></i>
+    <span>${n.toLocaleString()}</span></div>`).join("");
 </script>
 </body>
 </html>

@@ -32,7 +32,8 @@ def leader_state(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> d
         ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])
         baseline = returns.iloc[ti - trail : ti]
         recent = returns.iloc[ti - move_win : ti]
-        syms = [s for s in [*leaders, c.symbol] if s in returns.columns]
+        wanted = [*leaders, c.symbol]
+        syms = [s for s in wanted if s in returns.columns]
         moves = standardised_moves(recent, syms, move_win, baseline)
         shocks: list[Shock] = []
         for sym, z in moves.items():

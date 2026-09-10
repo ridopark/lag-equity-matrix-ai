@@ -19,6 +19,8 @@ MIN_EFFECTIVE = 1.0
 def assess(state: LagMatrixState) -> dict:
     evidence_by_key = state.get("evidence_by_key", {})
     effective_by_key = state.get("effective_evidence_by_key", {})
+    description_by_key = state.get("description_by_key", {})
+    neighbours_by_key = state.get("neighbours_by_key", {})
     out: list[Assessment] = []
 
     for c in state.get("candidates", []):
@@ -57,6 +59,8 @@ def assess(state: LagMatrixState) -> dict:
                     f"powered test supports a probability (D-34)."
                 ),
                 ts=datetime.now(UTC),
+                description=description_by_key.get(key),
+                neighbours=neighbours_by_key.get(key, 0),
             )
         )
     return {"assessments": out}

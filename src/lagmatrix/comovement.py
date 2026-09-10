@@ -1,0 +1,161 @@
+"""Pairwise contemporaneous co-movement, measured directly from price history (D-95).
+
+This measures how reliably two names move together *on the same session* — never
+what one does after the other. D-95's out-of-sample calibration, run on the same
+discover/validate split as D-93/D-94 across 1,236,371 pairs:
+
+    disc band        n        val mean   val sd   sign holds
+    0.3-0.40   115,155           0.260    0.121        98.7%
+    0.4-0.50    39,990           0.350    0.139        98.1%
+    0.5-0.60    12,291           0.460    0.164        96.2%
+    0.6-0.70     4,707           0.587    0.167        98.1%
+    0.7-0.95     2,214           0.712    0.129        99.5%
+
+A pair measured at 0.6-0.7 lands at 0.587 +/- 0.167 four years later with its
+sign intact 98% of the time — mild, consistent shrinkage. That replication is
+about the *relationship*, not a forecast: same-day co-movement replicates at
+0.586, next-day prediction replicates at 0.028 (D-93, D-94, both null). Nothing
+here may be read as one name anticipating the other.
+
+Same-company artefacts (GOOGL/GOOG, Z/ZG, FOX/FOXA, NWS/NWSA) are genuine,
+tradeable share classes and are kept. A true data artefact — one price series
+stored twice under two symbols (NATL/LINE, identical on 69.5% of sessions) — is
+flagged instead of dropped; the caller decides what to do with a flagged edge.
+"""
+
+from __future__ import annotations
+
+import math
+from datetime import date
+
+import numpy as np
+import pandas as pd
+
+from lagmatrix.domain.models import ComovementEdge
+
+_DUPLICATE_MATCH_THRESHOLD = 0.5
+
+# D-100: `data/bars-10y.parquet` holds 11 sessions with raw `pct_change` above this
+# cutoff -- GPOR +526x (2021-05-18), LINE +448x (2024-07-25), and nine more -- every
+# one a bankruptcy emergence, reverse split or ticker reuse, not a return. A genuine
+# shock (e.g. a real -30% session) sits two orders of magnitude below 10.0, so the
+# cutoff is set where D-100 measured the actual break, not tuned against it.
+_IMPLAUSIBLE_RETURN_CUTOFF = 10.0
+
+# D-102: `min_abs_corr=0` (or lower, or non-finite) makes this function compute
+# and return the full pairwise matrix -- measured on the real 2,183-symbol data,
+# ~2.38 million edges from ~100s of CPU and ~3.5GB RSS, versus 23,855 edges in
+# 3.9s at the live UI's own default of 0.5. `abs(c) < nan` is always `False` in
+# Python, so a NaN threshold silently behaves exactly like 0 with no exception
+# to catch it. This is a guard against a resource-exhaustion request, not a
+# tuning knob: the floor matches the live UI slider's own minimum
+# (`scripts/serve_index.html:268`, `min="0.1"`), so no legitimate value is ever
+# clamped. Non-finite input is rejected outright rather than clamped, since
+# there is no numeric ordering to clamp a NaN against.
+_MIN_ABS_CORR_FLOOR = 0.1
+
+
+def comovement_edges(
+    closes: pd.DataFrame,
+    as_of,
+    trail: int = 250,
+    min_abs_corr: float = 0.3,
+    exclude: frozenset[str] = frozenset(),
+) -> list[ComovementEdge]:
+    """One edge per unordered pair whose |correlation| clears `min_abs_corr`,
+    measured over the `trail` sessions strictly before `as_of` (D-16: `as_of`'s
+    own session is never in the window).
+    """
+    if not math.isfinite(min_abs_corr):
+        raise ValueError(f"min_abs_corr must be finite, got {min_abs_corr!r}")
+    min_abs_corr = max(min_abs_corr, _MIN_ABS_CORR_FLOOR)
+
+    session_dates = closes.index.date
+    matches = np.where(session_dates == as_of)[0]
+    if len(matches) == 0:
+        return []
+    ti = int(matches[0])
+    if ti < trail:
+        return []
+
+    cols = [c for c in closes.columns if c not in exclude]
+    window = closes[cols].pct_change().iloc[ti - trail : ti]
+
+    # D-100: mask implausible single-session returns before correlating, rather than
+    # feeding them to Pearson `corr` as real moves. `valid` is False for NaN too
+    # (comparisons against NaN are always False), so no separate NaN check is needed.
+    # Masked, not clipped, and per-pair: a corrupt session in one symbol must not
+    # silently distort the other symbol's other pairs, and the pair it does touch
+    # must be measured over one fewer session, not have the bad value replaced.
+    valid = window.abs() <= _IMPLAUSIBLE_RETURN_CUTOFF
+    masked = window.where(valid)
+
+    corr = masked.corr()
+    symbols = corr.columns.to_numpy()
+    values = corr.to_numpy()
+    # Pairwise valid-session counts via one matrix product, matching pandas' own
+    # pairwise-NaN-deletion behaviour in `.corr()` above -- avoids a Python loop
+    # over sessions for ~1,500 columns (1.24M pairs).
+    valid_counts = valid.to_numpy(dtype=float).T @ valid.to_numpy(dtype=float)
+
+    edges: list[ComovementEdge] = []
+    iu, ju = np.triu_indices(len(symbols), k=1)
+    for i, j in zip(iu, ju, strict=True):
+        c = values[i, j]
+        if np.isnan(c) or abs(c) < min_abs_corr:
+            continue
+        a, b = symbols[i], symbols[j]
+        n = int(valid_counts[i, j])
+        ci_low, ci_high = confidence_interval(float(c), n)
+        edges.append(
+            ComovementEdge(
+                a=str(a),
+                b=str(b),
+                corr=float(c),
+                n_sessions=n,
+                ci_low=ci_low,
+                ci_high=ci_high,
+                flag=duplicate_flag(window[a], window[b]),
+            )
+        )
+    return edges
+
+
+def session_available(closes: pd.DataFrame, as_of: date, trail: int) -> tuple[bool, str]:
+    """Whether `closes` can actually answer for `as_of`: its session must be
+    present in the index, and `trail` sessions must precede it (PHASE-1,
+    PLAN-2026-09-09-ingest-coherence). Reuses `comovement_edges`'s own lookup
+    without changing that function's existing return-`[]` contract -- callers
+    that need a loud failure instead of a silent empty edge list check here
+    first.
+    """
+    session_dates = closes.index.date
+    matches = np.where(session_dates == as_of)[0]
+    if len(matches) == 0:
+        last_session = closes.index[-1].date()
+        return False, f"{as_of} not found in data (last session available: {last_session})"
+    ti = int(matches[0])
+    if ti < trail:
+        return False, f"only {ti} sessions precede {as_of}, need {trail}"
+    return True, ""
+
+
+def confidence_interval(corr: float, n: int) -> tuple[float, float]:
+    """95% Fisher z-transform interval on a correlation measured from `n` sessions.
+
+    `corr` is clamped just inside [-1, 1]: `atanh` diverges at the boundary, and
+    a duplicate-series edge (D-95's NATL/LINE) can measure exactly +/-1.0.
+    """
+    clamped = max(min(corr, 1.0 - 1e-15), -1.0 + 1e-15)
+    z = math.atanh(clamped)
+    se = 1.0 / math.sqrt(n - 3)
+    return math.tanh(z - 1.96 * se), math.tanh(z + 1.96 * se)
+
+
+def duplicate_flag(ret_a: pd.Series, ret_b: pd.Series) -> str | None:
+    """`"duplicate_series"` if the two return series are exactly equal on most
+    sessions (NATL/LINE: one price series stored twice), else `None`. Genuine
+    share classes correlate highly but essentially never tie exactly.
+    """
+    match_rate = (ret_a.to_numpy() == ret_b.to_numpy()).mean()
+    return "duplicate_series" if match_rate > _DUPLICATE_MATCH_THRESHOLD else None

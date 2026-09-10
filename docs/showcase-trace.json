@@ -1,18 +1,19 @@
 {
  "meta": {
-  "equity": 606,
-  "supplies": 1211,
+  "equity": 514,
+  "supplies": 818,
   "comention": 2129,
   "articles": 47640,
-  "as_of": "2026-06-01",
-  "generated_at": "2026-09-07T22:30:09Z",
+  "as_of": "2026-05-11",
+  "generated_at": "2026-09-08T00:55:29Z",
   "arangodb": "3.12.11",
   "embedding_model": "all-MiniLM-L6-v2 (384-dim)",
-  "total_ms": 5099.9
+  "total_ms": 7591.6
  },
  "aql": {
-  "traversal": "FOR v, e, p IN 1..@hops INBOUND @start supplies_to\n  FILTER p.edges[*].filing_date ALL <= @as_of\n  COLLECT symbol = v.symbol\n    AGGREGATE hops = MIN(LENGTH(p.edges)),\n              path = MIN(CONCAT_SEPARATOR(\">\", REVERSE(p.vertices[*].symbol))),\n              pct  = MAX(p.edges[-1].pct_revenue),\n              filed = MAX(p.edges[-1].filing_date)\n  RETURN {symbol, hops, path, pct, filed}",
-  "vector": "FOR a IN article\n  LET score = APPROX_NEAR_COSINE(a.embedding, @vec)\n  FILTER a.date < @as_of\n  SORT score DESC\n  LIMIT @k\n  RETURN {headline: a.headline, date: a.date, symbols: a.symbols, score: score}"
+  "traversal": "FOR v, e, p IN 1..@hops INBOUND @start supplies_to\n  FILTER p.edges[*].filing_date ALL <= @as_of\n  COLLECT symbol = v.symbol INTO g\n  LET paths = g[*].p\n  LET depth = MIN(FOR x IN paths RETURN LENGTH(x.edges))\n  // the quoted filing must lie on the path the page draws, so choose among the\n  // SHORTEST paths only. Ranking over all paths let a 2-hop filing be shown\n  // beside a 1-hop label -- COHR sat at 1 hop from AAPL quoting Qorvo's 10-K.\n  LET best = FIRST(FOR x IN paths\n                     FILTER LENGTH(x.edges) == depth\n                     SORT TO_NUMBER(x.edges[-1].pct_revenue) DESC,\n                          x.edges[-1].filing_date DESC\n                     LIMIT 1 RETURN x)\n  RETURN {\n    symbol,\n    hops:  depth,\n    path:  CONCAT_SEPARATOR(\">\", REVERSE(best.vertices[*].symbol)),\n    filed: best.edges[-1].filing_date,\n    says:  best.edges[-1].passage,\n    named: best.edges[-1].counterparty\n  }",
+  "vector": "FOR a IN article\n  LET score = APPROX_NEAR_COSINE(a.embedding, @vec)\n  FILTER a.date < @as_of\n  SORT score DESC\n  LIMIT @k\n  RETURN {headline: a.headline, date: a.date, symbols: a.symbols, score: score}",
+  "comention": "FOR v, e, p IN 1..2 ANY @start co_mentioned\n  OPTIONS {uniqueVertices: \"path\", bfs: true}\n  FILTER p.edges[*].pmi ALL >= @minpmi\n  FILTER p.edges[*].first_seen ALL <= @as_of\n  // An ETF is co-mentioned with every constituent, so it is a hub that makes\n  // any two holdings look two hops apart. \"AVGO and TSM connect via SOXX\" is an\n  // artifact of the index, not a relationship. Exclude them from the whole path.\n  FILTER p.vertices[*].symbol NONE IN @excluded\n  COLLECT symbol = v.symbol INTO g\n  LET paths = g[*].p\n  LET depth = MIN(FOR x IN paths RETURN LENGTH(x.edges))\n  FILTER depth == 2\n  LET best = FIRST(FOR x IN paths FILTER LENGTH(x.edges) == depth\n                     SORT MIN(x.edges[*].pmi) DESC LIMIT 1 RETURN x)\n  SORT MIN(best.edges[*].pmi) DESC\n  LIMIT 7\n  RETURN {symbol, hops: depth,\n          path: CONCAT_SEPARATOR(\">\", best.vertices[*].symbol),\n          pmi: MIN(best.edges[*].pmi),\n          via: best.vertices[1].symbol,\n          articles: MIN(best.edges[*].articles)}"
  },
  "events": [
   {
@@ -22,417 +23,749 @@
    "detail": "Send fan-out: 3 candidates"
   },
   {
-   "t_ms": 1133.3,
+   "t_ms": 1271.6,
    "node": "graph_retriever",
-   "key": "AAPL",
-   "detail": "13 at 1 hop, 6 at 2 hops (20 ms AQL)"
+   "key": "TSLA|2026-05-11",
+   "detail": "22 neighbours"
   },
   {
-   "t_ms": 1951.2,
-   "node": "vector_retriever",
-   "key": "AAPL",
-   "detail": "6 articles (12 ms ANN)"
-  },
-  {
-   "t_ms": 3023.1,
+   "t_ms": 1272.1,
    "node": "graph_retriever",
-   "key": "AVGO",
-   "detail": "3 at 1 hop, 6 at 2 hops (5 ms AQL)"
+   "key": "AAPL|2026-05-11",
+   "detail": "32 neighbours"
   },
   {
-   "t_ms": 3658.1,
-   "node": "vector_retriever",
-   "key": "AVGO",
-   "detail": "6 articles (7 ms ANN)"
-  },
-  {
-   "t_ms": 4469.0,
+   "t_ms": 1299.9,
    "node": "graph_retriever",
-   "key": "TSLA",
-   "detail": "2 at 1 hop, 0 at 2 hops (2 ms AQL)"
+   "key": "AVGO|2026-05-11",
+   "detail": "20 neighbours"
   },
   {
-   "t_ms": 5099.8,
+   "t_ms": 1318.8,
+   "node": "leader_state",
+   "key": "AVGO|2026-05-11",
+   "detail": "5 moved"
+  },
+  {
+   "t_ms": 1322.8,
+   "node": "leader_state",
+   "key": "AAPL|2026-05-11",
+   "detail": "13 moved"
+  },
+  {
+   "t_ms": 1325.0,
+   "node": "leader_state",
+   "key": "TSLA|2026-05-11",
+   "detail": "11 moved"
+  },
+  {
+   "t_ms": 1552.2,
    "node": "vector_retriever",
-   "key": "TSLA",
-   "detail": "6 articles (4 ms ANN)"
+   "key": "AVGO|2026-05-11",
+   "detail": "6 articles"
   },
   {
-   "t_ms": 5099.8,
+   "t_ms": 1553.1,
+   "node": "vector_retriever",
+   "key": "TSLA|2026-05-11",
+   "detail": "6 articles"
+  },
+  {
+   "t_ms": 1559.9,
+   "node": "vector_retriever",
+   "key": "AAPL|2026-05-11",
+   "detail": "6 articles"
+  },
+  {
+   "t_ms": 1566.0,
    "node": "context_fusion",
    "key": null,
    "detail": "3 candidates weighted"
   },
   {
-   "t_ms": 5099.8,
+   "t_ms": 1566.8,
    "node": "assessor",
    "key": null,
    "detail": "3 assessments"
   },
   {
-   "t_ms": 5099.8,
-   "node": "review",
+   "t_ms": 1580.4,
+   "node": "__interrupt__",
    "key": null,
-   "detail": "no contradicted verdict \u2014 interrupt not raised"
+   "detail": ""
   },
   {
-   "t_ms": 5099.8,
+   "t_ms": 1581.8,
+   "node": "review",
+   "key": null,
+   "interrupt": {
+    "reason": "contradicted verdicts require confirmation (D-19)",
+    "contradicted": [
+     {
+      "symbol": "TSLA",
+      "as_of": "2026-05-11",
+      "rationale": "1 corroborating and 7 contradicting neighbour moves, weighted to 1.00 effective independent observations (0.12 for / 0.88 against). Not calibrated: no powered test supports a probability (D-34)."
+     }
+    ]
+   },
+   "detail": "interrupt(): TSLA contradicted \u2014 run halted"
+  },
+  {
+   "t_ms": 1584.1,
+   "node": "review",
+   "key": null,
+   "detail": ""
+  },
+  {
+   "t_ms": 1600.0,
    "node": "publisher",
    "key": null,
-   "detail": "published"
+   "detail": ""
   }
  ],
+ "spans": [
+  {
+   "node": "graph_retriever",
+   "step": 1,
+   "start_ms": 72.4,
+   "end_ms": 1272.1,
+   "key": "AAPL"
+  },
+  {
+   "node": "graph_retriever",
+   "step": 1,
+   "start_ms": 72.4,
+   "end_ms": 1299.9,
+   "key": "AVGO"
+  },
+  {
+   "node": "graph_retriever",
+   "step": 1,
+   "start_ms": 72.4,
+   "end_ms": 1271.6,
+   "key": "TSLA"
+  },
+  {
+   "node": "leader_state",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1322.8,
+   "key": "AAPL"
+  },
+  {
+   "node": "leader_state",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1318.8,
+   "key": "AVGO"
+  },
+  {
+   "node": "leader_state",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1325.0,
+   "key": "TSLA"
+  },
+  {
+   "node": "vector_retriever",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1560.0,
+   "key": "AAPL"
+  },
+  {
+   "node": "vector_retriever",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1552.2,
+   "key": "AVGO"
+  },
+  {
+   "node": "vector_retriever",
+   "step": 2,
+   "start_ms": 1300.5,
+   "end_ms": 1553.1,
+   "key": "TSLA"
+  },
+  {
+   "node": "context_fusion",
+   "step": 3,
+   "start_ms": 1560.3,
+   "end_ms": 1566.0,
+   "key": null
+  },
+  {
+   "node": "assessor",
+   "step": 4,
+   "start_ms": 1566.0,
+   "end_ms": 1566.8,
+   "key": null
+  },
+  {
+   "node": "review",
+   "step": 5,
+   "start_ms": 1583.4,
+   "end_ms": 1584.1,
+   "key": null
+  },
+  {
+   "node": "publisher",
+   "step": 6,
+   "start_ms": 1584.1,
+   "end_ms": 1600.0,
+   "key": null
+  }
+ ],
+ "checkpoints": [
+  {
+   "t_ms": 71.2,
+   "step": -1,
+   "id": "1f1ab1ff-937b-6372-bfff-5b79a20f181c"
+  },
+  {
+   "t_ms": 72.3,
+   "step": 0,
+   "id": "1f1ab1ff-937e-6c3b-8000-0f535552c09b"
+  },
+  {
+   "t_ms": 1300.5,
+   "step": 1,
+   "id": "1f1ab1ff-9f34-6ea9-8001-875705ac06ae"
+  },
+  {
+   "t_ms": 1560.3,
+   "step": 2,
+   "id": "1f1ab1ff-a1af-6abc-8002-2fb8eda74a43"
+  },
+  {
+   "t_ms": 1566.0,
+   "step": 3,
+   "id": "1f1ab1ff-a1bd-69b8-8003-12b7807ccbad"
+  },
+  {
+   "t_ms": 1566.8,
+   "step": 4,
+   "id": "1f1ab1ff-a1bf-6896-8004-fd7b43b72c31"
+  },
+  {
+   "t_ms": 1583.4,
+   "step": 4,
+   "id": "1f1ab1ff-a1bf-6896-8004-fd7b43b72c31"
+  },
+  {
+   "t_ms": 1584.1,
+   "step": 5,
+   "id": "1f1ab1ff-a1ea-60d1-8005-e61f464d6fa5"
+  },
+  {
+   "t_ms": 1600.0,
+   "step": 6,
+   "id": "1f1ab1ff-a1eb-66a1-8006-09b8224c1aee"
+  }
+ ],
+ "run": {
+  "thread_id": "showcase"
+ },
  "candidates": [
   {
    "symbol": "AAPL",
-   "as_of": "2026-06-01",
-   "traversal_ms": 20,
-   "vector_ms": 12,
+   "as_of": "2026-05-11",
+   "traversal_ms": 34.0,
+   "vector_ms": 18.4,
    "query": "AAPL supply chain, suppliers, component demand, orders and production outlook",
    "hop1": [
     {
      "symbol": "ADI",
      "hops": 1,
      "path": "ADI>AAPL",
-     "pct": "30",
-     "filed": "2021-12-03"
+     "filed": "2018-11-27",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Apple Inc. represented approximately 14% and 12% of revenue in the fiscal year ended October 28, 2017 (fiscal 2017) and the fiscal year ended October 29, 2016 (fiscal 2016), respectively",
+     "pct": "14"
     },
     {
      "symbol": "AMKR",
      "hops": 1,
      "path": "AMKR>AAPL",
-     "pct": "69",
-     "filed": "2024-02-16"
+     "filed": "2024-02-16",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Direct sales to Apple Inc. accounted for 27.7% of our net sales for the year ended December 31, 2023",
+     "pct": "27.7"
     },
     {
      "symbol": "APH",
      "hops": 1,
      "path": "APH>AAPL",
-     "pct": "12",
-     "filed": "2021-02-10"
+     "filed": "2020-02-12",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "During the year ended December 31, 2018, aggregate sales to Apple Inc., including sales of products to EMS companies that the Company believes are manufacturing products on Apple s behalf, accounted for approximately 12% of our net sales. 7 Table of Contents The Company sells its products through its own global sales force, independent representatives and a global network of electronics distributors",
+     "pct": "12"
     },
     {
      "symbol": "AVGO",
      "hops": 1,
      "path": "AVGO>AAPL",
-     "pct": "9",
-     "filed": "2023-12-14"
+     "filed": "2018-12-21",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "We believe aggregate sales to Apple, Inc., through all channels, accounted for approximately 25% of our net revenue for fiscal year 2018 and more than 20% for fiscal year 2017",
+     "pct": "25"
     },
     {
      "symbol": "CGNX",
      "hops": 1,
      "path": "CGNX>AAPL",
-     "pct": "15",
-     "filed": "2020-02-13"
+     "filed": "2020-02-13",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "In 2018 and 2017, direct and indirect revenue from Apple Inc. accounted for 15% and 20% of total revenue, respectively",
+     "pct": "15"
     },
     {
      "symbol": "COHR",
      "hops": 1,
      "path": "COHR>AAPL",
-     "pct": null,
-     "filed": "2023-08-18"
+     "filed": "2023-08-18",
+     "named": "Apple",
+     "verified": false,
+     "sentence": null,
+     "pct": null
     },
     {
      "symbol": "CRUS",
      "hops": 1,
      "path": "CRUS>AAPL",
-     "pct": null,
-     "filed": "2026-05-21"
+     "filed": "2025-05-23",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "For fiscal years 2025, 2024, and 2023, we had one end customer, Apple, Inc., who purchased through multiple contract manufacturers and represented approximately 89 percent, 87 percent, and 83 percent, of the Company s total net sales, respectively",
+     "pct": null
     },
     {
      "symbol": "JBL",
      "hops": 1,
      "path": "JBL>AAPL",
-     "pct": "10",
-     "filed": "2024-10-28"
+     "filed": "2024-10-28",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Sales to the following customer accounted for 10% or more of the Company s net revenues, expressed as a percentage of consolidated net revenue: Percentage of Net Revenue Fiscal Year Ended August 31, 2024 2023 2022 Apple, Inc. (1) 11 % 17 % 19 % (1) Sales to this customer were reported in the DMS operating segment",
+     "pct": "11"
     },
     {
      "symbol": "QRVO",
      "hops": 1,
      "path": "QRVO>AAPL",
-     "pct": "50",
-     "filed": "2026-05-08"
+     "filed": "2026-05-08",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "We provide products to our largest end customer, Apple Inc. (\"Apple\"), through sales to multiple contract manufacturers, which in the aggregate accounted for 50% and 47% of total revenue in fiscal years 2026 and 2025, respectively",
+     "pct": "50"
     },
     {
      "symbol": "SITM",
      "hops": 1,
      "path": "SITM>AAPL",
-     "pct": "10",
-     "filed": "2026-02-11"
-    },
-    {
-     "symbol": "SNX",
-     "hops": 1,
-     "path": "SNX>AAPL",
-     "pct": "12",
-     "filed": "2022-01-28"
+     "filed": "2026-02-11",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Based on the sell-through information provided to us from distributors who identify end customers, we believe that the majority of our products sold to Pernas Electronics Co. Ltd (\"Pernas\") and Quantek Technology Corporation (\"Quantek\") are in turn incorporated into products of Apple Inc. ( Apple ), our largest end customer",
+     "pct": null
     },
     {
      "symbol": "SWKS",
      "hops": 1,
      "path": "SWKS>AAPL",
-     "pct": null,
-     "filed": "2025-11-07"
+     "filed": "2025-11-07",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Our key customers include Amazon, Apple Inc. ( Apple ), Arcadyan, Arris, Bose, Ciena, Cisco, Ericsson, Fibocom, Garmin, Gemalto (a Thales company), General Electric, Google, Honeywell, Itron, Lenovo, LG Electronics, Microsoft, Motorola, NETGEAR, Nokia, Northrop Grumman, OPPO, Rockwell Collins, Sagemcom, Samsung, Schneider Electric, Sierra Wireless, Sonos, Sony, Technicolor, Telit, Tesla, TP-Link, VIVO, and Xiaomi",
+     "pct": null
     },
     {
      "symbol": "TTMI",
      "hops": 1,
      "path": "TTMI>AAPL",
-     "pct": "33",
-     "filed": "2020-02-26"
+     "filed": "2020-02-26",
+     "named": "Apple",
+     "verified": true,
+     "sentence": "Our five largest OEM customers in 2019 were, in alphabetical order, Apple Inc., Huawei Technology Co. Ltd., Northrop Grumman Corporation, Raytheon Company and Robert Bosch GmbH",
+     "pct": null
     }
    ],
-   "hop2": [
-    {
-     "symbol": "DELL",
-     "hops": 2,
-     "path": "DELL>AVGO>AAPL",
-     "pct": null,
-     "filed": "2024-03-25"
-    },
-    {
-     "symbol": "GEN",
-     "hops": 2,
-     "path": "GEN>AVGO>AAPL",
-     "pct": null,
-     "filed": "2020-05-28"
-    },
-    {
-     "symbol": "LITE",
-     "hops": 2,
-     "path": "LITE>AVGO>AAPL",
-     "pct": null,
-     "filed": "2022-08-24"
-    },
-    {
-     "symbol": "MTSI",
-     "hops": 2,
-     "path": "MTSI>QRVO>AAPL",
-     "pct": null,
-     "filed": "2025-11-14"
-    },
-    {
-     "symbol": "MXL",
-     "hops": 2,
-     "path": "MXL>QRVO>AAPL",
-     "pct": null,
-     "filed": "2022-02-02"
-    },
-    {
-     "symbol": "QCOM",
-     "hops": 2,
-     "path": "QCOM>QRVO>AAPL",
-     "pct": null,
-     "filed": "2018-11-07"
-    }
-   ],
+   "hop2": [],
    "articles": [
     {
-     "headline": "Apple's Margins Catch A Break, But Road Ahead Still Looks  Bumpy",
-     "date": "2025-04-14",
+     "headline": "ISM Manufacturing Prices For February 70.5 Vs 60.6 Est.",
+     "date": "2026-03-02",
      "symbols": [
-      "AAPL"
+      "SPY"
      ],
-     "score": 0.564335286617279
+     "score": 0.41137415170669556
     },
     {
-     "headline": "Apple: Market Structure And Key Support Levels Ahead Of Q2 Earnings",
-     "date": "2025-04-24",
+     "headline": "USA S&P Global Manufacturing PMI For March 52.3 Vs 52.4 Est.",
+     "date": "2026-04-01",
      "symbols": [
-      "AAPL"
+      "SPY"
      ],
-     "score": 0.5527594089508057
+     "score": 0.41122716665267944
     },
     {
-     "headline": "Stock Of The Day: Will Apple Bring Tech Sector Down?",
-     "date": "2025-07-10",
+     "headline": "USA ISM Manufacturing Prices For August 63.7 Vs 65.1 Est.",
+     "date": "2025-09-02",
      "symbols": [
-      "AAPL",
-      "MSFT",
-      "NVDA",
-      "XLK"
+      "SPY"
      ],
-     "score": 0.5464950203895569
+     "score": 0.408205509185791
     },
     {
-     "headline": "AAPL Surges 15% In May: What's Driving The Rally And Will It Continue?",
-     "date": "2026-05-27",
+     "headline": "ISM Manufacturing Prices For April 84.6 Vs 80.0 Est.",
+     "date": "2026-05-01",
      "symbols": [
-      "AAPL",
-      "GOOGL"
+      "SPY"
      ],
-     "score": 0.5272969007492065
+     "score": 0.4050450026988983
     },
     {
-     "headline": "As Apple Sheds Over $500 Billion In Market Cap Since Trump's 'Liberation Day,' Top Analysts Weigh In On Its Path Ahead",
-     "date": "2025-04-11",
+     "headline": "USA S&P Global Manufacturing PMI For March 52.4 Vs 51.5 Est.",
+     "date": "2026-03-24",
      "symbols": [
-      "AAPL",
-      "MSFT"
+      "SPY"
      ],
-     "score": 0.5231068134307861
+     "score": 0.4049214720726013
     },
     {
-     "headline": "Apple Reportedly Cuts iPhone Air Production, Ramps Up Other Flagship Models",
-     "date": "2025-10-22",
+     "headline": "S&P Global Manufacturing PMI For August 53.3 Vs 49.7Est.",
+     "date": "2025-08-21",
      "symbols": [
-      "AAPL"
+      "SPY"
      ],
-     "score": 0.5211336612701416
+     "score": 0.4014476239681244
+    }
+   ],
+   "pipeline_news": [
+    {
+     "doc_id": "52168722",
+     "symbol": "AAPL",
+     "text": "Apple Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call",
+     "published_at": "2026-04-30T00:00:00",
+     "score": 0.5764098167419434
+    },
+    {
+     "doc_id": "45139025",
+     "symbol": "AAPL",
+     "text": "Apple Gears Up For Q2 Earnings With Bearish Technicals: 'Super Cycle Unlikely' Says Strategist",
+     "published_at": "2025-05-01T00:00:00",
+     "score": 0.5686253905296326
+    },
+    {
+     "doc_id": "50253734",
+     "symbol": "AAPL",
+     "text": "Apple Sees Revenue for Q2 is expected to grow by 13% to 16% YOY",
+     "published_at": "2026-01-29T00:00:00",
+     "score": 0.40318381786346436
+    },
+    {
+     "doc_id": "45152493",
+     "symbol": "AAPL",
+     "text": "Apple Reports 'Strong' Q2 Earnings: Revenue Beat, EPS Beat, Installed Base Hits All-Time High Across All Segments, $100 Billion Buyback And More",
+     "published_at": "2025-05-01T00:00:00",
+     "score": 0.3900771737098694
+    },
+    {
+     "doc_id": "51749190",
+     "symbol": "AAPL",
+     "text": "Taiwan Semiconductor Revenue Skyrockets On Unstoppable AI Demand",
+     "published_at": "2026-04-10T00:00:00",
+     "score": 0.38966503739356995
+    },
+    {
+     "doc_id": "50951965",
+     "symbol": "AAPL",
+     "text": "Berkshire Hathaway Misses Projections As Abel Takes The Helm",
+     "published_at": "2026-02-28T00:00:00",
+     "score": 0.38699251413345337
+    }
+   ],
+   "twohop": [
+    {
+     "symbol": "FSR",
+     "hops": 2,
+     "path": "AAPL>HNHPF>FSR",
+     "pmi": 2.0734,
+     "via": "HNHPF",
+     "articles": 29
+    }
+   ],
+   "twohop_ms": 17.6,
+   "legacy_query": "news relevant to a up move in AAPL",
+   "query_now": "AAPL catalyst: earnings, demand, guidance, production, regulation",
+   "legacy_news": [
+    {
+     "text": "Market-Moving News for April 21st",
+     "score": 0.5672,
+     "published_at": "2026-04-21 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for April 3rd",
+     "score": 0.5427,
+     "published_at": "2025-04-03 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for April 14th",
+     "score": 0.5384,
+     "published_at": "2025-04-14 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for February 24th",
+     "score": 0.5364,
+     "published_at": "2025-02-24 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for September 3rd",
+     "score": 0.5299,
+     "published_at": "2025-09-03 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for May 12th",
+     "score": 0.5247,
+     "published_at": "2025-05-12 00:00:00"
     }
    ]
   },
   {
    "symbol": "AVGO",
-   "as_of": "2026-06-01",
-   "traversal_ms": 5,
-   "vector_ms": 7,
+   "as_of": "2026-05-11",
+   "traversal_ms": 8.8,
+   "vector_ms": 35.9,
    "query": "AVGO supply chain, suppliers, component demand, orders and production outlook",
-   "hop1": [
-    {
-     "symbol": "DELL",
-     "hops": 1,
-     "path": "DELL>AVGO",
-     "pct": null,
-     "filed": "2024-03-25"
-    },
-    {
-     "symbol": "GEN",
-     "hops": 1,
-     "path": "GEN>AVGO",
-     "pct": null,
-     "filed": "2020-05-28"
-    },
-    {
-     "symbol": "LITE",
-     "hops": 1,
-     "path": "LITE>AVGO",
-     "pct": null,
-     "filed": "2022-08-24"
-    }
-   ],
-   "hop2": [
-    {
-     "symbol": "APLD",
-     "hops": 2,
-     "path": "APLD>DELL>AVGO",
-     "pct": null,
-     "filed": "2024-08-30"
-    },
-    {
-     "symbol": "CLS",
-     "hops": 2,
-     "path": "CLS>DELL>AVGO",
-     "pct": "73",
-     "filed": "2026-02-27"
-    },
-    {
-     "symbol": "COHR",
-     "hops": 2,
-     "path": "COHR>DELL>AVGO",
-     "pct": null,
-     "filed": "2022-08-29"
-    },
-    {
-     "symbol": "FN",
-     "hops": 2,
-     "path": "FN>LITE>AVGO",
-     "pct": null,
-     "filed": "2025-08-19"
-    },
-    {
-     "symbol": "NTNX",
-     "hops": 2,
-     "path": "NTNX>DELL>AVGO",
-     "pct": "48",
-     "filed": "2025-09-24"
-    },
-    {
-     "symbol": "SMTC",
-     "hops": 2,
-     "path": "SMTC>LITE>AVGO",
-     "pct": null,
-     "filed": "2023-03-30"
-    }
-   ],
+   "hop1": [],
+   "hop2": [],
    "articles": [
     {
-     "headline": "Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment",
-     "date": "2025-09-25",
+     "headline": "Arista Networks Posts Strong Q1, Analysts Say Supply Shortages Dampen Outlook",
+     "date": "2026-05-06",
      "symbols": [
-      "NVDA"
+      "ANET",
+      "AVGO",
+      "TSM"
      ],
-     "score": 0.42470476031303406
+     "score": 0.4676660895347595
     },
     {
-     "headline": "Cisco, Nvidia, Arista Tackle Tariff Turmoil: Who's Best Positioned?",
-     "date": "2025-03-10",
+     "headline": "ASML Q3 Bookings Beat Expectations At $6.3 Billion As AI Demand, EUV Adoption Drive Strong 2025 Outlook",
+     "date": "2025-10-15",
+     "symbols": [
+      "ASML",
+      "NVDA"
+     ],
+     "score": 0.43214595317840576
+    },
+    {
+     "headline": "Taiwan Semiconductor CFO Anticipates Tariffs Impact But Has Not Seen Change In Customer Behavior Yet, Issues Strong Q2 Outlook",
+     "date": "2025-04-17",
+     "symbols": [
+      "AAPL",
+      "INTC",
+      "NVDA",
+      "TSM"
+     ],
+     "score": 0.43183985352516174
+    },
+    {
+     "headline": "Broadcom Slides 4% Despite Q4 Beat As Management Warns Q1 Margin Squeeze, Tax Hikes Could Overshadow AI Growth",
+     "date": "2025-12-12",
+     "symbols": [
+      "AVGO"
+     ],
+     "score": 0.4082182049751282
+    },
+    {
+     "headline": "P&G Holds Its Premium As Analysts Cite Durable Growth Beyond Near-Term Tariff Hits",
+     "date": "2025-10-27",
+     "symbols": [
+      "PG"
+     ],
+     "score": 0.36876633763313293
+    },
+    {
+     "headline": "Amazon's AI-Powered AWS, Efficiency Gains, And Consumer Demand Fuel Bullish Q2 Outlook",
+     "date": "2025-07-23",
      "symbols": [
       "AMZN",
-      "ANET",
-      "APH",
-      "CDW",
-      "COHR",
-      "CSCO",
-      "FN",
-      "NVDA"
+      "GOOGL",
+      "MSFT"
      ],
-     "score": 0.42133957147598267
+     "score": 0.36204177141189575
+    }
+   ],
+   "pipeline_news": [
+    {
+     "doc_id": "49354413",
+     "symbol": "AVGO",
+     "text": "Broadcom Slides 4% Despite Q4 Beat As Management Warns Q1 Margin Squeeze, Tax Hikes Could Overshadow AI Growth",
+     "published_at": "2025-12-12T00:00:00",
+     "score": 0.5026029348373413
     },
     {
-     "headline": "Exploring The Competitive Space: NVIDIA Versus Industry Peers In Semiconductors &amp; Semiconductor Equipment",
-     "date": "2025-09-26",
-     "symbols": [
-      "NVDA"
-     ],
-     "score": 0.41834086179733276
+     "doc_id": "52332071",
+     "symbol": "AVGO",
+     "text": "Arista Networks Posts Strong Q1, Analysts Say Supply Shortages Dampen Outlook",
+     "published_at": "2026-05-06T00:00:00",
+     "score": 0.4051101803779602
     },
     {
-     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
-     "date": "2025-07-15",
-     "symbols": [
-      "NVDA"
-     ],
-     "score": 0.40402913093566895
+     "doc_id": "51008941",
+     "symbol": "AVGO",
+     "text": "Broadcom Q1 Preview: Record Revenue Expected, But Stock Is Looking 'On the Ropes'",
+     "published_at": "2026-03-03T00:00:00",
+     "score": 0.38824138045310974
     },
     {
-     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
-     "date": "2025-07-14",
-     "symbols": [
-      "NVDA"
-     ],
-     "score": 0.40402913093566895
+     "doc_id": "45803595",
+     "symbol": "AVGO",
+     "text": "Broadcom Q2 Earnings: Revenue, EPS Beat Estimates Driven By 'Robust Demand' For AI Networking, Company Sees Acceleration In AI Revenue Ahead",
+     "published_at": "2025-06-05T00:00:00",
+     "score": 0.38357216119766235
     },
     {
-     "headline": "Inquiry Into NVIDIA's Competitor Dynamics In Semiconductors &amp; Semiconductor Equipment Industry",
-     "date": "2025-05-09",
-     "symbols": [
-      "NVDA"
-     ],
-     "score": 0.40402913093566895
+     "doc_id": "43109922",
+     "symbol": "AVGO",
+     "text": "Qorvo Could Achieve $9.63 EPS By 2026 With Activist Involvement, Morgan Stanley Upgrades Stock",
+     "published_at": "2025-01-21T00:00:00",
+     "score": 0.37316614389419556
+    },
+    {
+     "doc_id": "44149533",
+     "symbol": "AVGO",
+     "text": "Broadcom Q1 Earnings Preview: Semiconductor Looks To Get Back To Beating Analyst Estimates After Q4 Miss",
+     "published_at": "2025-03-05T00:00:00",
+     "score": 0.36948511004447937
+    }
+   ],
+   "twohop": [
+    {
+     "symbol": "INTC",
+     "hops": 2,
+     "path": "AVGO>TXN>INTC",
+     "pmi": 2.5539,
+     "via": "TXN",
+     "articles": 33
+    },
+    {
+     "symbol": "AMD",
+     "hops": 2,
+     "path": "AVGO>TXN>AMD",
+     "pmi": 2.4349,
+     "via": "TXN",
+     "articles": 33
+    },
+    {
+     "symbol": "TSM",
+     "hops": 2,
+     "path": "AVGO>MRVL>TSM",
+     "pmi": 2.4203,
+     "via": "MRVL",
+     "articles": 40
+    },
+    {
+     "symbol": "SFTBY",
+     "hops": 2,
+     "path": "AVGO>QCOM>SFTBY",
+     "pmi": 2.3571,
+     "via": "QCOM",
+     "articles": 29
+    },
+    {
+     "symbol": "SSNLF",
+     "hops": 2,
+     "path": "AVGO>QCOM>SSNLF",
+     "pmi": 2.3571,
+     "via": "QCOM",
+     "articles": 93
+    },
+    {
+     "symbol": "NVDA",
+     "hops": 2,
+     "path": "AVGO>MRVL>NVDA",
+     "pmi": 2.0475,
+     "via": "MRVL",
+     "articles": 131
+    },
+    {
+     "symbol": "DELL",
+     "hops": 2,
+     "path": "AVGO>HPE>DELL",
+     "pmi": 2.0447,
+     "via": "HPE",
+     "articles": 25
+    }
+   ],
+   "twohop_ms": 18.6,
+   "legacy_query": "news relevant to a up move in AVGO",
+   "query_now": "AVGO catalyst: earnings, demand, guidance, production, regulation",
+   "legacy_news": [
+    {
+     "text": "Market-Moving News for April 7th",
+     "score": 0.5269,
+     "published_at": "2026-04-07 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for June 6th",
+     "score": 0.5177,
+     "published_at": "2025-06-06 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for March 7th",
+     "score": 0.5104,
+     "published_at": "2025-03-07 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for December 12th",
+     "score": 0.4881,
+     "published_at": "2025-12-12 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for March 5th",
+     "score": 0.4879,
+     "published_at": "2026-03-05 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for September 5th",
+     "score": 0.4826,
+     "published_at": "2025-09-05 00:00:00"
     }
    ]
   },
   {
    "symbol": "TSLA",
-   "as_of": "2026-06-01",
-   "traversal_ms": 2,
-   "vector_ms": 4,
+   "as_of": "2026-05-11",
+   "traversal_ms": 4.2,
+   "vector_ms": 9.6,
    "query": "TSLA supply chain, suppliers, component demand, orders and production outlook",
    "hop1": [
     {
      "symbol": "APTV",
      "hops": 1,
      "path": "APTV>TSLA",
-     "pct": "9",
-     "filed": "2023-02-08"
+     "filed": "2023-02-08",
+     "named": "Tesla",
+     "verified": true,
+     "sentence": "The following table provides the percentage of net sales to our largest customers for the year ended December 31, 2022: Customer Percentage of Net Sales General Motors Company 9% Stellantis N.V. 9% Ford Motor Company 8% Volkswagen Group 8% Tesla, Inc. 5% Geely Automobile Holdings Limited 5% Mercedes-Benz Group AG 4% SAIC General Motors Corporation Limited 3% Bayerische Motoren Werke AG 2% Toyota Motor Corporation 2% Tata Motors Limited 2% Supply Relationships with Our Customers We typically supply products to our OEM customers through purchase orders, which are generally governed by general terms and conditions established by each OEM",
+     "pct": "9"
     },
     {
      "symbol": "JBL",
      "hops": 1,
      "path": "JBL>TSLA",
-     "pct": null,
-     "filed": "2020-10-22"
+     "filed": "2020-10-22",
+     "named": "Tesla",
+     "verified": true,
+     "sentence": "Based on net revenue, for the fiscal year ended August 31, 2020 , our largest customers include Amazon.com, Inc., Apple, Inc., Cisco Systems, Inc., Hewlett-Packard Company, Ingenico Group, Johnson and Johnson, LM Ericsson Telephone Company, NetApp, Inc., SolarEdge Technologies Inc., and Tesla, Inc. For the fiscal year ended August 31, 2020 , we had net revenues of $27.3 billion and net income attributable to Jabil Inc. of $53.9 million",
+     "pct": null
     }
    ],
    "hop2": [],
@@ -503,7 +836,113 @@
      ],
      "score": 0.4134949743747711
     }
+   ],
+   "pipeline_news": [
+    {
+     "doc_id": "51966124",
+     "symbol": "TSLA",
+     "text": "Tesla Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call",
+     "published_at": "2026-04-22T00:00:00",
+     "score": 0.45685768127441406
+    },
+    {
+     "doc_id": "43285246",
+     "symbol": "TSLA",
+     "text": "Tesla's Q4 Earnings Looms: Can The Stock Keep Its Rally Alive?",
+     "published_at": "2025-01-28T00:00:00",
+     "score": 0.4424653649330139
+    },
+    {
+     "doc_id": "45844984",
+     "symbol": "TSLA",
+     "text": "Tesla Among S&P's Big Losers: Q1 EPS Miss Puts TSLA In Bottom 10",
+     "published_at": "2025-06-09T00:00:00",
+     "score": 0.4309442639350891
+    },
+    {
+     "doc_id": "45210400",
+     "symbol": "TSLA",
+     "text": "Ahead Of Uber Earnings, Analyst Raises Forecast",
+     "published_at": "2025-05-05T00:00:00",
+     "score": 0.4066602289676666
+    },
+    {
+     "doc_id": "48613203",
+     "symbol": "TSLA",
+     "text": "Ahead Of Uber's Q3 Earnings, Mark Mahaney Predicts Investors Will Be Looking Out For This Major Update \u2014 Outlines Tesla, Waymo's Role",
+     "published_at": "2025-11-04T00:00:00",
+     "score": 0.40347903966903687
+    },
+    {
+     "doc_id": "50404256",
+     "symbol": "TSLA",
+     "text": "Tesla Rival Nio Expects Its First Profitable Quarter",
+     "published_at": "2026-02-05T00:00:00",
+     "score": 0.3893887400627136
+    }
+   ],
+   "twohop": [],
+   "twohop_ms": 4.2,
+   "legacy_query": "news relevant to a up move in TSLA",
+   "query_now": "TSLA catalyst: earnings, demand, guidance, production, regulation",
+   "legacy_news": [
+    {
+     "text": "Market-Moving News for April 21st",
+     "score": 0.57,
+     "published_at": "2025-04-21 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for April 16th",
+     "score": 0.5514,
+     "published_at": "2025-04-16 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for June 6th",
+     "score": 0.5491,
+     "published_at": "2025-06-06 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for July 7th",
+     "score": 0.5469,
+     "published_at": "2025-07-07 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for April 23rd",
+     "score": 0.5424,
+     "published_at": "2025-04-23 00:00:00"
+    },
+    {
+     "text": "Market-Moving News for April 23rd",
+     "score": 0.5424,
+     "published_at": "2026-04-23 00:00:00"
+    }
    ]
+  }
+ ],
+ "assessments": [
+  {
+   "symbol": "AAPL",
+   "direction": "up",
+   "verdict": "neutral",
+   "effective_evidence": 0.0,
+   "n_supporting": 0,
+   "n_contradicting": 0
+  },
+  {
+   "symbol": "AVGO",
+   "direction": "up",
+   "verdict": "corroborated",
+   "effective_evidence": 1.0,
+   "n_supporting": 3,
+   "n_contradicting": 1
+  },
+  {
+   "symbol": "TSLA",
+   "direction": "up",
+   "verdict": "contradicted",
+   "effective_evidence": 1.0,
+   "n_supporting": 1,
+   "n_contradicting": 7
   }
  ]
 }

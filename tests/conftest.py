@@ -1,6 +1,27 @@
-"""Shared fixtures. External systems are faked here — tests never hit real infra."""
+"""Shared fixtures.
+
+Most external systems are faked here. The exception is the ArangoDB-backed
+suite (`test_arango_topology`, `test_vector_index`, `test_market_scan`), which
+needs a real instance and seeds its own throwaway database — never the real
+`lagmatrix`. The connection helpers for those live here rather than being
+copy-pasted into three files, which is how they drifted out of sync with the
+application in the first place (Q-43).
+
+Those throwaway databases are per-process (Q-46). They used to be fixed names,
+so two suites running at once — routine here, with several agents working the
+same checkout — truncated each other's collections mid-test. Measured before
+the fix: two concurrent runs produced `6 failed, 8 errors` and `3 failed`,
+every failure in a live-ArangoDB file, while either run alone was green. A
+shared name made the suite report failures that had nothing to do with the
+code under test, which is worse than slow: it teaches you to distrust red.
+"""
 
 from __future__ import annotations
+
+import os
+import pathlib
+import socket
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -8,6 +29,155 @@ import pytest
 
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
+
+# Default aligned with `scripts/serve.py:52`. These previously defaulted to
+# :8529 while the application used :19999, so every live test skipped as
+# "not reachable" and the whole graph layer went unverified while the suite
+# reported a healthy pass count (Q-43).
+ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:19999")
+ARANGO_USER = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
+# Set to 1 in CI, or locally when a tunnel is expected, to turn "no database"
+# from a silent skip into a failure. Without it a missing instance still skips,
+# which is right on a laptop with no tunnel — but there was previously no mode
+# in which its absence was an error, so nobody learned the tests were dead.
+REQUIRE_LIVE = os.environ.get("LAGMATRIX_REQUIRE_LIVE") == "1"
+_PW_FILE = pathlib.Path.home() / ".lagmatrix-arango-pw"
+
+
+def arango_password() -> str:
+    """Env var first, then the same file `serve.py` reads. Never logged."""
+    pw = os.environ.get("LAGMATRIX_ARANGO_PASSWORD")
+    if pw is not None:
+        return pw
+    try:
+        return _PW_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+# Per-process, so concurrent runs cannot truncate each other (Q-46). The xdist
+# worker id is preferred when present; the pid covers plain concurrent runs.
+_RUN_ID = os.environ.get("PYTEST_XDIST_WORKER") or str(os.getpid())
+_CREATED: set[str] = set()
+
+
+def _unavailable(reason: str):
+    """Fail when a live instance was promised, skip when it was not."""
+    if REQUIRE_LIVE:
+        pytest.fail(f"LAGMATRIX_REQUIRE_LIVE=1 but ArangoDB is unusable: {reason}")
+    pytest.skip(f"ArangoDB not usable at {ARANGO_URL}: {reason}")
+
+
+def arango_db_or_skip(db_name: str):
+    """A handle to a throwaway database, creating it if absent.
+
+    Skips (or fails, under REQUIRE_LIVE) rather than passing vacuously. The
+    one-second TCP probe comes first because python-arango retries internally
+    and takes ~54s to give up on an unreachable host.
+    """
+    arango = pytest.importorskip("arango")
+    parsed = urlparse(ARANGO_URL)
+    try:
+        with socket.create_connection((parsed.hostname, parsed.port or 8529), timeout=1):
+            pass
+    except OSError as exc:
+        _unavailable(str(exc))
+    if not db_name.startswith("test_"):
+        raise ValueError(
+            f"throwaway database names must start with 'test_', got {db_name!r} "
+            "— this guard exists so a typo can never point the suite at `lagmatrix`")
+    scoped = f"{db_name}_{_RUN_ID}"
+    pw = arango_password()
+    try:
+        client = arango.ArangoClient(hosts=ARANGO_URL)
+        sys_db = client.db("_system", username=ARANGO_USER, password=pw, verify=True)
+        if not sys_db.has_database(scoped):
+            sys_db.create_database(scoped)
+        _CREATED.add(scoped)
+        return client.db(scoped, username=ARANGO_USER, password=pw)
+    except Exception as exc:
+        _unavailable(str(exc))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop this process's throwaway databases, so they do not accumulate.
+
+    Only names this process actually created, and only ones carrying this run's
+    id — `lagmatrix` can never be reached from here.
+    """
+    if not _CREATED:
+        return
+    import arango
+
+    pw = arango_password()
+    try:
+        sys_db = arango.ArangoClient(hosts=ARANGO_URL).db(
+            "_system", username=ARANGO_USER, password=pw, verify=True)
+    except Exception:
+        return
+    for name in sorted(_CREATED):
+        assert name.startswith("test_") and name.endswith(f"_{_RUN_ID}"), name
+        try:
+            sys_db.delete_database(name)
+        except Exception:
+            pass
+
+
+
+def require_local_file(path: str, what: str) -> None:
+    """Skip when a file that is deliberately not in the repo is absent, or fail
+    when `LAGMATRIX_REQUIRE_LIVE=1` promised it would be there.
+
+    Vendor bars and the embedding reference are gitignored -- this repo is
+    public -- so CI genuinely cannot have them and a skip there is honest. What
+    is not honest is skipping on a machine that was supposed to have them,
+    which is how nine live tests stayed dead for weeks (Q-43). Same fail-vs-skip
+    rule as `arango_db_or_skip`, so there is one convention rather than three.
+    """
+    if pathlib.Path(path).exists():
+        return
+    if REQUIRE_LIVE:
+        pytest.fail(f"LAGMATRIX_REQUIRE_LIVE=1 but {path} is missing ({what})")
+    pytest.skip(f"{path} not present on this machine ({what})")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_allow_real():
+    """Restore `serve.ALLOW_REAL` after every test.
+
+    It is module-level global state, and several tests flip it to True to reach
+    the real-data paths. None of them restored it, so whether a test that
+    depends on the default (`serve.py:93`, `ALLOW_REAL = False`) passed came
+    down to alphabetical file order -- `tests/test_serve_health.py` passed
+    alone and failed in the full suite for exactly that reason. Autouse rather
+    than a per-test monkeypatch so a test written next month cannot reintroduce
+    it by forgetting.
+    """
+    import sys
+
+    before = getattr(sys.modules.get("serve"), "ALLOW_REAL", False)
+    yield
+    mod = sys.modules.get("serve")
+    if mod is not None:
+        mod.ALLOW_REAL = before
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed with whatever encoder `NewsIndex` itself uses.
+
+    Tests that seed a throwaway `article` collection must produce vectors in
+    the same space the application queries with, and must not name the encoder
+    library -- naming it means a library swap edits tests, which is how a test
+    ends up asserting against the thing it was meant to be independent of.
+    Handles both call conventions so it survives the sentence-transformers to
+    fastembed swap unedited.
+    """
+    from lagmatrix.adapters.vector import NewsIndex
+
+    model = NewsIndex(db=None)._model
+    if hasattr(model, "encode"):
+        return [list(v) for v in model.encode(texts, normalize_embeddings=True)]
+    return [list(v) for v in model.embed(texts)]
 
 
 @pytest.fixture

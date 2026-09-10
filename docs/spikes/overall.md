@@ -3678,6 +3678,39 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   which is a distinct and harder problem. Logged as Q-55.
 - **Status:** Accepted
 
+### D-118 — The web pod is deployed ClusterIP-only, connecting read-only
+- **When:** 2026-09-10T12:45:00-05:00
+- **Decision:** `lagmatrix-web` Deployment plus a ClusterIP Service, **no
+  Ingress**, connecting as `lagmatrix_ro` rather than root.
+- **Why:** auth gates *exposure*, not deployment, and conflating the two was
+  holding up a change that improves security on its own. `serve.py` today runs
+  on a laptop holding the ArangoDB **root** password. In-cluster with a
+  read-only role it holds strictly less privilege than it does right now, and
+  needs no auth decision, because nothing connects to it from outside — it is
+  reached by `kubectl port-forward`, exactly as ArangoDB already is.
+  An Ingress is deliberately absent. `serve.py` has no authentication, and
+  `audit-conventions` measured that this cluster has **no Traefik middleware at
+  all** — no basicAuth, no forwardAuth, no ipAllowList — so "follow the existing
+  Ingress convention" would publish it to the LAN unauthenticated. That remains
+  a separate decision requiring auth first.
+  The demotion is expressible only because `arango_db()` now honours
+  `LAGMATRIX_ARANGO_USER`; it hardcoded `"root"` while `tests/conftest.py`
+  already read that variable — the same helper/application drift as Q-43.
+- **Outcome:** Rolled out and verified in-cluster, not merely applied:
+  `/health` returns 200, `/config` reports `graphrag: true` and
+  `default_as_of: 2026-09-09`, and `/movers?as_of=2026-09-09` sweeps 3,200
+  symbols returning 39 movers (SNOW z=2.468, BKNG −2.2, HWM −2.134).
+  The privilege claim is checked by what the pod **cannot** do: the mounted
+  credential's md5 matches the read-only password and not root's, and from
+  inside the pod, connecting as `lagmatrix_ro` reads 47,961 edges while
+  connecting as `root` is **rejected** — it does not hold that password.
+  `lagmatrix_ro` itself is denied document insert, collection create and AQL
+  write, tested rather than assumed.
+  Carries D-117's two deployment lessons forward: `fsGroup: 10001` so the
+  secret mount is readable, and an init container for `excluded-etfs.csv`,
+  which `neighbourhood()` reads and which the PVC would otherwise shadow.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

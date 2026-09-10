@@ -1,0 +1,120 @@
+# The explorer UI. **ClusterIP only, deliberately — there is no Ingress here.**
+#
+# Reach it with:  kubectl -n lagmatrix port-forward svc/lagmatrix-web 8000:80
+#
+# serve.py has no authentication of any kind, and `audit-conventions` measured
+# that this cluster has no Traefik middleware at all — no basicAuth, no
+# forwardAuth, no ipAllowList — so "follow the existing Ingress convention"
+# would publish it to the LAN unauthenticated. Adding an Ingress is a separate
+# decision that needs auth first; deploying without one needs nothing.
+#
+# This is still strictly less privileged than running serve.py on a laptop,
+# which is what it replaces: that process holds the ArangoDB **root** password.
+# This one connects as `lagmatrix_ro` (`ro` on lagmatrix, `none` on _system,
+# verified to be denied document insert, collection create and AQL write).
+# Every ArangoDB call reachable from an HTTP request is an aql.execute read;
+# the only writer, upsert_comovement, has one caller — the ingest CronJob,
+# which keeps the root credential.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lagmatrix-web
+  namespace: lagmatrix
+spec:
+  type: ClusterIP
+  selector: {app: lagmatrix-web}
+  ports:
+    - {name: http, port: 80, targetPort: 8000}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lagmatrix-web
+  namespace: lagmatrix
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the data PVC is ReadWriteOnce, so a rolling
+  # update would deadlock waiting for the old pod to release it.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: lagmatrix-web}
+  template:
+    metadata:
+      labels: {app: lagmatrix-web}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        # Kubernetes owns secret volumes root:root; without this a 0440 mount is
+        # unreadable by uid 10001 and arango_db() reports "not reachable" for
+        # what is actually a PermissionError (D-117, Q-55).
+        fsGroup: 10001
+      initContainers:
+        # The PVC mounts at /app/data and shadows what the image baked there,
+        # so the committed data/excluded-etfs.csv would be invisible —
+        # neighbourhood() reads it. Same fix as the ingest CronJob.
+        - name: seed-reference-data
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /seed}
+      containers:
+        - name: web
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+          imagePullPolicy: IfNotPresent
+          # --host 0.0.0.0 is required: serve.py defaults to 127.0.0.1, which
+          # would leave the Service unable to reach the pod at all.
+          args: ["scripts/serve.py", "--host", "0.0.0.0", "--port", "8000", "--allow-real"]
+          env:
+            - {name: LAGMATRIX_ARANGO_URL, value: "http://arangodb:8529"}
+            - {name: LAGMATRIX_ARANGO_USER, value: "lagmatrix_ro"}
+          ports:
+            - {containerPort: 8000, name: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          # /health is liveness only and touches no dependency (D-113): a probe
+          # that fails when ArangoDB is down would get the pod killed for
+          # something a restart cannot fix, and Q-49 says that outage is routine.
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # /config carries the readiness-shaped signal non-fatally — it reports
+          # graphrag: arango_db() is not None — but it calls default_as_of(),
+          # which reads the ~650MiB co-movement frame (D-109). Probing it on a
+          # short period would re-pay that; startup only.
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            failureThreshold: 30
+            periodSeconds: 5
+          # Measured, not estimated: 155.8 MiB at rest, 337.6 MiB after the
+          # first /config, and COMOVE_CLOSES peaks near 1,018 MiB during the
+          # pivot (D-109, D-115).
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits:   {cpu: "1", memory: 1536Mi}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: tmp, mountPath: /tmp}
+            - name: arango-pw
+              mountPath: /home/appuser/.lagmatrix-arango-pw
+              subPath: password
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: lagmatrix-data}
+        - name: tmp
+          emptyDir: {}
+        - name: arango-pw
+          secret:
+            secretName: arangodb-auth-ro
+            items: [{key: password, path: password}]
+            defaultMode: 0440

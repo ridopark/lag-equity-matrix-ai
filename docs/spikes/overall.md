@@ -3433,10 +3433,43 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the long file current.
 - **Status:** Accepted
 
+### D-111 — An unreachable database is not "start from the beginning"
+- **When:** 2026-09-10T00:45:00-05:00
+- **Decision:** `last_article_date()` returns `(ok, since, reason)`. `node_news`
+  and `node_vectors` both refuse to run when `ok` is false, and neither reaches
+  its subprocess.
+- **Why:** the function collapsed three situations into `None` — ArangoDB
+  unreachable, `article` genuinely empty, and a stored date failing
+  `date.fromisoformat` — and both callers read `None` as "start from scratch".
+  `node_news` dropped `--start` and fetched ten years across 500 symbols;
+  `node_vectors` fell back to a hardcoded `2025-01-01` and re-embedded
+  everything since. Both then reported `done`.
+  Found by comparing two `--dry-run` outputs minutes apart: one printed
+  `news: from the beginning`, the other `news: from 2026-09-09`. The only
+  difference was that ArangoDB was unreachable for the first. **Not a
+  hypothetical** — Q-49 records the pod being OOM-killed 8 times in two days, so
+  an unattended 3am run will meet a dead database.
+  The empty-collection case still starts from the beginning, because a genuine
+  first run must. Two negative controls pin that, and they are the reason the
+  fix could not simply be "error on any falsy result".
+  The outer `except Exception` is gone with it. Previously a failure *during*
+  the query — which is exactly what an OOM-kill mid-query looks like — was
+  swallowed into the same silent refetch. It now propagates, is retried by the
+  graph's `RetryPolicy(max_attempts=3)`, and then fails.
+  `node_vectors` was nearly missed: it calls the same function at a second call
+  site that no test covered, and a tuple is always truthy, so the change would
+  have left `since or "2025-01-01"` silently dead. The red agent flagged it
+  rather than leaving it for green to notice.
+- **Outcome:** 245 passed. All three data nodes — `comovement` (D-110), `news`
+  and `vectors` — now fail loudly on the same class of condition rather than
+  proceeding on a guess.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-49 | ArangoDB is being OOM-killed roughly every few hours, and each kill silently breaks the dev tunnel | the graph store, the live test suite, and any deployment sized from these numbers | Measured on the cluster 2026-09-09: the `arangodb` pod shows **8 restarts in 2d2h**, `Last State: Terminated, Reason: Error, Exit Code: 137` — OOMKilled — against its own `limits.memory: 1500Mi`. This is **not** node pressure: the node was at 77% with about 3.2 GiB free at the time. The pod idles at 244Mi, so something in our own workload spikes it past 1500Mi; the vector index (47,829 articles x 384 dims, rebuilt by every `load_vectors.py` run) and the 23,855-edge `upsert_comovement` are the candidates, unmeasured as to which. **Two consequences beyond the restarts.** (1) Each kill invalidates the remote `kubectl port-forward`, so `localhost:19999` keeps listening while nothing answers — that turned 13 live tests into silent skips, caught only because Q-43's guard exists. Restarting the SSH leg is not enough; the remote forward must be restarted too. (2) `1500Mi` is already known-insufficient, so any deployment sizing that inherits it inherits the crash. Not answered: whether to raise the limit, bound the workload, or both — and raising a limit on the host that runs real-money trading is the user's call, not one to make from here. |
 | Q-48 | `--dry-run` cannot catch the failure D-110 was built for | nothing today; the value of a dry run as a pre-flight check | `node_comovement` returns `{"done": ["comovement: DRY"]}` at `daily_ingest.py:130-131`, before it reaches `serve.COMOVE_CLOSES()` or `session_available`. So `--dry-run` prints four green nodes even when the real run would now error. That is exactly the blind spot that let tonight's incident through: the dry run passed all four nodes, and the real run still left the product worse. Every node has the same shape, so this is not specific to comovement — a dry run currently verifies that the *plumbing* is wired, not that the *data* can answer. Deciding what a dry run should mean is the real question; making it read the frame would cost a ~650MiB read, which may or may not be worth it for a pre-flight. |
 | Q-47 | ~~`/graph` and `/movers` answer errors with HTTP 200~~ **ANSWERED by D-108** | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |
 | Q-46 | ~~The live tests share fixed database names, so two concurrent suites collide~~ **ANSWERED by D-106** — fixed in `tests/conftest.py` alone, and the two grounds given below for not fixing it were both wrong: it *is* reproducible on demand, and it touched one file, not five. | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |

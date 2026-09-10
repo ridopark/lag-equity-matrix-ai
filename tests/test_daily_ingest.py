@@ -289,3 +289,177 @@ def test_as_of_is_resolved_after_the_long_bars_file_is_extended(monkeypatch):
         "node_comovement must resolve as_of from the *second* call to "
         f"serve.default_as_of(), after node_long_bars runs -- got {used_as_of}"
     )
+
+
+class _FakeAQL:
+    """Stand-in for `db.aql`, returning canned rows for the one query
+    `last_article_date` issues -- `list(db.aql.execute(...))`."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, query):
+        return iter(self._rows)
+
+
+class _FakeDB:
+    def __init__(self, rows):
+        self.aql = _FakeAQL(rows)
+
+
+def test_node_news_reports_an_error_and_never_fetches_when_arangodb_is_unreachable(monkeypatch):
+    """The incident: `serve.arango_db()` returns `None` when the homelab's
+    ArangoDB pod is unreachable (it has been OOM-killed 8 times in about two
+    days, exit 137 against a 1500Mi limit). `last_article_date()` currently
+    collapses this into the same `None` as a genuinely empty `article`
+    collection, so `node_news` omits `--start` and fetches ten years of news
+    across 500 symbols while reporting `done` -- a green line for a dead
+    database.
+
+    Falsifies if: `"errors"` is empty, `"done"` is non-empty, or the spied
+    `_run` is called at all.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: None)
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_news({"dry_run": False})
+
+    assert result.get("errors"), "an unreachable ArangoDB must be a loud failure"
+    assert not result.get("done"), "the failure path must not also claim success"
+    assert calls == [], "_run must never be called when ArangoDB is unreachable"
+
+
+def test_node_news_reports_an_error_and_never_fetches_when_the_stored_date_is_malformed(
+        monkeypatch):
+    """The stored watermark reaching `date.fromisoformat` is what D-103's
+    comment in `last_article_date` already guards against -- the fix under
+    test is that a validation failure must be loud, not fall back to `None`
+    and quietly fetch from the beginning as if there had never been a
+    watermark at all.
+
+    Falsifies if: `"errors"` is empty, `"done"` is non-empty, or the spied
+    `_run` is called at all.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: _FakeDB(["not-a-date"]))
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_news({"dry_run": False})
+
+    assert result.get("errors"), "a malformed stored date must be a loud failure"
+    assert not result.get("done"), "the failure path must not also claim success"
+    assert calls == [], "_run must never be called when the stored date is malformed"
+
+
+def test_node_news_fetches_from_the_beginning_when_the_article_collection_is_empty(monkeypatch):
+    """Negative control -- without it, a fix that treats every falsy
+    `last_article_date()` result as an error would pass both tests above
+    while breaking a legitimate first run. `MAX(a.date)` over zero rows
+    returns a single row holding `None`; that is not a failure, it is "there
+    is no watermark yet," and must still fetch from the beginning and report
+    `done`.
+
+    Falsifies if: the spied `_run` is never called, `_run` is called with a
+    `--start` flag, `"done"` is empty, or `"errors"` is non-empty.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: _FakeDB([None]))
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_news({"dry_run": False})
+
+    assert calls, "_run must still be called for a legitimate first run"
+    assert "--start" not in calls[0], "an empty collection has no watermark to start from"
+    assert result.get("done"), "a legitimate first run must report success"
+    assert not result.get("errors")
+
+
+def test_node_vectors_reports_an_error_and_never_fetches_when_arangodb_is_unreachable(monkeypatch):
+    """`node_vectors` must fail the same way `node_news` does, for a stronger
+    reason: with ArangoDB unreachable, `load_vectors.py` cannot write the
+    embeddings it computes -- both the vector index and the graph live there
+    -- so fetching and embedding a year of articles only to fail on the write
+    is pure waste. `since` also has a *hardcoded* fallback (`"2025-01-01"`,
+    below), unlike `node_news`'s "from the beginning": an unreachable
+    database today means re-embedding everything since that fixed date, via
+    the same `load_vectors.py` that reaches psql in the `copytrade` namespace
+    (D-103) -- a spurious full re-embed is not merely expensive there.
+    D-110 already made `node_comovement` refuse to proceed when its data
+    could not answer; this is that same rule applied to the same class of
+    failure, so all three ingest nodes behave alike under this fault.
+
+    Falsifies if: `"errors"` is empty, `"done"` is non-empty, or the spied
+    `_run` is called at all.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: None)
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_vectors({"dry_run": False})
+
+    assert result.get("errors"), "an unreachable ArangoDB must be a loud failure"
+    assert not result.get("done"), "the failure path must not also claim success"
+    assert calls == [], "_run must never be called when ArangoDB is unreachable"
+
+
+def test_node_vectors_reports_an_error_and_never_fetches_when_the_stored_date_is_malformed(
+        monkeypatch):
+    """The `node_news` malformed-date test, mirrored for `node_vectors`: a
+    corrupted stored watermark must not fall back to `"2025-01-01"` and
+    quietly re-embed a year of articles -- it must be treated as data
+    corruption, loudly, exactly as it is for `node_news`.
+
+    Falsifies if: `"errors"` is empty, `"done"` is non-empty, or the spied
+    `_run` is called at all.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: _FakeDB(["not-a-date"]))
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_vectors({"dry_run": False})
+
+    assert result.get("errors"), "a malformed stored date must be a loud failure"
+    assert not result.get("done"), "the failure path must not also claim success"
+    assert calls == [], "_run must never be called when the stored date is malformed"
+
+
+def test_node_vectors_embeds_from_the_fallback_date_when_the_article_collection_is_empty(
+        monkeypatch):
+    """Negative control -- an empty `article` collection is a legitimate
+    first run, not a failure, and `"2025-01-01"` is exactly the fallback
+    `node_vectors` already carries for it. Without this test, a fix that
+    errors on every falsy `last_article_date()` result would pass both
+    failure-path tests above while breaking a legitimate first run.
+
+    Falsifies if: the spied `_run` is never called, its command does not
+    contain `"2025-01-01"`, `"done"` is empty, or `"errors"` is non-empty.
+    """
+    import daily_ingest
+    import serve
+
+    monkeypatch.setattr(serve, "arango_db", lambda: _FakeDB([None]))
+    calls = []
+    monkeypatch.setattr(daily_ingest, "_run", lambda cmd, dry: calls.append(cmd) or "")
+
+    result = daily_ingest.node_vectors({"dry_run": False})
+
+    assert calls, "_run must still be called for a legitimate first run"
+    assert "2025-01-01" in calls[0], "an empty collection must use the hardcoded fallback"
+    assert result.get("done"), "a legitimate first run must report success"
+    assert not result.get("errors")

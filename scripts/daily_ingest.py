@@ -68,28 +68,30 @@ def long_bar_date() -> date | None:
     return pd.to_datetime(b["timestamp"]).max().date()
 
 
-def last_article_date() -> str | None:
-    """Latest article already embedded, so news resumes from there."""
+def last_article_date() -> tuple[bool, str | None, str]:
+    """Latest article already embedded, so news resumes from there.
+
+    Returns `(ok, since, reason)`: `ok` is `False` for an infrastructure
+    failure or data corruption -- distinct from a genuinely empty `article`
+    collection, which is `(True, None, "")` and lets a first run proceed.
+    """
+    import serve
+    db = serve.arango_db()
+    if db is None:
+        return False, None, "ArangoDB not reachable"
+    rows = list(db.aql.execute(
+        "FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi"))
+    hi = rows[0] if rows else None
+    if not hi:
+        return True, None, ""
+    # This value is passed to `load_vectors.py --since`, which reaches psql
+    # inside the *copytrade* namespace. It comes back out of a database, not
+    # from an operator, so it is validated here as well as there -- a stored
+    # value must never be trusted just because we are the ones who stored it.
     try:
-        import serve
-        db = serve.arango_db()
-        if db is None:
-            return None
-        rows = list(db.aql.execute(
-            "FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi"))
-        hi = rows[0] if rows else None
-        if not hi:
-            return None
-        # This value is passed to `load_vectors.py --since`, which reaches psql
-        # inside the *copytrade* namespace. It comes back out of a database, not
-        # from an operator, so it is validated here as well as there -- a stored
-        # value must never be trusted just because we are the ones who stored it.
-        try:
-            return date.fromisoformat(str(hi)).isoformat()
-        except ValueError:
-            return None
-    except Exception:
-        return None
+        return True, date.fromisoformat(str(hi)).isoformat(), ""
+    except ValueError:
+        return False, None, f"stored article date malformed: {hi!r}"
 
 
 def _run(cmd: list[str], dry: bool) -> str:
@@ -123,7 +125,9 @@ def node_long_bars(state: IngestState) -> dict:
 
 
 def node_news(state: IngestState) -> dict:
-    since = last_article_date()
+    ok, since, reason = last_article_date()
+    if not ok:
+        return {"errors": [f"news: {reason}"]}
     cmd = [sys.executable, "scripts/load_news.py", "--top-liquid", "500"]
     if since:
         cmd += ["--start", since]
@@ -132,7 +136,10 @@ def node_news(state: IngestState) -> dict:
 
 
 def node_vectors(state: IngestState) -> dict:
-    since = last_article_date() or "2025-01-01"
+    ok, since, reason = last_article_date()
+    if not ok:
+        return {"errors": [f"vectors: {reason}"]}
+    since = since or "2025-01-01"
     out = _run([sys.executable, "scripts/load_vectors.py", "--since", since],
                state.get("dry_run", False))
     return {"done": [f"vectors: embedded from {since} {out}"]}

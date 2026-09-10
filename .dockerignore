@@ -1,0 +1,20 @@
+# Mirrors .gitignore's data policy rather than inventing a second one: the
+# vendor bars/news files never enter an image, the two files the code's own
+# fallback chain needs do.
+.venv
+.git
+.github
+docs
+htmlcov
+__pycache__
+.pytest_cache
+.ruff_cache
+*.py[oc]
+*.egg-info
+.env
+data/*
+!data/excluded-etfs.csv
+*.parquet
+!tests/fixtures/synthetic-closes.parquet
+*.sqlite
+*.sqlite3

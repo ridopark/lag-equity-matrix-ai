@@ -19,49 +19,51 @@ Usage:  uv run python scripts/load_vectors.py [--since 2025-01-01]
 from __future__ import annotations
 
 import argparse
-import json
-import os
+import pathlib
 import re
-import subprocess
 import sys
 from datetime import date
 
 import pandas as pd
 
-HOST = "ridopark@192.168.10.123"
-PG = ("kubectl -n copytrade exec -i postgres-0 -- "
-      "psql -U temporal -d orchestrator -q -t -A -v ON_ERROR_STOP=1 -F'\x1f'")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from lagmatrix import pg  # noqa: E402
+
 DB = "lagmatrix"
 DIM = 384
 CHUNK = 400
 
 
-def arango_js(js: str, database: str = DB) -> str:
-    pw = open(os.path.expanduser("~/.lagmatrix-arango-pw")).read().strip()
-    remote = ("kubectl -n lagmatrix exec -i deploy/arangodb -- sh -c "
-              f"'cat > /tmp/v.js && arangosh --server.password \"{pw}\" "
-              f"--server.database {database} --javascript.execute /tmp/v.js'")
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, remote],
-                       input=js, capture_output=True, text=True, timeout=1800)
-    if r.returncode:
-        sys.exit(f"arangosh failed:\n{r.stderr[:1200]}\n{r.stdout[-1200:]}")
-    return r.stdout
+def arango():
+    """The live ArangoDB handle, over HTTP (Q-54).
+
+    This used to be `ssh <host> kubectl -n lagmatrix exec -i deploy/arangodb --
+    arangosh`, which needed a kubeconfig and put the database password on a
+    remote command line. `serve.arango_db()` reads the same credential file and
+    speaks the HTTP API, so it works from a pod and from a laptop alike.
+    """
+    import serve
+
+    db = serve.arango_db()
+    if db is None:
+        sys.exit("ArangoDB not reachable")
+    return db
 
 
-def ensure_article_js() -> str:
-    """JS that creates the `article` collection if absent -- never drops it.
+def ensure_article(db) -> None:
+    """Create the `article` collection if absent -- never drop it.
 
     D-97: the two lines this replaces were
     `if (db._collection("article")) { db._drop("article"); } db._create("article");`
     and re-running them destroyed 47,640 embeddings and their vector index once
     already. Documents are upserted by their stable Alpaca id below
-    (`overwriteMode:'replace'`), so a re-run refreshes what it re-embeds and
+    (`overwrite_mode="replace"`), so a re-run refreshes what it re-embeds and
     leaves everything else in place -- which is what makes a nightly job safe.
     """
-    return """
-      if (!db._collection("article")) { db._create("article"); }
-      print("article collection ready");
-    """
+    if not db.has_collection("article"):
+        db.create_collection("article")
 
 
 def main() -> None:
@@ -82,24 +84,28 @@ def main() -> None:
     tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
     if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
         sys.exit("data/fires.csv holds a ticker that is not a plain symbol")
-    inlist = ",".join(f"'{t}'" for t in tickers)
-    sql = f"""
+    # Tickers and `since` travel as parameters, not interpolated text. The
+    # regex above stays as a second line of defence, but the parameterisation
+    # is what makes D-103 structurally hard to repeat.
+    sql = """
       WITH ok AS (SELECT article_id FROM lagmatrix.news_symbol
                   GROUP BY 1 HAVING count(*) <= 8),
       hit AS (SELECT DISTINCT s.article_id FROM lagmatrix.news_symbol s
-              JOIN ok USING (article_id) WHERE s.symbol IN ({inlist}))
+              JOIN ok USING (article_id) WHERE s.symbol = ANY(%s))
       SELECT a.id, a.created_at::date, coalesce(a.headline,''),
              replace(coalesce(a.summary,''), chr(31), ' '),
              (SELECT string_agg(symbol, ' ') FROM lagmatrix.news_symbol z
               WHERE z.article_id = a.id)
       FROM lagmatrix.news_article a JOIN hit ON hit.article_id = a.id
-      WHERE a.created_at >= '{since}';"""
-    r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PG], input=sql,
-                       capture_output=True, text=True, timeout=1200)
-    if r.returncode:
-        sys.exit(f"postgres failed:\n{r.stderr[:600]}")
-    rows = [ln.split("\x1f") for ln in r.stdout.splitlines() if ln.count("\x1f") == 4]
-    df = pd.DataFrame(rows, columns=["id", "date", "headline", "summary", "symbols"])
+      WHERE a.created_at >= %s;"""
+    conn = pg.connect()
+    try:
+        result = pg.rows(conn, sql, (tickers, since))
+    finally:
+        conn.close()
+    df = pd.DataFrame(
+        [[("" if v is None else str(v)) for v in row] for row in result],
+        columns=["id", "date", "headline", "summary", "symbols"])
     print(f"  {len(df):,} articles since {args.since} (breadth<=8, alert-universe tagged)")
 
     from fastembed import TextEmbedding
@@ -109,24 +115,23 @@ def main() -> None:
     vecs = list(model.embed(text, batch_size=128))
     print(f"  {len(vecs):,} x {vecs[0].shape[0]} embeddings")
 
-    arango_js(ensure_article_js())
+    db = arango()
+    ensure_article(db)
+    articles = db.collection("article")
     for i in range(0, len(df), CHUNK):
         part = df.iloc[i:i + CHUNK]
         docs = [{"_key": str(row.id), "date": row.date, "headline": row.headline[:300],
                  "summary": row.summary[:700], "symbols": row.symbols.split(),
                  "embedding": [round(float(x), 5) for x in vecs[i + j]]}
                 for j, row in enumerate(part.itertuples())]
-        arango_js(f"db.article.insert({json.dumps(docs)}, {{overwriteMode:'replace'}});\n")
+        articles.insert_many(docs, overwrite_mode="replace")
         if (i // CHUNK) % 20 == 0:
             print(f"    {min(i+CHUNK, len(df)):,}/{len(df):,}", flush=True)
 
     print("  building the vector index…")
-    out = arango_js(f"""
-      db.article.ensureIndex({{type:"vector", fields:["embedding"],
-        params:{{metric:"cosine", dimension:{DIM}, nLists:64}}}});
-      print("indexed: " + db.article.count() + " articles");
-    """)
-    print("  " + out.strip().splitlines()[-1])
+    articles.add_index({"type": "vector", "fields": ["embedding"],
+                        "params": {"metric": "cosine", "dimension": DIM, "nLists": 64}})
+    print(f"  indexed: {articles.count()} articles")
 
 
 if __name__ == "__main__":

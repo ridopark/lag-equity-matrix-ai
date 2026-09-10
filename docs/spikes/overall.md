@@ -3598,6 +3598,48 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   defects above was the question asked.
 - **Status:** Accepted
 
+### D-116 — D-95's split is pinned to a date; the fraction was sliding it
+- **When:** 2026-09-10T10:35:00-05:00
+- **Decision:** `experiment_lag_matrix.py` and `experiment_chains.py` split at
+  `VALIDATION_START = 2022-09-06`, compared by session **date**, with four fatal
+  preconditions. `scipy` becomes a declared dependency.
+- **Why:** both split with `cut = int(len(rets) * 0.60)` — a fraction of however
+  many sessions the file holds. D-115 gave `long_bars` the job of appending
+  sessions nightly, so that boundary now **slides**: measured on the real file,
+  +21 sessions moves discovery's end from 2022-09-02 to 2022-09-21, and +252
+  (about a year) to 2023-04-12 — seven months. Re-running afterwards prints a
+  number that looks comparable to 0.586 and is not, and with `*.parquet`
+  gitignored and `fetch_daily_bars.py` rewriting split-affected history in
+  place, no prior state is recoverable. The headline result was quietly becoming
+  unfalsifiable, as a consequence of work done the same day.
+  The date is derived, not chosen: 2,515 sessions, `int(2515*0.60) = 1509`,
+  `rets.index[1509]`. Confirmed to reproduce D-95/D-100 across five quantities
+  — 11 masked returns, 1,573 symbols, 1,236,372 pairs, 6 same-company drops,
+  corr 0.5860 — which is a far stronger check than matching the headline alone.
+  **Two of the four preconditions are the point.** Range and
+  session-existence only catch a boundary that has gone missing. Discovery
+  length (1,509) and discovery end (2022-09-02) catch history rewritten
+  *underneath* a date that still exists — exactly what a split refetch does.
+  Without those the script stays deterministic while silently measuring a
+  different experiment.
+  Validation's **end** is left open on purpose: a growing out-of-sample window
+  is the one thing nightly ingest genuinely improves.
+  Compared by session date rather than exact timestamp because the bars are
+  stamped `04:00:00+00:00` (midnight ET). My first attempt pinned midnight UTC
+  and the existence precondition caught it — the check firing on its author.
+- **Outcome:** Reproduces. `sessions 2,515, discovery 1,509
+  (2016-09-07..2022-09-02), validation 1,006 (2022-09-06..2026-09-09)`,
+  **1,573 symbols** matching D-95, and lag 1 at **0.0281** matching D-93's
+  stated 0.028. `experiment_chains.py` clears the same preconditions.
+  **Incidental, and worse than the defect being fixed:** running it revealed
+  D-101's fastembed swap had already broken both scripts entirely —
+  `ModuleNotFoundError: scipy`. `scipy` was never declared; it arrived
+  transitively via sentence-transformers, so removing torch removed it. Nothing
+  caught this because the experiment scripts are in neither the test suite nor
+  CI. It is now a direct dependency. **The reproduction scripts being outside
+  every automated check is the underlying gap and is not fixed here.**
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

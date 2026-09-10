@@ -5,6 +5,9 @@ written before this script existed. Read-only; touches no database.
 """
 from __future__ import annotations
 
+import sys
+from datetime import date
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -31,15 +34,68 @@ def lagged_corr(z: np.ndarray, k: int) -> np.ndarray:
     return (a.T @ b) / len(a)
 
 
+# D-95's discovery/validation boundary, pinned as a date rather than a fraction.
+#
+# It used to be `cut = int(len(rets) * 0.60)` -- a fraction of however many
+# sessions the file happens to hold. Since `long_bars` now appends nightly that
+# boundary slid: a year of runs moves it about seven months, and re-running this
+# then prints a number that looks comparable to D-95's 0.586 and is not. With
+# `*.parquet` gitignored and `fetch_daily_bars.py` rewriting split-affected
+# history in place, no prior state is recoverable either.
+#
+# 2022-09-06 is not a chosen date. It is the boundary the file yielded when
+# 0.586 was published (2,515 sessions, int(2515*0.60)=1509, rets.index[1509]),
+# confirmed to reproduce D-95/D-100 across five quantities: 11 masked returns,
+# 1,573 symbols, 1,236,372 pairs, 6 same-company drops, corr 0.5860.
+#
+# Compared as a date, never an index, so it survives rows appearing before it.
+# Compared by session *date*. The bars are stamped 04:00:00+00:00 (midnight ET),
+# so an exact-timestamp pin would silently miss -- and comparing dates survives
+# a change in that convention, which an exact stamp would not.
+VALIDATION_START = date(2022, 9, 6)
+EXPECTED_DISCOVERY_SESSIONS = 1509
+EXPECTED_DISCOVERY_END = date(2022, 9, 2)
+
+
+def split_at_boundary(rets):
+    """Discovery/validation either side of `VALIDATION_START`, or exit loudly.
+
+    The first two checks catch a boundary that has gone missing. The last two
+    catch something worse and quieter: history rewritten *underneath* a date
+    that still exists, which `fetch_daily_bars.py` does when it refetches a
+    split-affected symbol in full. Without them this stays deterministic while
+    silently measuring a different experiment.
+    """
+    sessions = rets.index.date
+    if not (sessions.min() <= VALIDATION_START <= sessions.max()):
+        sys.exit(f"{VALIDATION_START} is outside the data "
+                 f"({sessions.min()}..{sessions.max()})")
+    if VALIDATION_START not in set(sessions):
+        sys.exit(f"{VALIDATION_START} is not a session in this file; "
+                 "splitting at the next one is the silent shift this pin exists "
+                 "to prevent")
+    disc = rets[sessions < VALIDATION_START]
+    val = rets[sessions >= VALIDATION_START]
+    if len(disc) != EXPECTED_DISCOVERY_SESSIONS:
+        sys.exit(f"discovery has {len(disc)} sessions, expected "
+                 f"{EXPECTED_DISCOVERY_SESSIONS} -- history before the boundary "
+                 "has changed")
+    if disc.index[-1].date() != EXPECTED_DISCOVERY_END:
+        sys.exit(f"discovery ends {disc.index[-1].date()}, expected "
+                 f"{EXPECTED_DISCOVERY_END} -- history before the "
+                 "boundary has changed")
+    return disc, val
+
+
 def main() -> None:
     bars = pd.read_parquet("data/bars-10y.parquet")
     closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
     rets = closes.pct_change().iloc[1:]
-    cut = int(len(rets) * 0.60)
-    disc_raw, val_raw = rets.iloc[:cut], rets.iloc[cut:]
+    disc_raw, val_raw = split_at_boundary(rets)
     print(f"sessions {len(rets):,}   discovery {len(disc_raw):,} "
-          f"({rets.index[0].date()}..{rets.index[cut-1].date()})   "
-          f"validation {len(val_raw):,} ({rets.index[cut].date()}..{rets.index[-1].date()})")
+          f"({disc_raw.index[0].date()}..{disc_raw.index[-1].date()})   "
+          f"validation {len(val_raw):,} "
+          f"({val_raw.index[0].date()}..{val_raw.index[-1].date()})")
 
     zd, cols_d = standardise(disc_raw)
     zv_full, cols_v = standardise(val_raw)

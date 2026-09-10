@@ -1,5 +1,12 @@
 # PLAN-2026-09-09-ingest-coherence
 
+**Status: DONE, 2026-09-10.** All five phases executed and verified by a real
+ingest run, not a dry one: `bars-10y.parquet` extended 2026-09-04 -> 2026-09-09,
+APH and RUSHA refetched for live splits, `as_of` resolved after the fetch, 24,104
+co-movement edges written for that date. See D-109 through D-112.
+**One thing this plan did not address:** nothing schedules `daily_ingest.py` at all
+(Q-50). The pipeline is correct; it is not yet operational.
+
 **Goal:** Make `scripts/daily_ingest.py` actually extend the file co-movement
 reads, derive `as_of` from that file only after it has been extended, and turn
 a resulting empty edge set into a loud, explicit failure instead of a silent

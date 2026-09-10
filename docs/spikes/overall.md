@@ -3465,10 +3465,41 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   proceeding on a guess.
 - **Status:** Accepted
 
+### D-112 — Two bars files, kept apart on purpose
+- **When:** 2026-09-10T00:55:00-05:00
+- **Decision:** `data/bars.parquet` and `data/bars-10y.parquet` stay separate.
+  The wide file is refetched whole each run; the long file is extended
+  incrementally with a corporate-actions split guard.
+- **Why:** the obvious simplification is one file, and it loses on two counts.
+  They differ in *history* (159 vs 2,514 sessions) and in *universe* (3,201 vs
+  2,183 symbols, the wide one drifting with a liquidity screen, the long one
+  pinned for reproducibility — D-95's replication is measured against that fixed
+  set). Merging would either impose the long file's cost on every wide read or
+  the wide file's drift on the replication baseline.
+  It also turns out the split immunity is a property of *how* each is fetched,
+  not of anything either file does: `fetch_bars.py` never reads the existing
+  file, so every row it writes shares one adjustment basis. The long file cannot
+  afford that — a nightly 10-year, 2,183-symbol refetch — which is exactly why
+  it needs the split guard the wide one does not.
+  Closes `PLAN-2026-09-09-ingest-coherence.md`. The plan completed a spec that
+  had already been written and skipped once: `PLAN-2026-09-09-daily-ingest.md`
+  PHASE-2 defined `merge_bars`/`daily_watermark`/`fetch_daily_bars.py` and none
+  of it existed. That is the same pattern as D-101 (verified, never
+  implemented) and the ten plans that carried no status line until today — work
+  recorded as done that was not.
+- **Outcome:** Verified by a real run, not a dry one. `bars-10y.parquet` went
+  2026-09-04 → 2026-09-09 (+4,366 rows), APH and RUSHA were refetched for live
+  splits, `as_of` resolved to 2026-09-09 *after* the fetch, and co-movement
+  wrote 24,104 edges for that date. `default_as_of()` now returns 2026-09-09 and
+  `followers("PANW", ...)` returns 11 — CRWD, FTNT, OKTA, TENB, ZS, S.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-50 | Nothing schedules `daily_ingest.py`; there is no "tomorrow's run" | the entire point of a *daily* ingest | Checked 2026-09-10: no crontab entry, no systemd timer, and `kubectl -n lagmatrix get cronjobs` returns **No resources found**. The pipeline is correct and verified end to end, but it executes only when a human types the command. Every "tomorrow's run will now fail loudly instead of silently" claim in D-110/D-111 is conditional on something invoking it, and today nothing does. Three options, none chosen: a local cron on the dev box (unreliable — it is WSL, not always running), a systemd timer (same caveat), or the k8s CronJob that `PLAN-2026-09-09-homelab-deploy.md` PHASE-5 specifies, which is the real answer and is blocked behind containerisation and D-101's unimplemented torch swap. Worth deciding before treating the ingest as operational. |
+| Q-51 | The two bars files cover different universes: 3,201 vs 2,183 symbols | which symbols co-movement can ever see | `data/bars.parquet` carries 3,201 symbols (a liquidity screen, median $vol >= $10M or a candidate, refreshed every run) while `data/bars-10y.parquet` carries 2,183 (pinned when it was first built). So roughly a thousand symbols appear in the wide file — and in `/movers`, which swept 3,201 — that co-movement can never return as a follower, because they have no long history stored. Whether the long file's universe should be refreshed, and what that costs against D-95's replication being measured on the fixed 2,183, is undecided. Raised by `plan-ingest`, which declined to guess rather than rationalising it. Related to the universe question already open under `PLAN-2026-09-09-daily-ingest.md` PHASE-7. |
 | Q-49 | ArangoDB is being OOM-killed roughly every few hours, and each kill silently breaks the dev tunnel | the graph store, the live test suite, and any deployment sized from these numbers | Measured on the cluster 2026-09-09: the `arangodb` pod shows **8 restarts in 2d2h**, `Last State: Terminated, Reason: Error, Exit Code: 137` — OOMKilled — against its own `limits.memory: 1500Mi`. This is **not** node pressure: the node was at 77% with about 3.2 GiB free at the time. The pod idles at 244Mi, so something in our own workload spikes it past 1500Mi; the vector index (47,829 articles x 384 dims, rebuilt by every `load_vectors.py` run) and the 23,855-edge `upsert_comovement` are the candidates, unmeasured as to which. **Two consequences beyond the restarts.** (1) Each kill invalidates the remote `kubectl port-forward`, so `localhost:19999` keeps listening while nothing answers — that turned 13 live tests into silent skips, caught only because Q-43's guard exists. Restarting the SSH leg is not enough; the remote forward must be restarted too. (2) `1500Mi` is already known-insufficient, so any deployment sizing that inherits it inherits the crash. Not answered: whether to raise the limit, bound the workload, or both — and raising a limit on the host that runs real-money trading is the user's call, not one to make from here. |
 | Q-48 | `--dry-run` cannot catch the failure D-110 was built for | nothing today; the value of a dry run as a pre-flight check | `node_comovement` returns `{"done": ["comovement: DRY"]}` at `daily_ingest.py:130-131`, before it reaches `serve.COMOVE_CLOSES()` or `session_available`. So `--dry-run` prints four green nodes even when the real run would now error. That is exactly the blind spot that let tonight's incident through: the dry run passed all four nodes, and the real run still left the product worse. Every node has the same shape, so this is not specific to comovement — a dry run currently verifies that the *plumbing* is wired, not that the *data* can answer. Deciding what a dry run should mean is the real question; making it read the frame would cost a ~650MiB read, which may or may not be worth it for a pre-flight. |
 | Q-47 | ~~`/graph` and `/movers` answer errors with HTTP 200~~ **ANSWERED by D-108** | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |

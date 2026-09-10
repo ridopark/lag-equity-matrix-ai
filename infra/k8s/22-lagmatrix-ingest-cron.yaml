@@ -41,6 +41,13 @@ spec:
     spec:
       backoffLimit: 0
       template:
+        metadata:
+          # A stable label so a NetworkPolicy podSelector can target these pods.
+          # Without it they carry only auto-generated batch.kubernetes.io/job-name
+          # and controller-uid labels, which change every run -- so a default-deny
+          # egress policy would select them while no allow could match, and the
+          # nightly ingest would go from working to fully blocked, unattended.
+          labels: {app: lagmatrix-ingest}
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false

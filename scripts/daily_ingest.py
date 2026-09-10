@@ -226,9 +226,13 @@ def build():
     Serial rather than the minimal fix, for a measured reason. Ordering
     `vectors` after `comovement` without a join is only possible in a chain,
     and keeping them concurrent put 1,018 MiB (comovement) and 617 MiB
-    (load_vectors) in one superstep at the moment `load_vectors` triggers
-    ArangoDB's index rebuild -- against ~2.8 GiB free on a node that also runs
-    real-money trading. Serial peak is one node at a time, about 1,018 MiB.
+    (load_vectors) in one superstep -- against ~2.8 GiB free on a node that
+    also runs real-money trading. Serial peak is one node at a time, about
+    1,018 MiB. (An earlier version of this note added "at the moment
+    `load_vectors` triggers ArangoDB's index rebuild". It triggers no rebuild:
+    `add_index` on an identical definition is a no-op, measured -- the index id
+    is unchanged across runs and documents inserted after training still
+    self-retrieve at rank 1.)
     The cost is wall-clock on a job that has all night.
     """
     g = StateGraph(IngestState)

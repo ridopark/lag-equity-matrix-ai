@@ -439,7 +439,7 @@ checked here; their typical magnitude is far smaller than a split's, so far
 less likely to corrupt a correlation, but this is an unmeasured assumption,
 not a proven absence of risk — stated so it is not silently assumed away.
 
-**Confirmed live, 2026-09-09 (team-lead, real credentials).**
+**Confirmed live, 2026-09-09 (team-lead, real credentials) — both halves.**
 `CorporateActionsRequest(symbols=["NVDA","AAPL"], start=2024-06-01,
 end=2024-06-20)` against the real API returned exactly one entry, under a
 `forward_splits` key: NVDA, `new_rate=10.0`, `old_rate=1.0`,
@@ -447,9 +447,16 @@ end=2024-06-20)` against the real API returned exactly one entry, under a
 measured in the file, and well inside the ±5-day pad. AAPL returned nothing
 for this window — correctly, since its own split (2020-08-31) is outside it —
 which confirms the endpoint genuinely filters by symbol and date rather than
-returning everything; **AAPL's own split, in its own window, has not yet been
-queried and remains open** (TASK-3.7). Two properties of the real response,
-not visible from the type stubs alone, and now load-bearing:
+returning everything, but is **not**, by itself, evidence that AAPL's own
+split is findable (that requires querying AAPL's own window, a distinct
+claim from "the endpoint filters correctly"). That distinct claim is now
+also confirmed: a second query, `symbols=["AAPL"], start=2020-08-26,
+end=2020-09-05`, returned one `forward_splits` entry — AAPL, `new_rate=4.0`,
+`old_rate=1.0`, `ex_date=2020-08-31` — exactly the date the stored file's
+close jumps 120.96 → 125.06. Both halves of TASK-3.7's halt condition now
+pass on live data, two different splits six years apart, and the ±5-day pad
+is comfortable in both cases. Two properties of the real response, not
+visible from the type stubs alone, and now load-bearing:
 - **Absent keys, not empty lists.** The response had no `reverse_splits` or
   `unit_splits` key at all — not `[]`, absent entirely. `split_affected_
   symbols` reads every type via `.get(type_name, [])`, never a bare subscript
@@ -607,17 +614,15 @@ universe refresh (see "Open question: the universe gap").
   the running total at the point TASK-3.1/3.2 already landed (this revision's
   5 new tests in TASK-3.3; TASK-3.1/3.2's own tests are already counted).
 - TASK-3.7 (verify, operational — needs live Alpaca credentials).
-  **NVDA half already confirmed** (see the live-evidence note above) — no
-  action needed for it. **Still open:** query `AAPL`, `2020-08-26`..
-  `2020-09-05` (its own 2020-08-31 4:1 split, not yet queried against its own
-  window — team-lead's probe used NVDA's window for both symbols, so AAPL
-  returning nothing there is not evidence about AAPL's own split) and confirm
-  a `forward_splits` entry is returned — a single symbol matching is not
-  proof the mechanism generalises to a different split, a different date and
-  a different rate. Also run `scripts/fetch_daily_bars.py` twice; confirm
+  **Both the NVDA and AAPL corporate-actions checks are confirmed** (see the
+  live-evidence note above — two different splits, six years apart, both
+  found within the ±5-day pad) — no action needed for either. **Still open:**
+  run `scripts/fetch_daily_bars.py` twice once it exists; confirm
   `0 new rows` and `0 symbols refetched` on the second call, and that
   `data/bars-10y.parquet`'s last session advanced to at least yesterday's
-  close on the first.
+  close on the first — this exercises the script end-to-end (batching,
+  merge, write-back), which the two standalone `CorporateActionsRequest`
+  probes above do not.
 
 **What would make this wrong:** if a split's `ex_date`/`effective_date` is
 reported by Alpaca more than 5 calendar days after the day it actually affects
@@ -742,12 +747,13 @@ real, matching the existing `_run` helper's own dry-run contract.
   bars arriving, or a delisted symbol Alpaca no longer serves — stop. That is
   the universe-refresh question this plan explicitly does not answer, and
   the fix is not "merge whatever columns show up."
-- NVDA's known 2024-06-10 split is confirmed found within the ±5-day
-  window (live, team-lead). If TASK-3.7's still-open AAPL check does not
-  find its own 2020-08-31 split within the same ±5-calendar-day window, stop
-  PHASE-3 and widen the pad (with a new justification, not a re-tuned guess)
-  before wiring `fetch_daily_bars.py` into the nightly graph — do not ship a
-  split guard confirmed on only one of the two known cases.
+- **Satisfied.** Both NVDA's 2024-06-10 split and AAPL's 2020-08-31 split
+  are confirmed found within the ±5-day window on live data (see PHASE-3's
+  "Confirmed live" note) — the pad-width halt condition this plan originally
+  carried does not fire. If a future symbol's split is *not* found within
+  ±5 days once `fetch_daily_bars.py` is running for real, stop and widen the
+  pad with a new justification rather than a re-tuned guess; two confirmed
+  cases are evidence the pad is reasonable, not a guarantee it is unbounded.
 - If TASK-4.3 cannot demonstrate `as_of` changing between "before" and
   "after" `node_long_bars` runs without also changing `serve.default_as_of`'s
   real implementation in a way PHASE-2/D-109 did not anticipate, stop — it

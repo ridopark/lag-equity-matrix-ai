@@ -30,10 +30,19 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from lagmatrix import pg  # noqa: E402
+from lagmatrix.ingest import plan_embeddings  # noqa: E402
 
 DB = "lagmatrix"
 DIM = 384
 CHUNK = 400
+# The candidate query's lower bound (Q-56). Fixed, not the moving watermark
+# `daily_ingest.py` passes as `--since`: a ticker firing for the first time
+# after that watermark had already advanced past its own history was never
+# picked up as a candidate at all, so the anti-join below (against what is
+# already embedded) never got a chance to catch it -- 412 articles measured
+# missing this way. `--since` keeps its default and its validation, but no
+# longer bounds this query; see `main()`.
+CORPUS_FLOOR = "2025-01-01"
 
 
 def arango():
@@ -68,7 +77,14 @@ def ensure_article(db) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--since", default="2025-01-01")
+    ap.add_argument(
+        "--since", default="2025-01-01",
+        help="Informational only -- it does NOT bound the query. Candidates come "
+             "from CORPUS_FLOOR and the work is whatever is not yet embedded (Q-56). "
+             "Kept because daily_ingest.py passes it and because a malformed value "
+             "is still an operator mistake worth catching. A flag that looks like it "
+             "narrows the query and silently does not would be the same class of "
+             "defect this fix removes.")
     args = ap.parse_args()
 
     # Both interpolations below land in SQL executed against the *copytrade*
@@ -76,7 +92,9 @@ def main() -> None:
     # `--since` in particular is not always operator-typed: daily_ingest.py
     # reads it back out of ArangoDB (`MAX(a.date)`), which makes anything stored
     # there a second-order injection source. Parse it as a date, and let a bad
-    # value fail loudly here rather than reach psql.
+    # value fail loudly here rather than reach psql -- it is a policy floor
+    # now (see `CORPUS_FLOOR` above), not the query's bound, but a malformed
+    # `--since` is still an operator mistake worth catching.
     try:
         since = date.fromisoformat(args.since).isoformat()
     except (TypeError, ValueError):
@@ -84,9 +102,9 @@ def main() -> None:
     tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
     if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
         sys.exit("data/fires.csv holds a ticker that is not a plain symbol")
-    # Tickers and `since` travel as parameters, not interpolated text. The
-    # regex above stays as a second line of defence, but the parameterisation
-    # is what makes D-103 structurally hard to repeat.
+    # Tickers and the corpus floor travel as parameters, not interpolated
+    # text. The regex above stays as a second line of defence, but the
+    # parameterisation is what makes D-103 structurally hard to repeat.
     sql = """
       WITH ok AS (SELECT article_id FROM lagmatrix.news_symbol
                   GROUP BY 1 HAVING count(*) <= 8),
@@ -100,24 +118,32 @@ def main() -> None:
       WHERE a.created_at >= %s;"""
     conn = pg.connect()
     try:
-        result = pg.rows(conn, sql, (tickers, since))
+        result = pg.rows(conn, sql, (tickers, CORPUS_FLOOR))
     finally:
         conn.close()
     df = pd.DataFrame(
         [[("" if v is None else str(v)) for v in row] for row in result],
         columns=["id", "date", "headline", "summary", "symbols"])
-    print(f"  {len(df):,} articles since {args.since} (breadth<=8, alert-universe tagged)")
+
+    db = arango()
+    ensure_article(db)
+    articles = db.collection("article")
+    existing_keys = set(db.aql.execute("FOR a IN article RETURN a._key"))
+    n_candidates, n_already_embedded, to_embed = plan_embeddings(df.id.tolist(), existing_keys)
+    print(f"  {n_candidates:,} candidates since {CORPUS_FLOOR} "
+          f"(breadth<=8, alert-universe tagged; --since {since} is a policy floor only)")
+    print(f"  {n_already_embedded:,} already embedded")
+    print(f"  {len(to_embed):,} to embed")
+    df = df[df.id.isin(to_embed)].reset_index(drop=True)
 
     from fastembed import TextEmbedding
     model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
     text = (df.headline.fillna("") + ". " + df.summary.fillna("").str.slice(0, 600)).tolist()
     print("  embedding…")
-    vecs = list(model.embed(text, batch_size=128))
-    print(f"  {len(vecs):,} x {vecs[0].shape[0]} embeddings")
+    vecs = list(model.embed(text, batch_size=128)) if text else []
+    if vecs:
+        print(f"  {len(vecs):,} x {vecs[0].shape[0]} embeddings")
 
-    db = arango()
-    ensure_article(db)
-    articles = db.collection("article")
     for i in range(0, len(df), CHUNK):
         part = df.iloc[i:i + CHUNK]
         docs = [{"_key": str(row.id), "date": row.date, "headline": row.headline[:300],

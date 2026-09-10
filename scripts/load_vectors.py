@@ -30,6 +30,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from lagmatrix import pg  # noqa: E402
+from lagmatrix.adapters.arango import embedding_universe  # noqa: E402
 from lagmatrix.ingest import plan_embeddings  # noqa: E402
 
 DB = "lagmatrix"
@@ -57,7 +58,11 @@ def arango():
 
     db = serve.arango_db()
     if db is None:
-        sys.exit("ArangoDB not reachable")
+        # D-119/Q-55: "not reachable" was wrong for two of the three ways this
+        # fails -- a bad credential and an unreadable credential file both
+        # reached the operator as a network problem. `serve.py` learned to say
+        # which; this caller had not, so the misleading message survived here.
+        sys.exit(f"ArangoDB unusable: {serve.arango_reason()}")
     return db
 
 
@@ -99,9 +104,18 @@ def main() -> None:
         since = date.fromisoformat(args.since).isoformat()
     except (TypeError, ValueError):
         sys.exit(f"--since must be an ISO date, got {args.since!r}")
-    tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
-    if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
+    fires_tickers = sorted(pd.read_csv("data/fires.csv").ticker.unique())
+    if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in fires_tickers):
         sys.exit("data/fires.csv holds a ticker that is not a plain symbol")
+    db = arango()
+    # Widens the alert set with every supplies_to/moves_with endpoint so
+    # scan- and leader:-mode candidates get news too, not just fires.csv's
+    # 24 symbols (see test_embedding_universe.py). These symbols come from
+    # our own graph rather than an operator-edited CSV, but they still reach
+    # the same %s-bound query below, so the same regex guards them.
+    tickers = embedding_universe(db, fires_tickers)
+    if not all(re.fullmatch(r"[A-Z][A-Z.\-]{0,9}", str(x)) for x in tickers):
+        sys.exit("the embedding universe holds a ticker that is not a plain symbol")
     # Tickers and the corpus floor travel as parameters, not interpolated
     # text. The regex above stays as a second line of defence, but the
     # parameterisation is what makes D-103 structurally hard to repeat.
@@ -125,7 +139,6 @@ def main() -> None:
         [[("" if v is None else str(v)) for v in row] for row in result],
         columns=["id", "date", "headline", "summary", "symbols"])
 
-    db = arango()
     ensure_article(db)
     articles = db.collection("article")
     existing_keys = set(db.aql.execute("FOR a IN article RETURN a._key"))

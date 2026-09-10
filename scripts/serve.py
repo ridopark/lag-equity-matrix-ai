@@ -559,6 +559,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if url.path == "/health":
+            self._json({"status": "ok"})
+            return
         if url.path == "/config":
             self._json({"allow_real": ALLOW_REAL, "graphrag": arango_db() is not None,
                         "arango_url": ARANGO_URL, "default_as_of": default_as_of()})

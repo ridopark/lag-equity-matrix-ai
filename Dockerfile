@@ -57,6 +57,10 @@ USER appuser
 
 EXPOSE 8000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)" \
+      || exit 1
+
 # `--host 0.0.0.0` is required: serve.py defaults to 127.0.0.1, which would
 # leave the Service unable to reach the pod at all.
 ENTRYPOINT ["python"]

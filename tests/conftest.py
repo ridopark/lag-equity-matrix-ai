@@ -124,6 +124,27 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 
+@pytest.fixture(autouse=True)
+def _isolate_allow_real():
+    """Restore `serve.ALLOW_REAL` after every test.
+
+    It is module-level global state, and several tests flip it to True to reach
+    the real-data paths. None of them restored it, so whether a test that
+    depends on the default (`serve.py:93`, `ALLOW_REAL = False`) passed came
+    down to alphabetical file order -- `tests/test_serve_health.py` passed
+    alone and failed in the full suite for exactly that reason. Autouse rather
+    than a per-test monkeypatch so a test written next month cannot reintroduce
+    it by forgetting.
+    """
+    import sys
+
+    before = getattr(sys.modules.get("serve"), "ALLOW_REAL", False)
+    yield
+    mod = sys.modules.get("serve")
+    if mod is not None:
+        mod.ALLOW_REAL = before
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed with whatever encoder `NewsIndex` itself uses.
 

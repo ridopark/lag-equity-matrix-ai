@@ -30,7 +30,9 @@ def _scripts_on_path():
     sys.path.remove(str(SCRIPTS))
 
 
-@pytest.mark.parametrize("name", ["serve", "capture_showcase", "capture_trace"])
+@pytest.mark.parametrize(
+    "name", ["serve", "capture_showcase", "capture_trace", "fetch_daily_bars"]
+)
 def test_script_imports_cleanly(name):
     """Falsifies if the module raises on import — the exact failure that
     deleting a function another script still imports would produce."""

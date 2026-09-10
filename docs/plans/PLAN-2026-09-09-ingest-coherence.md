@@ -431,13 +431,43 @@ inference.** Checked before recommending it, per the four questions raised:
      once detection is no longer providing the fast reaction and only needs
      to bound worst-case staleness, not eliminate it same-day.
 
-**Residual gap, named rather than silently absorbed:** detection is scoped to
-`forward_splits`, `reverse_splits` and `unit_splits` — the three types whose
-ratios are large enough to plausibly reproduce the jump measured above.
-`stock_dividends` and `spin_offs` also alter the adjusted basis and are not
-checked here; their typical magnitude is far smaller than a split's, so far
-less likely to corrupt a correlation, but this is an unmeasured assumption,
-not a proven absence of risk — stated so it is not silently assumed away.
+**Residual gap, measured rather than assumed — vindicated on real data.**
+Detection is scoped to `forward_splits`, `reverse_splits` and `unit_splits`.
+`stock_dividends` and `spin_offs` also alter the adjusted basis and are
+deliberately not checked here; this was flagged as an unmeasured assumption
+when this phase was first drafted, and it is no longer one. The first real
+`--dry-run` of `fetch_daily_bars.py` caught a live dividend in the act:
+`RUSHA`'s stored closes differ from a fresh full refetch on **all 2,514
+overlapping sessions**, by a systematic ratio between 1.001910 and
+1.003731 — a dividend, not noise and not a split. Measured on its 2,513
+sessions of returns: max return difference 0.001030 (0.05 sigma), only 7 of
+2,513 sessions differ by more than 0.1%, and `corr(stored returns, fresh
+returns) = 0.99989812`. Against that, an undetected 2:1 split leaves a −50%
+single-session artefact — roughly 25 sigma, three orders of magnitude worse,
+and exactly the class this phase exists to catch. The scope line is now a
+number, not a judgement: splits are in scope because they are catastrophic
+(~25 sigma); dividends are out because they are immaterial to D-95's
+replication (~0.05 sigma, r=0.9999) even though they are, confirmed,
+silently happening on real symbols today.
+
+**The drift is bounded per-event but accumulates, and this phase does not
+solve that.** A dividend-paying symbol that never splits is never refetched
+by this phase's detection (which only reacts to `forward_splits`/
+`reverse_splits`/`unit_splits`), so its stored basis drifts further from
+Alpaca's true adjusted basis with every dividend it pays. One dividend
+measured at ~0.05 sigma; ten years of dividends on a high-yield name has not
+been measured and could compound to something no longer immaterial — named
+here as a bounded-but-growing residual, not solved by this phase. What would
+trigger revisiting: a future measurement (the same overlap-compare technique
+used above, applied to a long-held high-yield symbol's full 10-year history)
+showing accumulated drift approaching `_IMPLAUSIBLE_RETURN_CUTOFF`'s
+neighbourhood, or a correlation result traceable to implausible stability or
+instability on one specific symbol. The quarterly full refetch already named
+as PHASE-3's fallback (for a corporate-actions endpoint that turns out
+unreliable) is also the natural remedy for this — independently of that
+reason, since a periodic full refetch resets every symbol's basis to
+Alpaca's current truth regardless of which mechanism, or none, missed an
+intervening adjustment.
 
 **Confirmed live, 2026-09-09 (team-lead, real credentials) — both halves.**
 `CorporateActionsRequest(symbols=["NVDA","AAPL"], start=2024-06-01,
@@ -478,10 +508,19 @@ increases by roughly one session per successful run, D falls out of
 `[watermark - 5, today]` permanently within roughly three to six nightly runs
 of first being detected (the exact count depends on where a weekend falls
 inside the 5-calendar-day pad), and is never queried again after that. The
-cost of those few extra nights is one full refetch of one
-already-correctly-adjusted symbol — harmless (`merge_bars`'s `keep="last"`
-just replaces already-correct rows with byte-identical fresh ones) and
-negligible against the ~2,183-symbol universe. **Do not build deduplication
+cost of those few extra nights is one full refetch of a symbol likely
+already close to correctly adjusted. **Correction, measured on real data:**
+this refetch is not always a byte-identical no-op. `APH` (a pure 2:1 split,
+no intervening dividend) came back bit-identical to its stored history —
+`max |stored - fresh| = 0.000000` across 2,514 overlapping sessions.
+`RUSHA` did not: its fresh refetch differed from stored on every one of
+2,514 sessions by a small, systematic dividend-adjustment ratio (see the
+residual-gap note above), and `merge_bars`'s `keep="last"` correctly let the
+fresh values win, since fresh is authoritative. So a repeat refetch
+triggered by a detected split can still change the file's contents even
+while the run reports `0 new rows` — expected and correct, not a bug, but
+"identical" was the wrong word for it. Negligible either way against the
+~2,183-symbol universe. **Do not build deduplication
 for this** — suppressing a bounded, harmless repeat would itself be error
 handling for a non-problem, the same CLAUDE.md rule this plan already
 invoked against a weekly-full-refetch fallback. The only way this would leak

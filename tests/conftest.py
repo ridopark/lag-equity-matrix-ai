@@ -124,6 +124,24 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed with whatever encoder `NewsIndex` itself uses.
+
+    Tests that seed a throwaway `article` collection must produce vectors in
+    the same space the application queries with, and must not name the encoder
+    library -- naming it means a library swap edits tests, which is how a test
+    ends up asserting against the thing it was meant to be independent of.
+    Handles both call conventions so it survives the sentence-transformers to
+    fastembed swap unedited.
+    """
+    from lagmatrix.adapters.vector import NewsIndex
+
+    model = NewsIndex(db=None)._model
+    if hasattr(model, "encode"):
+        return [list(v) for v in model.encode(texts, normalize_embeddings=True)]
+    return [list(v) for v in model.embed(texts)]
+
+
 @pytest.fixture
 def closes() -> pd.DataFrame:
     """120 sessions of synthetic closes.

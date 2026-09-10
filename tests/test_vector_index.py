@@ -32,7 +32,7 @@ from datetime import date
 
 import pytest
 
-from conftest import arango_db_or_skip
+from conftest import arango_db_or_skip, embed_texts
 from lagmatrix.adapters.vector import NewsIndex
 from lagmatrix.domain.models import NewsChunk
 
@@ -81,16 +81,15 @@ def index():
     or ignored `as_of` filter cannot pass by ranking alone.
     """
     db = arango_db_or_skip(ARANGO_DB_NAME)
-    sentence_transformers = pytest.importorskip("sentence_transformers")
 
     if db.has_collection(ARTICLE):
         db.delete_collection(ARTICLE)
     db.create_collection(ARTICLE)
     articles = db.collection(ARTICLE)
 
-    model = sentence_transformers.SentenceTransformer(EMBEDDING_MODEL)
-    texts = [CHIP_TEXT, DIVIDEND_TEXT, BEFORE_CUTOFF_TEXT, AFTER_CUTOFF_TEXT, ON_CUTOFF_TEXT]
-    vectors = model.encode(texts, normalize_embeddings=True)
+    texts = [CHIP_TEXT, DIVIDEND_TEXT, BEFORE_CUTOFF_TEXT,
+             AFTER_CUTOFF_TEXT, ON_CUTOFF_TEXT]
+    vectors = embed_texts(texts)
     articles.insert({
         "_key": "chip-article", "date": "2025-03-01", "headline": CHIP_TEXT,
         "summary": "", "symbols": ["X"], "embedding": [round(float(x), 6) for x in vectors[0]],

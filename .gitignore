@@ -59,3 +59,10 @@ src/hello.py
 # Kept locally, held out of history on purpose (2026-09-09). Removing this line
 # republishes it.
 docs/plans/PLAN-2026-09-09-homelab-deploy.md
+
+# Real headlines + their stored embeddings, captured read-only from the live
+# `article` collection to prove a new encoder reproduces the existing corpus.
+# Not committed: the corpus derives from the Alpaca/Benzinga news feed and this
+# repo is public. Regenerate locally; the test that needs it fails loudly rather
+# than skipping when it is absent (Q-43).
+tests/fixtures/embedding-reference.json

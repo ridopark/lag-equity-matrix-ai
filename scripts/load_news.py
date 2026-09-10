@@ -1,8 +1,14 @@
 """Backfill Alpaca/Benzinga news into lagmatrix.news_* (D-16's unbuilt half).
 
-Bulk-loads via COPY through `ssh -> kubectl exec -i -> psql`, because that is
-the only route to this cluster: 5432 is a headless ClusterIP with no external
-route, so row-at-a-time INSERT would cost one round trip each and is unusable.
+Bulk-loads via COPY into a TEMP table: row-at-a-time INSERT would cost a round
+trip each and is unusable at this volume.
+
+Connects to postgres directly (Q-54). This used to go through
+`ssh <host> -> kubectl exec -i postgres-0 -- psql`, on the reasoning that 5432
+was a headless ClusterIP with no external route -- true from a laptop, and the
+reason the CronJob could not run this at all. From inside the cluster the
+service is reachable, and measuring it was what showed the shell-out was a
+workaround for where the script ran rather than a property of the database.
 
 Idempotent. Articles arrive with a stable Alpaca id, staged into a TEMP table
 and merged with ON CONFLICT DO NOTHING, so re-running a window is free and a
@@ -23,8 +29,8 @@ import argparse
 import csv
 import io
 import os
+import pathlib
 import random
-import subprocess
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -33,9 +39,10 @@ import pandas as pd
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest
 
-HOST = "ridopark@192.168.10.123"
-PSQL = ("kubectl -n copytrade exec -i postgres-0 -- "
-        "psql -U temporal -d orchestrator -v ON_ERROR_STOP=1 -q")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+
+from lagmatrix import pg  # noqa: E402
+
 CHUNK_DAYS = 90       # one fetch window; Benzinga paginates within it
 WINDOW_LIMIT = 10_000  # NOT a page size. The SDK paginates internally up to
                        # NewsRequest.limit and always returns next_page_token=None,
@@ -44,39 +51,56 @@ WINDOW_LIMIT = 10_000  # NOT a page size. The SDK paginates internally up to
                        # first 50 articles: TSLA has 497 in Jan 2024 alone.
 
 
-def psql(sql: str, stdin: str = "") -> str:
-    """Run SQL over ssh -> kubectl exec -> psql, retrying transport failures.
+_CONN = None
 
-    A non-zero exit from psql itself is a real SQL error and stops the run; only
-    the ssh transport is retried, and only when psql produced no diagnostic.
+
+def conn():
+    """One postgres connection per run, opened on first use (Q-54).
+
+    Replaces `ssh <host> kubectl -n copytrade exec -i postgres-0 -- psql`, which
+    needed a kubeconfig and so could not run in a pod. The retry loop that
+    wrapped it goes too: it existed to survive *ssh transport* failures, and
+    there is no ssh here. A real SQL error stopped the run before and still
+    does -- psycopg2 raises rather than returning a non-zero exit code.
     """
-    last = ""
-    for attempt in range(1, 4):
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, PSQL],
-                           input=sql + stdin, capture_output=True, text=True,
-                           timeout=900)
-        if r.returncode == 0:
-            return r.stdout
-        last = r.stderr
-        if "ERROR:" in r.stderr:          # SQL error — retrying will not help
-            sys.exit(f"psql failed:\n{r.stderr[:1500]}")
-        if attempt < 3:
-            print(f"      ssh/psql transport failed, retry {attempt}/2", flush=True)
-            time.sleep(3 * attempt)
-    sys.exit(f"psql failed after retries:\n{last[:1500]}")
+    global _CONN
+    if _CONN is None:
+        _CONN = pg.connect()
+    return _CONN
+
+
+def stage_load(table: str, columns: list[str], csv_text: str) -> None:
+    """COPY into a TEMP table, then INSERT ... ON CONFLICT DO NOTHING.
+
+    Deliberately not `pg.copy_csv`, which commits: `ON COMMIT DROP` would then
+    fire before the INSERT could read the staged rows. The three statements
+    must share one transaction, so this drives the cursor directly.
+
+    `table` and `columns` are interpolated because postgres cannot parameterise
+    identifiers -- they are this module's own constants, never input.
+    """
+    column_list = ", ".join(columns)
+    c = conn()
+    with c.cursor() as cur:
+        cur.execute(f"CREATE TEMP TABLE stage (LIKE {table} INCLUDING DEFAULTS) "
+                    "ON COMMIT DROP")
+        cur.copy_expert(
+            f"COPY stage ({column_list}) FROM STDIN WITH (FORMAT csv)",
+            io.StringIO(csv_text))
+        cur.execute(f"INSERT INTO {table} ({column_list}) "
+                    f"SELECT {column_list} FROM stage ON CONFLICT DO NOTHING")
+    c.commit()
 
 
 def already_covered(symbol: str) -> set[tuple[date, date]]:
-    out = psql("\\pset tuples_only on\n"
-               f"SELECT window_start||'|'||window_end FROM lagmatrix.news_coverage "
-               f"WHERE symbol = '{symbol}';\n")
-    got = set()
-    for line in out.splitlines():
-        line = line.strip()
-        if "|" in line:
-            a, b = line.split("|")
-            got.add((date.fromisoformat(a), date.fromisoformat(b)))
-    return got
+    result = pg.rows(
+        conn(),
+        "SELECT window_start, window_end FROM lagmatrix.news_coverage "
+        "WHERE symbol = %s",
+        (symbol,))
+    # psycopg2 returns date objects, so the old ||'|'|| concatenation and its
+    # string splitting are gone -- one fewer delimiter to collide with.
+    return {(a, b) for a, b in result}
 
 
 def copy_in(table: str, columns: list[str], rows: list[list]) -> None:
@@ -86,19 +110,7 @@ def copy_in(table: str, columns: list[str], rows: list[list]) -> None:
     buf = io.StringIO()
     w = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
     w.writerows(rows)
-    cols = ", ".join(columns)
-    sql = (
-        # the CREATE must be inside the transaction: outside it, ON COMMIT DROP
-        # fires at the end of its own implicit transaction and the table is gone
-        "BEGIN;\n"
-        f"CREATE TEMP TABLE stage (LIKE {table} INCLUDING DEFAULTS) ON COMMIT DROP;\n"
-        f"COPY stage ({cols}) FROM STDIN WITH (FORMAT csv);\n"
-        f"{buf.getvalue()}\\.\n"
-        f"INSERT INTO {table} ({cols}) SELECT {cols} FROM stage "
-        f"ON CONFLICT DO NOTHING;\n"
-        "COMMIT;\n"
-    )
-    psql(sql)
+    stage_load(table, columns, buf.getvalue())
 
 
 MAX_TRIES = 6
@@ -202,11 +214,14 @@ def main() -> None:
                         [[a.id, s] for a in arts for s in (a.symbols or [])])
                 sym_new += len(arts)
             sym_seen += len(arts)
-            psql("INSERT INTO lagmatrix.news_coverage "
-                 "(symbol, window_start, window_end, n_articles) VALUES "
-                 f"('{sym}', '{key[0]}', '{key[1]}', {len(arts)}) "
-                 "ON CONFLICT (symbol, window_start, window_end) DO UPDATE "
-                 "SET n_articles = EXCLUDED.n_articles, fetched_at = now();\n")
+            pg.execute(
+                conn(),
+                "INSERT INTO lagmatrix.news_coverage "
+                "(symbol, window_start, window_end, n_articles) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (symbol, window_start, window_end) DO UPDATE "
+                "SET n_articles = EXCLUDED.n_articles, fetched_at = now()",
+                (sym, key[0], key[1], len(arts)))
             w_start = w_end
         tot_new += sym_new
         tot_seen += sym_seen
@@ -214,11 +229,13 @@ def main() -> None:
               f"{f'  ({skipped} windows already covered)' if skipped else ''}")
 
     print(f"\n  fetched {tot_seen:,} article-rows across {len(symbols)} symbols")
-    n = psql("\\pset tuples_only on\n"
-             "SELECT (SELECT count(*) FROM lagmatrix.news_article)||' articles, '||"
-             "(SELECT count(*) FROM lagmatrix.news_symbol)||' symbol tags, '||"
-             "(SELECT count(DISTINCT symbol) FROM lagmatrix.news_symbol)||' symbols';\n")
-    print(f"  table now holds: {n.strip()}")
+    articles, tags, symbols_seen = pg.rows(
+        conn(),
+        "SELECT (SELECT count(*) FROM lagmatrix.news_article), "
+        "       (SELECT count(*) FROM lagmatrix.news_symbol), "
+        "       (SELECT count(DISTINCT symbol) FROM lagmatrix.news_symbol)")[0]
+    print(f"  table now holds: {articles} articles, {tags} symbol tags, "
+          f"{symbols_seen} symbols")
 
 
 if __name__ == "__main__":

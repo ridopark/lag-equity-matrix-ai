@@ -23,6 +23,7 @@ placeholders.
 from __future__ import annotations
 
 import pytest
+
 from lagmatrix.edgar.relations import classify, naming_sentence
 
 # ---------------------------------------------------------------------------

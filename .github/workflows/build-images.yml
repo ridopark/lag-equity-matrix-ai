@@ -1,0 +1,85 @@
+name: build-images
+
+# Publishes the image the ingest CronJob pulls. Until this runs, nothing
+# schedules daily_ingest.py at all (Q-50).
+#
+# Deliberately NOT triggered on pull_request. A fork PR must never be able to
+# publish to ghcr, and this workflow holds packages:write. The sibling repo's
+# deploy chain was reachable from a fork precisely because a build workflow
+# fired on pull_request and a downstream workflow_run trusted it.
+#
+# Every action is pinned to a commit SHA rather than a tag. v4/v5 are
+# branch-like refs the action owner can repoint; that is tolerable for a
+# secretless test job and is not tolerable here, where the job can push images.
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - scripts/**
+      - data/excluded-etfs.csv
+      - tests/fixtures/synthetic-closes.parquet
+      - tests/fixtures/synthetic-fires.csv
+      - pyproject.toml
+      - uv.lock
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/build-images.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci-gate:
+    # Fails closed: the image is only built if ci.yml actually concluded
+    # success for this exact SHA. "No run found" is a failure, not a pass --
+    # an unverified commit must not become a published image.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a green ci.yml for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            conclusion=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}" \
+              --jq '.workflow_runs[0].conclusion // "none"')
+            case "$conclusion" in
+              success) echo "ci.yml succeeded for ${SHA}"; exit 0 ;;
+              failure|cancelled|timed_out|action_required)
+                echo "ci.yml concluded ${conclusion} for ${SHA}"; exit 1 ;;
+              *) echo "attempt ${attempt}: ci.yml is ${conclusion}; waiting"; sleep 30 ;;
+            esac
+          done
+          echo "ci.yml did not conclude for ${SHA} within 20 minutes"
+          exit 1
+
+  build:
+    needs: ci-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          # The SHA tag is what a manifest should pin; :latest is a convenience
+          # alias and a mutable pointer, so rolling back means naming the SHA.
+          tags: |
+            ghcr.io/ridopark/lag-equity-matrix-ai:latest
+            ghcr.io/ridopark/lag-equity-matrix-ai:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

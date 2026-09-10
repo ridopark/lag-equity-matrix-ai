@@ -3107,7 +3107,25 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   rejected as unnecessary once the dependency is gone entirely — though whether
   web and ingest still warrant *separate* images for credential and PVC-write
   reasons is a live question for the deployment plan, not settled here.
-- **Outcome:** pending — verified compatible, not yet implemented; TDD, and the
+- **Outcome:** **Implemented 2026-09-10**, and the compatibility claim now holds
+  inside this repo rather than in a scratch venv: fastembed reproduces the
+  **stored** vectors at cosine **1.000000** across 8 real articles, unit norm,
+  so the 47,829 embeddings already in the corpus stay valid and nothing needs
+  re-embedding. `torch` and `sentence_transformers` are both absent from
+  `sys.modules` after importing `lagmatrix.adapters.vector`, and neither name
+  appears in `src/`, `scripts/` or `tests/` outside the test that must name them
+  to check for them. 248 passed.
+  **Measured, not estimated:** `.venv` went **6.0G → 574M**, about 10.5x — the
+  lockfile dropped torch, transformers, scipy, scikit-learn, sympy, triton and
+  the nvidia-cu13 wheels, and gained fastembed, onnxruntime, pillow, mmh3 and
+  py-rust-stemmers. That is larger than this entry's own "~7x" figure, which
+  counted dependency weight rather than resident venv size.
+  A detail nobody had recorded, found while writing the test: the stored vectors
+  were built from `headline + ". " + summary[:600]` (`load_vectors.py:107`), not
+  from headlines. Embedding a headline alone reproduces the stored vector at only
+  0.89–0.99. The `600` is load-bearing — change it and every future embedding
+  silently stops matching the corpus, with no error anywhere.
+  Originally: pending — verified compatible, not yet implemented; TDD, and the
   red test must pin agreement with the *stored* vectors rather than merely that
   the module imports. Confirmed still unimplemented on 2026-09-09: `uv.lock` has
   zero `fastembed` entries and two `torch` ones, `pyproject.toml:22` still pins

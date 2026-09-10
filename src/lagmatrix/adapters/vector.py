@@ -1,6 +1,6 @@
 """Vector store: news, filings, and earnings-call passages.
 
-Backed by ArangoDB's `APPROX_NEAR_COSINE` vector index over sentence-transformer
+Backed by ArangoDB's `APPROX_NEAR_COSINE` vector index over fastembed
 embeddings (see `scripts/load_vectors.py`), not Qdrant — the query text is
 embedded here with the same `all-MiniLM-L6-v2` model the corpus was indexed
 with, so a query is compared against articles in the same embedding space.
@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date
 
 from arango.database import StandardDatabase
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 from lagmatrix.domain.models import NewsChunk
 
@@ -37,12 +37,12 @@ FOR a IN article
 class NewsIndex:
     def __init__(self, db: StandardDatabase) -> None:
         self.db = db
-        self._model = SentenceTransformer(EMBEDDING_MODEL)
+        self._model = TextEmbedding(model_name=f"sentence-transformers/{EMBEDDING_MODEL}")
 
     def search(
         self, query: str, symbols: list[str], limit: int, as_of: date
     ) -> list[NewsChunk]:
-        vector = self._model.encode([query], normalize_embeddings=True)[0].tolist()
+        vector = next(self._model.embed([query])).tolist()
         cursor = self.db.aql.execute(
             _SEARCH_AQL,
             bind_vars={

@@ -316,10 +316,10 @@ def main() -> None:
                 pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln]
     print(f"  excluding {len(EXCLUDED)} ETFs from multi-hop paths")
 
-    from sentence_transformers import SentenceTransformer
+    from fastembed import TextEmbedding
 
     from lagmatrix.adapters.vector import NewsIndex
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     counts, _ = query("RETURN {equity: LENGTH(equity), supplies: LENGTH(supplies_to), "
                       "comention: LENGTH(co_mentioned), articles: LENGTH(article)}", {})
@@ -342,8 +342,7 @@ def main() -> None:
 
         q = (f"{seed} supply chain, suppliers, component demand, "
              f"orders and production outlook")
-        vec = [round(float(x), 5) for x in
-               model.encode([q], normalize_embeddings=True)[0]]
+        vec = [round(float(x), 5) for x in next(model.embed([q]))]
         arts, vms = query(VECTOR_AQL, {"vec": vec, "k": 6, "as_of": args.as_of})
 
         two, tms = query(COMENTION_AQL,

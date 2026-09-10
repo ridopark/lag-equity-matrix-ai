@@ -102,13 +102,12 @@ def main() -> None:
     df = pd.DataFrame(rows, columns=["id", "date", "headline", "summary", "symbols"])
     print(f"  {len(df):,} articles since {args.since} (breadth<=8, alert-universe tagged)")
 
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    from fastembed import TextEmbedding
+    model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
     text = (df.headline.fillna("") + ". " + df.summary.fillna("").str.slice(0, 600)).tolist()
     print("  embedding…")
-    vecs = model.encode(text, batch_size=128, show_progress_bar=False,
-                        normalize_embeddings=True)
-    print(f"  {vecs.shape[0]:,} x {vecs.shape[1]} embeddings")
+    vecs = list(model.embed(text, batch_size=128))
+    print(f"  {len(vecs):,} x {vecs[0].shape[0]} embeddings")
 
     arango_js(ensure_article_js())
     for i in range(0, len(df), CHUNK):

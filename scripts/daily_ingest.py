@@ -1,14 +1,23 @@
 """Nightly ingest: new bars and new news into the stores, then rebuild the edges.
 
-Two independent chains, run concurrently and deliberately never joined:
+One ordered chain. Every edge is a real data dependency:
 
-    START ─┬─> bars ──> comovement ──> END
-           └─> news ──> vectors ─────> END
+    START ─> extract_fires ─> bars ─> long_bars ─> comovement ─> news ─> vectors ─> END
 
-No join node, on purpose. D-89 established that a join whose in-edges complete
-in different supersteps fires twice, and `errors` here is a concatenating
-channel, so a join would double its contents. The two chains have nothing to
-say to each other, so there is nothing to join.
+This replaced two chains fanned out from START and never joined. **The claim
+that motivated that shape — "the two chains have nothing to say to each
+other" — was false**, and is withdrawn here rather than quietly edited away:
+`node_news` runs `load_news.py --top-liquid`, which reads the
+`data/bars.parquet` that `node_bars` writes, and both sat in the same
+superstep. Which version it read was settled by subprocess startup timing, and
+because `fetch_bars.py` fetches for minutes before it writes, the read always
+won — so news ranked liquidity from the previous run's file, every night,
+silently.
+
+No join node, still, and D-89's mechanism is untouched: a join whose in-edges
+complete in different supersteps fires twice, and `errors` here is a
+concatenating channel. The reason there is no join now is that **no node has
+two in-edges** — not that anything is independent.
 
 LangGraph earns its place for three specific reasons, not decoration:
   - `RetryPolicy` — Alpaca drops long-lived connections on a decade-scale pull.
@@ -32,7 +41,7 @@ from typing import Annotated, TypedDict
 
 import pandas as pd
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import RetryPolicy, Send
+from langgraph.types import RetryPolicy
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
@@ -106,6 +115,25 @@ def _run(cmd: list[str], dry: bool) -> str:
     return (r.stdout or "").strip()[-200:]
 
 
+def node_extract_fires(state: IngestState) -> dict:
+    """Refresh `data/fires.csv` from the trading system's audit_log.
+
+    Nothing used to run this, so the file was a static artefact that quietly
+    went stale (3 signals behind when measured). It runs first because
+    `fetch_bars.py` reads it to set the price window, and `load_vectors.py`
+    reads it for the embedding universe.
+
+    Safe to regenerate nightly for a structural reason, not a hopeful one:
+    `fetch_daily_bars.py` takes the long file's universe from the file itself
+    (`existing["symbol"].unique()`), so this cannot reach D-95's frozen
+    2,183-symbol cohort. The alert set selects candidates; the co-movement
+    graph is built from price history regardless (D-27).
+    """
+    out = _run([sys.executable, "scripts/extract_fires.py"],
+               state.get("dry_run", False))
+    return {"done": [f"fires: refreshed {out}"]}
+
+
 def node_bars(state: IngestState) -> dict:
     last = last_bar_date()
     today = datetime.now(UTC).date()
@@ -175,19 +203,47 @@ def node_comovement(state: IngestState) -> dict:
 
 
 def build():
+    """A single ordered chain. Every edge is a real data dependency.
+
+        extract_fires -> bars -> long_bars -> comovement -> news -> vectors
+
+    This replaces two chains fanned out from START and deliberately never
+    joined (D-89). That design rested on the claim that the chains had nothing
+    to say to each other, and the claim was false: `node_news` runs
+    `load_news.py --top-liquid`, which reads the `data/bars.parquet` that
+    `node_bars` writes -- in the same superstep. Which version it read was
+    decided by subprocess startup timing, and since `fetch_bars.py` takes
+    minutes to fetch before it writes, the read essentially always won. So
+    `news` ranked liquidity from the *previous* run's file, every night,
+    silently. Correct by coincidence is what D-109 was about.
+
+    D-89's mechanism is untouched and still binding: a join whose in-edges
+    complete in different supersteps fires twice into a concatenating channel.
+    The reason there is no join here is that **no node has two in-edges** --
+    not that anything is independent.
+
+    Serial rather than the minimal fix, for a measured reason. Ordering
+    `vectors` after `comovement` without a join is only possible in a chain,
+    and keeping them concurrent put 1,018 MiB (comovement) and 617 MiB
+    (load_vectors) in one superstep at the moment `load_vectors` triggers
+    ArangoDB's index rebuild -- against ~2.8 GiB free on a node that also runs
+    real-money trading. Serial peak is one node at a time, about 1,018 MiB.
+    The cost is wall-clock on a job that has all night.
+    """
     g = StateGraph(IngestState)
     retry = RetryPolicy(max_attempts=3)
+    g.add_node("extract_fires", node_extract_fires, retry_policy=retry)
     g.add_node("bars", node_bars, retry_policy=retry)
     g.add_node("long_bars", node_long_bars, retry_policy=retry)
+    g.add_node("comovement", node_comovement, retry_policy=retry)
     g.add_node("news", node_news, retry_policy=retry)
     g.add_node("vectors", node_vectors, retry_policy=retry)
-    g.add_node("comovement", node_comovement, retry_policy=retry)
-    g.add_conditional_edges(START, lambda s: [Send("bars", s), Send("news", s)],
-                            ["bars", "news"])
+    g.add_edge(START, "extract_fires")
+    g.add_edge("extract_fires", "bars")
     g.add_edge("bars", "long_bars")
     g.add_edge("long_bars", "comovement")
+    g.add_edge("comovement", "news")
     g.add_edge("news", "vectors")
-    g.add_edge("comovement", END)
     g.add_edge("vectors", END)
     return g.compile()
 

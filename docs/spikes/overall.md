@@ -3551,6 +3551,53 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `test_serve_default_as_of_coherence.py` + `test_serve_health.py` — now pass.
 - **Status:** Accepted
 
+### D-115 — The ingest is one ordered chain; D-89's independence claim is withdrawn
+- **When:** 2026-09-10T10:15:00-05:00
+- **Decision:** `daily_ingest.py` becomes a single chain —
+  `extract_fires -> bars -> long_bars -> comovement -> news -> vectors` — and
+  gains `extract_fires` as a node. D-89's *mechanism* stands; the *claim* that
+  motivated its shape does not.
+- **Why:** D-89 fanned two chains out from START and never joined them, on the
+  stated grounds that "the two chains have nothing to say to each other". They
+  do. `node_news` runs `load_news.py --top-liquid`, which reads the
+  `data/bars.parquet` that `node_bars` writes, and both sat in the **same
+  superstep**. Which version it read was decided by subprocess startup timing —
+  and since `fetch_bars.py` fetches for minutes before writing, the read always
+  won, so news ranked liquidity from the *previous* run's file. Not
+  occasionally: `node_bars`' skip predicate (`last >= today - 1 day`) is
+  evaluated before a fetch that ends at `now`, which on a 09:00 UTC schedule is
+  before the US close, so the file sits permanently one session behind its own
+  predicate and the node writes on essentially every scheduled run. Verified by
+  simulating the predicate: run 09-10 skips, 09-11 and 09-14 fetch.
+  **Correct by coincidence** — D-109's pathology, in the scheduler this time.
+  Two consequences beyond the stale read. On an empty PVC `news` fails with
+  `FileNotFoundError` and retries three times *inside the same superstep*,
+  where `bars`' output cannot yet be visible, so the graph could never cold
+  start. And `fetch_bars.py:104` wrote the file non-atomically, unlike
+  `fetch_daily_bars.py`; that is now temp-file-then-rename, which closes the
+  torn-read window and — stated at the call site — does **not** fix the
+  ordering, because ordering is a graph problem.
+  **Serial rather than the minimal `bars -> news` edge, for a measured reason.**
+  Making `vectors` run after both `news` and `comovement` needs two in-edges,
+  and D-89's mechanism says such a join fires twice when its in-edges land in
+  different supersteps. Relying on superstep ordering instead would be correct
+  by coincidence again. Keeping them concurrent put a measured 1,018 MiB
+  (comovement) and 617 MiB (`load_vectors.py`) in one superstep at the moment
+  `load_vectors` triggers ArangoDB's index rebuild — against ~2.8 GiB free on a
+  node that also runs real-money trading. Serial peak is one node, ~1,018 MiB.
+  The cost is wall-clock on a job that has all night.
+  `extract_fires` is safe to run nightly for a structural reason:
+  `fetch_daily_bars.py:97` takes the long file's universe from
+  `existing["symbol"].unique()`, so it cannot reach D-95's frozen 2,183-symbol
+  cohort. Two of the three consumers I believed it had do not consume it —
+  `load_news.py:177` reads it only under `--from-fires`, and the force-include
+  in `fetch_bars.py:101` is empirically a no-op, since the lowest fires ticker
+  is PFE at $1.005B median dollar volume against a $10M threshold.
+- **Outcome:** 266 passed. Dry run shows all six nodes in order. Found by
+  consulting two agents about a much smaller question; neither of the two
+  defects above was the question asked.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -2,8 +2,19 @@
 # unnecessary. Now it has something genuinely graph-shaped to hold: a directed,
 # dated supply-chain graph and a PMI-weighted co-mention graph.
 #
-# Its own namespace so nothing here can touch the trading workloads, and modest
-# limits because the homelab node has ~4 GB headroom.
+# Its own namespace, and modest limits because the homelab node is shared.
+#
+# CORRECTION (2026-09-10): the namespace claim above was wrong and is left here
+# rather than deleted, because it is the kind of sentence that gets trusted.
+# There is no NetworkPolicy in this cluster -- `kubectl get networkpolicy -A`
+# returns nothing -- and Kubernetes defaults to allow-all in both directions.
+# A namespace partitions names, not traffic: a pod here can reach the trading
+# workloads today. A default-deny NetworkPolicy is what would make the sentence
+# true, and it does not exist yet.
+#
+# The "~4 GB headroom" figure was also wrong: it measured *requests*, which is
+# not what gets a pod killed. The node's limits already sum to ~115% of
+# capacity.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -55,7 +66,15 @@ spec:
             - containerPort: 8529
           resources:
             requests: {memory: 512Mi, cpu: 100m}
-            limits:   {memory: 1500Mi, cpu: "1"}
+            # Raised 1500Mi -> 2560Mi on 2026-09-10 after 8 OOM-kills in two
+            # days (exit 137). Measured at 942Mi at rest -- 63% of the old
+            # ceiling before any load -- because the corpus grew to 47,829
+            # embedded articles and 24,104 co-movement edges. Not node
+            # pressure: the node had ~2.5GiB free.
+            # This is a ceiling, not a fix. load_vectors.py rebuilds the whole
+            # ANN index every run and the corpus grows daily, so incremental
+            # indexing is the durable answer (Q-49).
+            limits:   {memory: 2560Mi, cpu: "1"}
           volumeMounts:
             - {name: data, mountPath: /var/lib/arangodb3}
           readinessProbe:

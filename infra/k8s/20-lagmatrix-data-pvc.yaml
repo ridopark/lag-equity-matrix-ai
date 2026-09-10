@@ -1,0 +1,19 @@
+# The parquet files the ingest writes and the web pod reads. ReadWriteOnce
+# because k3s's local-path provisioner offers nothing else on a single node,
+# which is also why the web Deployment must use `strategy: Recreate` -- a
+# rolling update would deadlock on the volume.
+#
+# Sizing: bars-10y.parquet is 30MB and grows about 4,400 rows a session;
+# bars.parquet 17MB, bars-5y 17MB, the minute extracts 3MB each. 5Gi is
+# roughly 50x current usage, which is cheap on a 138GiB filesystem and saves
+# a resize later.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lagmatrix-data
+  namespace: lagmatrix
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi

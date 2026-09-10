@@ -1,0 +1,86 @@
+# The nightly ingest. Until this exists, daily_ingest.py runs only when a human
+# types the command (Q-50), which makes "the ingest fails loudly at 3am instead
+# of silently" a claim about a run that never happens.
+#
+# Schedule: 09:00 UTC, Tue-Sat. The US session closes 20:00-21:00 UTC, so 09:00
+# the following day leaves margin for Alpaca's EOD bars to finalise; Tue-Sat UTC
+# covers every Mon-Fri US session exactly once. A reasonable default, not a
+# measured requirement -- retune freely.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lagmatrix-ingest
+  namespace: lagmatrix
+spec:
+  schedule: "0 9 * * 2-6"
+  # A re-run must never race the previous one against the same parquet files.
+  # D-97 makes concurrent upserts safe but not free, and Forbid is simpler than
+  # reasoning about interleaved ones.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 20
+  failedJobsHistoryLimit: 20
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+          containers:
+            - name: ingest
+              # :latest is a placeholder until CI publishes SHA tags. It is a
+              # mutable pointer -- with imagePullPolicy: Always, what runs
+              # tonight is whatever was pushed last, and rolling back means
+              # retagging rather than naming a known-good build. Pin to
+              # :${GITHUB_SHA} once the build workflow exists.
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:latest
+              imagePullPolicy: Always
+              # Overrides the image's CMD (which serves the web UI). main()
+              # no longer resolves as_of up front -- node_comovement resolves it
+              # after node_long_bars has extended the file (PHASE-4), so there
+              # is no date to compute in the manifest.
+              command: ["python", "scripts/daily_ingest.py"]
+              envFrom:
+                - secretRef: {name: alpaca-credentials}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              # Measured on 2026-09-09, not estimated. The two candidate peaks:
+              #   fetch_daily_bars.py   799 MiB  (reads all 4.7M rows even when
+              #                                   there is nothing new to add)
+              #   comovement node     1,018 MiB  (COMOVE_CLOSES 644 MiB, then
+              #                                   comovement_edges on top)
+              # LangGraph runs the bars and news chains in one superstep, and a
+              # subprocess's memory is charged to this pod's cgroup, so the
+              # limit must cover concurrent peaks, not the largest single one.
+              # 2Gi sits above the measured 1,018 MiB with room for an
+              # overlapping load_vectors.py, which is the one contributor still
+              # unmeasured. The deploy plan specified 1.5Gi assuming a windowed
+              # COMOVE_CLOSES that was never built -- that would have been tight
+              # enough to OOM on the comovement node alone.
+              resources:
+                requests: {cpu: 250m, memory: 512Mi}
+                limits:   {cpu: "1", memory: 2Gi}
+              volumeMounts:
+                - {name: data, mountPath: /app/data}
+                - {name: tmp, mountPath: /tmp}
+                # daily_ingest.py reaches ArangoDB through `import serve`, which
+                # reads this exact path. Mounted as a file so no code changes.
+                - name: arango-pw
+                  mountPath: /home/appuser/.lagmatrix-arango-pw
+                  subPath: password
+                  readOnly: true
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: lagmatrix-data}
+            - name: tmp
+              emptyDir: {}
+            - name: arango-pw
+              secret:
+                secretName: arangodb-auth
+                items: [{key: password, path: password}]
+                defaultMode: 0400

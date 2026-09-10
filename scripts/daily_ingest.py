@@ -87,7 +87,7 @@ def last_article_date() -> tuple[bool, str | None, str]:
     import serve
     db = serve.arango_db()
     if db is None:
-        return False, None, "ArangoDB not reachable"
+        return False, None, f"ArangoDB unavailable: {serve.arango_reason()}"
     rows = list(db.aql.execute(
         "FOR a IN article COLLECT AGGREGATE hi = MAX(a.date) RETURN hi"))
     hi = rows[0] if rows else None
@@ -188,7 +188,8 @@ def node_comovement(state: IngestState) -> dict:
 
     db = serve.arango_db()
     if db is None:
-        return {"errors": ["comovement: ArangoDB not reachable; edges not written"]}
+        return {"errors": [f"comovement: ArangoDB unavailable, edges not written: "
+                           f"{serve.arango_reason()}"]}
     closes = serve.COMOVE_CLOSES()
     d = date.fromisoformat(state.get("as_of") or serve.default_as_of())
     ok, reason = session_available(closes, d, trail=250)

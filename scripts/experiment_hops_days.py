@@ -50,7 +50,7 @@ def hop_map(db) -> dict[str, dict[str, tuple[int, object]]]:
 def main() -> None:
     db = serve.arango_db()
     if db is None:
-        raise SystemExit("ArangoDB not reachable")
+        raise SystemExit(f"ArangoDB unavailable: {serve.arango_reason()}")
     hops = hop_map(db)
 
     bars = pd.read_parquet("data/bars-10y.parquet")

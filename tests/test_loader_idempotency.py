@@ -52,7 +52,7 @@ sys.path.insert(0, str(SCRIPTS))
 # Not yet extracted from scripts/load_arango.py and scripts/load_vectors.py
 # main() -- this import is expected to raise ImportError until TASK-1.2 lands.
 from load_arango import comention_edge_docs, ensure_collections_js, supply_edge_docs  # noqa: E402
-from load_vectors import ensure_article_js  # noqa: E402
+from load_vectors import ensure_article  # noqa: E402
 
 ARANGO_DB_NAME = "test_loader_idempotency"
 
@@ -80,11 +80,56 @@ def test_ensure_collections_js_never_drops():
     assert "_drop" not in js
 
 
-def test_ensure_article_js_never_drops():
-    """Falsifies if the generated JS contains `_drop` -- the substring
-    `load_vectors.py:84`'s `db._drop("article")` uses today."""
-    js = ensure_article_js()
-    assert "_drop" not in js
+class _FakeArangoDb:
+    """Records every collection operation; refuses none."""
+
+    def __init__(self, existing: set[str]):
+        self.existing = existing
+        self.calls: list[tuple[str, str]] = []
+
+    def has_collection(self, name):
+        self.calls.append(("has_collection", name))
+        return name in self.existing
+
+    def create_collection(self, name):
+        self.calls.append(("create_collection", name))
+        self.existing.add(name)
+
+    def delete_collection(self, name):
+        self.calls.append(("delete_collection", name))
+        self.existing.discard(name)
+
+
+def test_ensure_article_never_drops_an_existing_collection():
+    """The D-97 guarantee, now asserted on behaviour rather than on the text of
+    a generated script: `ensure_article` must never delete `article`.
+
+    This replaces a substring check (`"_drop" not in js`) that could only
+    inspect arangosh source. `load_vectors.py` now speaks to ArangoDB through
+    python-arango, so there is no script to grep -- and asserting on the calls
+    made is a stronger claim than asserting on the text that would have made
+    them.
+
+    Falsifies if `ensure_article` calls `delete_collection`, or re-creates a
+    collection that already exists. Either would destroy the corpus; the code
+    this replaced did exactly that once, costing 47,640 embeddings.
+    """
+    db = _FakeArangoDb({"article"})
+    ensure_article(db)
+    assert ("delete_collection", "article") not in db.calls
+    assert ("create_collection", "article") not in db.calls
+
+
+def test_ensure_article_creates_the_collection_when_absent():
+    """The other half: a genuinely empty database must get the collection.
+
+    Falsifies if `ensure_article` is so cautious it never creates anything,
+    which would pass the test above while making a first run impossible.
+    """
+    db = _FakeArangoDb(set())
+    ensure_article(db)
+    assert ("create_collection", "article") in db.calls
+    assert ("delete_collection", "article") not in db.calls
 
 
 def test_supply_edge_docs_have_deterministic_keys():

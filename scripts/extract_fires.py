@@ -4,8 +4,9 @@ One row per distinct BTO signal — NOT one row per audit_log row. The table
 records each alert once per tenant across 6 tenants, so `count(*)` overstates
 fires by ~3x (spike 07).
 
-Read-only. Reaches the homelab over SSH because the cluster is not exposed:
-    ssh <host> -> kubectl -n copytrade exec postgres-0 -- psql
+Read-only. Connects to postgres directly via `lagmatrix.pg` (Q-54): the old
+`ssh <host> -> kubectl -n copytrade exec postgres-0 -- psql` route needed a
+kubeconfig, so nothing running in a pod could use it.
 
 Usage:  uv run python scripts/extract_fires.py [--out data/fires.csv]
 """
@@ -15,13 +16,12 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import subprocess
+import pathlib
 import sys
 
-HOST = "ridopark@192.168.10.123"
-NS = "copytrade"
-POD = "postgres-0"
-DB = "orchestrator"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+
+from lagmatrix import pg  # noqa: E402
 
 # DISTINCT ON collapses the per-tenant duplicates; the earliest occurred_at is
 # when we first saw the alert. Direction: a bought call is bullish, a bought put
@@ -50,22 +50,25 @@ ETFS = {"SPY", "QQQ"}
 
 
 def fetch() -> str:
-    remote = (
-        f"kubectl -n {NS} exec {POD} -- psql -U temporal -d {DB} "
-        f"--csv -c {sql_quote(' '.join(SQL.split()))}"
-    )
-    out = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", HOST, remote],
-        capture_output=True, text=True, timeout=120,
-    )
-    if out.returncode != 0:
-        sys.exit(f"query failed:\n{out.stderr}")
-    return out.stdout
+    """The signal rows, as CSV text, so the parsing below is unchanged.
 
-
-def sql_quote(s: str) -> str:
-    """Wrap for the remote shell: single-quote, escaping embedded quotes."""
-    return "'" + s.replace("'", "'\"'\"'") + "'"
+    `audit_log` is the one trading table this repo reads; the `lagmatrix_ingest`
+    role has SELECT on it and nothing else in `public`.
+    """
+    conn = pg.connect()
+    try:
+        result = pg.rows(conn, SQL)
+        columns = [
+            "signal_id", "ticker", "direction", "opt_right", "strike",
+            "expiry", "alert_premium", "author", "posted_at", "first_seen_at",
+        ]
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(columns)
+        w.writerows(result)
+        return buf.getvalue()
+    finally:
+        conn.close()
 
 
 def main() -> None:

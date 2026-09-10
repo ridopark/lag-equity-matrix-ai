@@ -20,6 +20,12 @@ dependencies = [
     "pyarrow>=25.0.1",
     "langgraph-checkpoint-sqlite>=3.1.1",
     "fastembed>=0.8",
+    "psycopg2-binary>=2.9",
+    # Used by scripts/experiment_lag_matrix.py and experiment_chains.py, the
+    # two scripts that reproduce D-95. It was never declared -- it arrived
+    # transitively via sentence-transformers, so D-101's fastembed swap
+    # silently removed it and left the reproduction scripts unable to import.
+    "scipy>=1.11",
 ]
 
 [project.scripts]

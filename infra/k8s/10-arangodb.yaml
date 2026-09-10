@@ -4,13 +4,37 @@
 #
 # Its own namespace, and modest limits because the homelab node is shared.
 #
-# CORRECTION (2026-09-10): the namespace claim above was wrong and is left here
-# rather than deleted, because it is the kind of sentence that gets trusted.
-# There is no NetworkPolicy in this cluster -- `kubectl get networkpolicy -A`
-# returns nothing -- and Kubernetes defaults to allow-all in both directions.
-# A namespace partitions names, not traffic: a pod here can reach the trading
-# workloads today. A default-deny NetworkPolicy is what would make the sentence
-# true, and it does not exist yet.
+# CORRECTION (2026-09-10): the namespace claim above is wrong, and so was my
+# first correction of it. Both are left here because these are exactly the
+# sentences that get trusted later.
+#
+# I originally wrote that `kubectl get networkpolicy -A` returns nothing. I had
+# not run it. Then I ran it through `head -3`, saw a header and two rows, and
+# wrote "two policies" -- asserting a count from a truncated view, in the very
+# comment meant to correct the first error. There are **five**, all in
+# `copytrade`, all ingress-only: two protecting the exec-alpaca pods and three
+# protecting tenant-dashboard-bff. The conclusion is unchanged -- none of them
+# restricts egress from `lagmatrix` -- but the count was wrong twice.
+#
+# Measured from a pod in THIS namespace on 2026-09-10 (busybox, `nc -z`, with a
+# control target to prove the method worked -- the first attempt reported
+# everything "blocked" because the arangodb image has no bash and the command
+# never ran):
+#
+#     REACHABLE   postgres.copytrade:5432      <- the trading database
+#     REACHABLE   redis.copytrade:6379
+#     REACHABLE   api-gateway.copytrade:8082   <- broker-credential write routes
+#     REACHABLE   dashboard.copytrade:3000
+#     REACHABLE   market-data.copytrade:8080
+#     blocked     exec-alpaca-live:8080        <- its NetworkPolicy works
+#     blocked     orchestrator:8080            <- has an endpoint; unexplained
+#     blocked     audit:8081                   <- 0 endpoints, proves nothing
+#
+# So the namespace does not isolate: a pod here reaches the trading system's
+# postgres, its redis, and its api-gateway today. That is the same postgres
+# D-103's injection would have reached. The two existing policies protect the
+# execution pods specifically and nothing else. A default-deny egress policy in
+# `lagmatrix` is what would make the header sentence true; it does not exist.
 #
 # The "~4 GB headroom" figure was also wrong: it measured *requests*, which is
 # not what gets a pod killed. The node's limits already sum to ~115% of
@@ -57,7 +81,20 @@ spec:
           # in AQL, which is not a vector database in any meaningful sense.
           # Enabling it lets one store fill both roles, which is what D-13 chose
           # and what the node's memory headroom requires.
-          args: ["arangod", "--experimental-vector-index"]
+          # Cache sizes are bounded to the container, not the node. arangod
+          # detects the cgroup -- effective_physical_memory reports 2,560 MiB --
+          # and then sizes its caches from the NODE's 15,672 MiB anyway:
+          #   rocksdb_block_cache_capacity  4,087 MiB  = (node - 2GiB) * 0.30
+          #   rocksdb_cache_limit           3,406 MiB  = (node - 2GiB) * 0.25
+          #   sum                           7,493 MiB  = 2.93x this container's limit
+          # Block cache usage was 1,258 MiB against 266 MiB of live SST -- 4.7x
+          # the entire dataset -- and grows with query volume without shrinking
+          # before capacity. That is what OOM-killed this pod 8 times, not the
+          # vector index (~74 MiB) and not any index rebuild. Raising the limit
+          # from 1500Mi to 2560Mi moved the wall; this removes it.
+          args: ["arangod", "--experimental-vector-index",
+                 "--rocksdb.block-cache-size", "805306368",
+                 "--cache.size", "268435456"]
           env:
             - name: ARANGO_ROOT_PASSWORD
               valueFrom:
@@ -71,9 +108,13 @@ spec:
             # ceiling before any load -- because the corpus grew to 47,829
             # embedded articles and 24,104 co-movement edges. Not node
             # pressure: the node had ~2.5GiB free.
-            # This is a ceiling, not a fix. load_vectors.py rebuilds the whole
-            # ANN index every run and the corpus grows daily, so incremental
-            # indexing is the durable answer (Q-49).
+            # Raising this was treating a symptom -- see the cache args below
+            # for the actual cause. The claim that once stood here, that
+            # "load_vectors.py rebuilds the whole ANN index every run", is
+            # FALSE: add_index on an identical definition is a no-op, the index
+            # id and name have not changed across runs, and 170 documents
+            # inserted after training all self-retrieve at rank 1. Total vector
+            # training time over 15.7h of uptime is 0.0133s.
             limits:   {memory: 2560Mi, cpu: "1"}
           volumeMounts:
             - {name: data, mountPath: /var/lib/arangodb3}

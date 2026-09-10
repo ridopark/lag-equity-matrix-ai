@@ -101,7 +101,16 @@ def main() -> None:
     keep = set(med[med >= MIN_DOLLAR_VOL].index) | set(fires.ticker.unique())
     bars = bars[bars.symbol.isin(keep)]
 
-    bars.to_parquet(OUT, index=False)
+    # Temp-file-then-rename, matching fetch_daily_bars.py. `node_news` reads
+    # bars.parquet in the same LangGraph superstep that this node writes it, so
+    # a direct write leaves a window where the reader sees a truncated file.
+    # os.replace is atomic within a filesystem, which closes that window.
+    # It does NOT fix the ordering -- news still reads whatever was there
+    # before this write lands, which is the previous run's file. That is a
+    # graph-edge problem, not a write problem.
+    tmp = f"{OUT}.tmp"
+    bars.to_parquet(tmp, index=False)
+    os.replace(tmp, OUT)
     pd.Series(sorted(keep)).to_csv(UNIVERSE_OUT, index=False, header=["symbol"])
 
     print(f"\nwrote {OUT}")

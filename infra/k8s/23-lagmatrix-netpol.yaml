@@ -1,0 +1,146 @@
+# Default-deny egress for lagmatrix, plus per-workload allows.
+#
+# Enforcement verified, not assumed: k3s runs kube-router's netpol controller
+# in-process in the k3s server -- which is why no controller pod appears in
+# kube-system, and why "k3s ships flannel, so NetworkPolicy is a no-op" is
+# wrong. The server runs with no flags, so --disable-network-policy is not set,
+# and kube-router already programs KUBE-POD-FW-* chains for pods here, each
+# ending in REJECT --reject-with icmp-port-unreachable.
+#
+# INVARIANT: `podSelector: {}` appears exactly ONCE, in the default-deny below.
+# Every allow names a workload by label. NetworkPolicy has no deny primitive --
+# policies union -- so an allow with an empty podSelector widens EVERY pod in
+# the namespace, including lagmatrix-web, whose entire point is that it cannot
+# reach postgres.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: lagmatrix
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+---
+# The web UI reads ArangoDB and nothing else. `grep -n "psycopg\|postgres\|
+# PG_HOST\|5432" scripts/serve.py` returns nothing -- there is no postgres code
+# path to permit. This denies it postgres.copytrade:5432 and the api-gateway
+# broker-credential write routes, both reachable from this pod today.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lagmatrix-web-egress
+  namespace: lagmatrix
+spec:
+  podSelector:
+    matchLabels: {app: lagmatrix-web}
+  policyTypes: [Egress]
+  egress:
+    # DO NOT FOLD THE DNS BLOCKS IN THIS FILE INTO ONE NAMESPACE-WIDE POLICY.
+    # Doing it for DNS is harmless in itself, which is the danger: it makes a
+    # `podSelector: {}` allow look normal, and the next instance of the pattern
+    # will not be DNS. Duplication you can see beats an abstraction that
+    # silently widens a security boundary.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels: {app: arangodb}
+      ports:
+        - {protocol: TCP, port: 8529}
+---
+# The nightly ingest. Selectable only because 22-lagmatrix-ingest-cron.yaml
+# labels its pod template `app: lagmatrix-ingest`: CronJob pods otherwise carry
+# only per-run labels (job-name changes every run), so no podSelector could
+# match them and the default-deny above would block the job outright. The label
+# was applied first and a full run verified green before this policy existed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lagmatrix-ingest-egress
+  namespace: lagmatrix
+spec:
+  podSelector:
+    matchLabels: {app: lagmatrix-ingest}
+  policyTypes: [Egress]
+  egress:
+    # See the note on the DNS block above before consolidating this one.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels: {app: arangodb}
+      ports:
+        - {protocol: TCP, port: 8529}
+    # postgres.copytrade is HEADLESS (clusterIP: None -- verified), so DNS hands
+    # back the pod IP directly and a podSelector is required. It would be
+    # required for an ordinary ClusterIP service too, for the reason below.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: copytrade}
+          podSelector:
+            matchLabels: {app: postgres}
+      ports:
+        - {protocol: TCP, port: 5432}
+    # "The public internet, but not the rest of the cluster." Kubernetes has no
+    # Internet selector; ipBlock with excepts is the idiom. Alpaca only: bars,
+    # corporate actions and news.
+    #
+    # READ BEFORE EDITING THE EXCEPT LIST. `except: 10.42.0.0/16` is the entry
+    # doing the work, and the obvious edit -- excepting only the service CIDR
+    # 10.43.0.0/16 -- would leak the entire cluster. kube-router compiles
+    # selectors into ipsets of POD IPs and evaluates in FORWARD/OUTPUT, i.e.
+    # AFTER kube-proxy has DNAT'd a ClusterIP to a backend pod. A packet to
+    # redis.copytrade:6379 is matched as 10.42.x.x and never as 10.43.x.x.
+    #
+    # Use the /16s, not this node's 10.42.0.0/24 slice: a second node would get
+    # 10.42.1.0/24 and a /24 except would silently stop covering it.
+    #
+    # No HuggingFace exception is needed. load_vectors.py constructs
+    # TextEmbedding("sentence-transformers/all-MiniLM-L6-v2"), which normally
+    # downloads at runtime -- but the Dockerfile bakes it at
+    # FASTEMBED_CACHE_PATH and the model directory was confirmed present in the
+    # running image. Do not add one on the assumption that it downloads.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16      # pod CIDR  -- load-bearing, see above
+              - 10.43.0.0/16      # service CIDR -- belt and braces
+              - 192.168.10.0/24   # the LAN. Not netpol's recommendation; my
+                                  # addition. The ingest's only outbound need is
+                                  # Alpaca, so nothing on the home network is a
+                                  # legitimate target, and this keeps a
+                                  # compromised batch job off the LAN the
+                                  # trading host sits on.
+      ports:
+        - {protocol: TCP, port: 443}
+---
+# ArangoDB deliberately has NO allow policy, so the default-deny gives it zero
+# egress. An earlier draft granted it DNS defensively, on the theory that a
+# database unable to resolve fails confusingly. The evidence says otherwise:
+# its network namespace holds exactly one socket -- LISTEN on 8529 -- with no
+# established outbound and conntrack showing zero flows across 15h of uptime;
+# `arangod --dump-options` (416KB, the complete set) contains no telemetry
+# option; and it runs single-server, so there is no agency traffic. Kubernetes
+# also writes the pod's own name into /etc/hosts, so self-resolution never
+# reaches DNS.
+#
+# Granting nothing is the more informative configuration. If a future version,
+# or a backup-to-object-storage job, starts reaching out, it should fail
+# visibly at that moment rather than have been silently pre-authorised.
+#
+# The kubelet's tcpSocket readiness probe on 8529 is unaffected: that is
+# ingress, it originates on the node, and every pod chain accepts it via
+# `-m addrtype --src-type LOCAL -j ACCEPT` as its first rule.

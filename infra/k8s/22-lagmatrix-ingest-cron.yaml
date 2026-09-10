@@ -1,11 +1,29 @@
 # The nightly ingest. Until this exists, daily_ingest.py runs only when a human
-# types the command (Q-50), which makes "the ingest fails loudly at 3am instead
-# of silently" a claim about a run that never happens.
+# types the command (Q-50).
 #
-# Schedule: 09:00 UTC, Tue-Sat. The US session closes 20:00-21:00 UTC, so 09:00
-# the following day leaves margin for Alpaca's EOD bars to finalise; Tue-Sat UTC
-# covers every Mon-Fri US session exactly once. A reasonable default, not a
-# measured requirement -- retune freely.
+# The graph is one ordered chain (D-115), and every node's inputs are either
+# produced by an earlier node or fetched from outside:
+#
+#   extract_fires  postgres            -> data/fires.csv
+#   bars           fires.csv + Alpaca  -> data/bars.parquet
+#   long_bars      bars-10y.parquet    -> extends it   <- THE ONE SEEDED FILE
+#   comovement     bars-10y.parquet    -> ArangoDB edges
+#   news           bars.parquet        -> postgres
+#   vectors        fires.csv + postgres-> ArangoDB embeddings
+#
+# `long_bars` is the only node that cannot start from nothing:
+# fetch_daily_bars.py extends the long file and exits "seed it with
+# fetch_history.py first" on an empty volume. That is deliberate (D-112) --
+# a nightly 10-year, 2,183-symbol refetch is unaffordable. So the PVC is seeded
+# once, out of band, with data/bars-10y.parquet. Everything else regenerates.
+#
+# Two earlier blockers are gone. The scripts reached postgres through
+# `kubectl exec`, which no pod can do (Q-54); they now connect directly with a
+# role scoped to the lagmatrix schema. And `news` used to read bars.parquet in
+# the same superstep that `bars` wrote it, so on an empty volume it failed and
+# retried three times where its dependency could not yet exist; the chain
+# orders them (D-115).
+
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -23,28 +41,72 @@ spec:
     spec:
       backoffLimit: 0
       template:
+        metadata:
+          # A stable label so a NetworkPolicy podSelector can target these pods.
+          # Without it they carry only auto-generated batch.kubernetes.io/job-name
+          # and controller-uid labels, which change every run -- so a default-deny
+          # egress policy would select them while no allow could match, and the
+          # nightly ingest would go from working to fully blocked, unattended.
+          labels: {app: lagmatrix-ingest}
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001
+            # Without fsGroup, Kubernetes owns secret volumes as root:root, so a
+            # 0400 mount is unreadable by uid 10001 and arango_db() fails with
+            # PermissionError. fsGroup makes volume files group-owned by 10001,
+            # which 0440 below then makes readable. This cost a failed run.
+            fsGroup: 10001
+          initContainers:
+            # The PVC mounts at /app/data and shadows whatever the image baked
+            # there -- so data/excluded-etfs.csv, which IS committed and IS in
+            # the image, was invisible and comovement died on it. This copies
+            # the image's copy onto the volume before the run, which keeps the
+            # repo as the source of truth rather than letting a seeded copy
+            # drift. It mounts the volume at /seed precisely so /app/data stays
+            # unshadowed here and the baked-in file can be read.
+            - name: seed-reference-data
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: data, mountPath: /seed}
           containers:
             - name: ingest
-              # :latest is a placeholder until CI publishes SHA tags. It is a
-              # mutable pointer -- with imagePullPolicy: Always, what runs
-              # tonight is whatever was pushed last, and rolling back means
-              # retagging rather than naming a known-good build. Pin to
-              # :${GITHUB_SHA} once the build workflow exists.
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:latest
-              imagePullPolicy: Always
+              # Pinned to a SHA, not :latest. With :latest and imagePullPolicy:
+              # Always, what runs tonight is whatever was pushed last, and
+              # rolling back means retagging rather than naming a known-good
+              # build. This tag is the commit the image was built from.
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+              imagePullPolicy: IfNotPresent
               # Overrides the image's CMD (which serves the web UI). main()
               # no longer resolves as_of up front -- node_comovement resolves it
               # after node_long_bars has extended the file (PHASE-4), so there
               # is no date to compute in the manifest.
               command: ["python", "scripts/daily_ingest.py"]
+              env:
+                # serve.py:94 defaults to http://localhost:19999 -- the SSH
+                # tunnel a developer runs, meaningless in a pod. Required, but
+                # NOT what broke the first run: that was the unreadable password
+                # mount above. arango_db()'s bare `except Exception: return
+                # None` reports "ArangoDB not reachable" for a PermissionError
+                # on the credential, so the message sent me to fix the address
+                # while the database was reachable all along.
+                - name: LAGMATRIX_ARANGO_URL
+                  value: http://arangodb:8529
               envFrom:
                 - secretRef: {name: alpaca-credentials}
+                # LAGMATRIX_PG_* -- a role scoped to the lagmatrix schema plus
+                # read-only on public.audit_log, denied DELETE, DDL and every
+                # other trading table. Deliberately not libpq's PGHOST/PGPASSWORD:
+                # those get picked up from an ambient environment silently.
+                - secretRef: {name: lagmatrix-pg}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -83,4 +145,4 @@ spec:
               secret:
                 secretName: arangodb-auth
                 items: [{key: password, path: password}]
-                defaultMode: 0400
+                defaultMode: 0440

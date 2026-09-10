@@ -95,24 +95,65 @@ ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:19999")
 FANNED = {"graph_retriever", "leader_state", "vector_retriever"}
 
 
+_ARANGO_REASON = ""
+
+
+def arango_reason() -> str:
+    """Why the last `arango_db()` returned None, or "" if it succeeded (Q-55).
+
+    Kept as a module-level record rather than a raised exception or a changed
+    return type: returning None on failure is deliberate — the correlation half
+    of this pipeline needs no database, so a laptop with no tunnel should still
+    serve the page — and every caller already handles None.
+    """
+    return _ARANGO_REASON
+
+
 def arango_db():
-    """The graph/vector handle, or None when the homelab is not tunnelled.
+    """The graph/vector handle, or None with `arango_reason()` set.
 
     Returning None rather than raising is deliberate: the correlation half of
     this pipeline needs no database, so the page should still run and say the
     GraphRAG half is unavailable, instead of failing whole.
+
+    It used to swallow every failure identically, and callers rendered them all
+    as "ArangoDB not reachable". In D-117 the pod could not *read* the mounted
+    password — Kubernetes owns secret volumes root:root and the container runs
+    as uid 10001 — and that was reported as a network problem while the database
+    was reachable throughout. The message was loud and named the wrong cause,
+    which is worse than a vague one because it directs the search.
     """
+    global _ARANGO_REASON
     parsed = urlparse(ARANGO_URL)
     try:
         with socket.create_connection((parsed.hostname, parsed.port or 8529), timeout=1):
             pass
-    except OSError:
+    except OSError as e:
+        _ARANGO_REASON = f"unreachable at {ARANGO_URL}: {e}"
+        return None
+    pw_path = pathlib.Path(os.path.expanduser("~/.lagmatrix-arango-pw"))
+    try:
+        pw = pw_path.read_text().strip()
+    except OSError as e:
+        # Reachable, but the credential could not be read. Named separately
+        # because it is the failure that cost two wrong fixes.
+        _ARANGO_REASON = f"credential {pw_path} unreadable: permission or path error ({e})"
         return None
     try:
         from arango import ArangoClient
-        pw = pathlib.Path(os.path.expanduser("~/.lagmatrix-arango-pw")).read_text().strip()
-        return ArangoClient(hosts=ARANGO_URL).db("lagmatrix", username="root", password=pw)
-    except Exception:
+
+        # LAGMATRIX_ARANGO_USER so the web pod can connect as a read-only
+        # role while the ingest CronJob keeps the writer. Every call
+        # reachable from an HTTP request is an aql.execute read; the only
+        # writer, upsert_comovement, has one caller (daily_ingest.py).
+        # `tests/conftest.py` already read this variable while this line
+        # hardcoded "root" -- the same helper/application drift as Q-43.
+        user = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
+        db = ArangoClient(hosts=ARANGO_URL).db("lagmatrix", username=user, password=pw)
+        _ARANGO_REASON = ""
+        return db
+    except Exception as e:
+        _ARANGO_REASON = f"connect as {os.environ.get('LAGMATRIX_ARANGO_USER', 'root')} failed: {e}"
         return None
 
 
@@ -509,7 +550,7 @@ def neighbourhood(symbol: str, as_of: str) -> dict:
     date.fromisoformat(as_of)
     db = arango_db()
     if db is None:
-        return {"error": "ArangoDB not reachable"}
+        return {"error": f"ArangoDB unavailable: {arango_reason()}"}
     rows = list(db.aql.execute(cap.TRAVERSAL_AQL,
                                bind_vars={"start": f"equity/{symbol}", "hops": 2,
                                           "as_of": as_of}))

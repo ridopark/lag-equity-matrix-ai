@@ -60,6 +60,14 @@ def last_bar_date() -> date | None:
     return pd.to_datetime(b["timestamp"]).max().date()
 
 
+def long_bar_date() -> date | None:
+    try:
+        b = pd.read_parquet(LONG_BARS)
+    except Exception:
+        return None
+    return pd.to_datetime(b["timestamp"]).max().date()
+
+
 def last_article_date() -> str | None:
     """Latest article already embedded, so news resumes from there."""
     try:
@@ -105,6 +113,15 @@ def node_bars(state: IngestState) -> dict:
     return {"done": [f"bars: fetched through {last_bar_date()} {out}"]}
 
 
+def node_long_bars(state: IngestState) -> dict:
+    last = long_bar_date()
+    today = datetime.now(UTC).date()
+    if last is not None and last >= today - timedelta(days=1):
+        return {"done": [f"long_bars: already current through {last}"]}
+    out = _run([sys.executable, "scripts/fetch_daily_bars.py"], state.get("dry_run", False))
+    return {"done": [f"long_bars: fetched through {long_bar_date()} {out}"]}
+
+
 def node_news(state: IngestState) -> dict:
     since = last_article_date()
     cmd = [sys.executable, "scripts/load_news.py", "--top-liquid", "500"]
@@ -138,7 +155,7 @@ def node_comovement(state: IngestState) -> dict:
     if db is None:
         return {"errors": ["comovement: ArangoDB not reachable; edges not written"]}
     closes = serve.COMOVE_CLOSES()
-    d = date.fromisoformat(state["as_of"])
+    d = date.fromisoformat(state.get("as_of") or serve.default_as_of())
     ok, reason = session_available(closes, d, trail=250)
     if not ok:
         return {"errors": [f"comovement: {reason}"]}
@@ -154,12 +171,14 @@ def build():
     g = StateGraph(IngestState)
     retry = RetryPolicy(max_attempts=3)
     g.add_node("bars", node_bars, retry_policy=retry)
+    g.add_node("long_bars", node_long_bars, retry_policy=retry)
     g.add_node("news", node_news, retry_policy=retry)
     g.add_node("vectors", node_vectors, retry_policy=retry)
     g.add_node("comovement", node_comovement, retry_policy=retry)
     g.add_conditional_edges(START, lambda s: [Send("bars", s), Send("news", s)],
                             ["bars", "news"])
-    g.add_edge("bars", "comovement")
+    g.add_edge("bars", "long_bars")
+    g.add_edge("long_bars", "comovement")
     g.add_edge("news", "vectors")
     g.add_edge("comovement", END)
     g.add_edge("vectors", END)
@@ -174,9 +193,12 @@ def main() -> None:
                     help="report what would run without fetching or writing")
     args = ap.parse_args()
 
-    import serve
-    as_of = args.as_of or serve.default_as_of()
-    print(f"daily ingest, as of {as_of}{'  [dry run]' if args.dry_run else ''}")
+    as_of = args.as_of
+    if as_of:
+        banner = f"daily ingest, as of {as_of}"
+    else:
+        banner = "daily ingest, as of: resolved after the bars fetch"
+    print(f"{banner}{'  [dry run]' if args.dry_run else ''}")
     out = asyncio.run(build().ainvoke({"as_of": as_of, "dry_run": args.dry_run,
                                        "done": [], "errors": []}))
     for line in out.get("done", []):

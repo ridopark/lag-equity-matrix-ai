@@ -132,16 +132,19 @@ def node_comovement(state: IngestState) -> dict:
     import serve
 
     from lagmatrix.adapters.arango import upsert_comovement
-    from lagmatrix.comovement import comovement_edges
+    from lagmatrix.comovement import comovement_edges, session_available
 
     db = serve.arango_db()
     if db is None:
         return {"errors": ["comovement: ArangoDB not reachable; edges not written"]}
     closes = serve.COMOVE_CLOSES()
+    d = date.fromisoformat(state["as_of"])
+    ok, reason = session_available(closes, d, trail=250)
+    if not ok:
+        return {"errors": [f"comovement: {reason}"]}
     excluded = frozenset(
         ln.split(",")[0] for ln in
         pathlib.Path("data/excluded-etfs.csv").read_text().splitlines()[1:] if ln)
-    d = date.fromisoformat(state["as_of"])
     edges = comovement_edges(closes, d, trail=250, min_abs_corr=0.5, exclude=excluded)
     upsert_comovement(db, edges, d)
     return {"done": [f"comovement: {len(edges):,} edges upserted as of {d}"]}

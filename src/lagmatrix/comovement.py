@@ -26,6 +26,7 @@ flagged instead of dropped; the caller decides what to do with a flagged edge.
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -118,6 +119,25 @@ def comovement_edges(
             )
         )
     return edges
+
+
+def session_available(closes: pd.DataFrame, as_of: date, trail: int) -> tuple[bool, str]:
+    """Whether `closes` can actually answer for `as_of`: its session must be
+    present in the index, and `trail` sessions must precede it (PHASE-1,
+    PLAN-2026-09-09-ingest-coherence). Reuses `comovement_edges`'s own lookup
+    without changing that function's existing return-`[]` contract -- callers
+    that need a loud failure instead of a silent empty edge list check here
+    first.
+    """
+    session_dates = closes.index.date
+    matches = np.where(session_dates == as_of)[0]
+    if len(matches) == 0:
+        last_session = closes.index[-1].date()
+        return False, f"{as_of} not found in data (last session available: {last_session})"
+    ti = int(matches[0])
+    if ti < trail:
+        return False, f"only {ti} sessions precede {as_of}, need {trail}"
+    return True, ""
 
 
 def confidence_interval(corr: float, n: int) -> tuple[float, float]:

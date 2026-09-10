@@ -3397,10 +3397,47 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   plan because the broken default date was live and user-visible.
 - **Status:** Accepted
 
+### D-110 — The ingest refuses to claim success when its data cannot answer
+- **When:** 2026-09-10T00:10:00-05:00
+- **Decision:** `session_available(closes, as_of, trail)` in
+  `src/lagmatrix/comovement.py`, checked by `node_comovement` **before**
+  `comovement_edges` runs. A failure returns an `errors` entry naming both dates
+  and never reaches `upsert_comovement`.
+- **Why:** tonight's first real ingest advanced `bars.parquet` to 2026-09-09 and
+  left `bars-10y.parquet` — the file co-movement reads — at 2026-09-04. Tomorrow's
+  run would have asked for a session that file does not contain, received `[]`,
+  written nothing, and printed:
+
+      {'done': ['comovement: 0 edges upserted as of 2026-09-09']}
+
+  Reproduced on synthetic data as the red test, then verified in-process against
+  the real frame. After the fix, the same call returns:
+
+      {'errors': ['comovement: 2026-09-09 not found in data
+                   (last session available: 2026-09-04)']}
+      upsert_comovement called: []
+
+  and a good date still returns 23,855 edges upserted, unchanged.
+  **The distinction this deliberately preserves.** A quiet trading day producing
+  zero edges from a *fully available* window is a real result, not a failure.
+  `session_available` runs before `comovement_edges` and therefore cannot see the
+  edge count, so the two cases cannot be conflated. The alternative that lost was
+  checking `len(edges) == 0` after the fact, which is simpler and wrong — it would
+  trade a silent wrong answer for a noisy false one.
+  Additive by design: `comovement_edges`'s existing return-`[]` contract is
+  untouched, so a later, wider change to that contract in the deployment work
+  cannot collide with this.
+- **Outcome:** 230 passed. PHASE-1 of `PLAN-2026-09-09-ingest-coherence.md`.
+  Does **not** by itself make tomorrow's run correct — it makes tomorrow's run
+  *fail loudly* instead of silently. PHASE-3 and PHASE-4 are what actually keep
+  the long file current.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-48 | `--dry-run` cannot catch the failure D-110 was built for | nothing today; the value of a dry run as a pre-flight check | `node_comovement` returns `{"done": ["comovement: DRY"]}` at `daily_ingest.py:130-131`, before it reaches `serve.COMOVE_CLOSES()` or `session_available`. So `--dry-run` prints four green nodes even when the real run would now error. That is exactly the blind spot that let tonight's incident through: the dry run passed all four nodes, and the real run still left the product worse. Every node has the same shape, so this is not specific to comovement — a dry run currently verifies that the *plumbing* is wired, not that the *data* can answer. Deciding what a dry run should mean is the real question; making it read the frame would cost a ~650MiB read, which may or may not be worth it for a pre-flight. |
 | Q-47 | ~~`/graph` and `/movers` answer errors with HTTP 200~~ **ANSWERED by D-108** | nothing today; an HTTP-status-only client of the deployed service | D-102 gave `/followers` and `/network` real 400s via `parse_bounded`, and D-104 did the same for `/run`'s `limit`. But `/graph` and `/movers` still catch `Exception` and return `{"error": ...}` through `_json`, which hardcodes `send_response(200)` — so D-107's new `ValueError` surfaces as a 200 carrying an error body, and a caller reading only the status cannot tell bad input from a clean run. This is the same inconsistency between sibling endpoints that D-104 existed to close, one layer up. The SSE endpoints may not be able to join the rule: `/run` flushes its headers before `stream()` can raise, so its errors are structurally stuck in the body — which is itself worth deciding rather than inheriting. |
 | Q-46 | ~~The live tests share fixed database names, so two concurrent suites collide~~ **ANSWERED by D-106** — fixed in `tests/conftest.py` alone, and the two grounds given below for not fixing it were both wrong: it *is* reproducible on demand, and it touched one file, not five. | `tests/conftest.py`, `tests/test_vector_index.py` and the four other live-gated files | Each live test file hardcodes its own database (`test_vector_index`, `test_arango_topology`, `test_market_scan`, `test_comovement_store`, `test_loader_idempotency`), and at least `test_vector_index.py` drops and recreates its `article` collection in the fixture. Two pytest runs against the same ArangoDB therefore race: one drops while the other inserts, and the second fails with a 409 unique-constraint on `chip-article`. Observed once today, when several agents each ran the suite at the same time; **not** reproducible in normal use — three consecutive single runs gave 168 passed. So it is a parallelism defect, not a correctness one, and it is logged rather than fixed because the fix touches five files for a condition a single developer never hits. It **would** bite parallel CI jobs, or anyone running tests while an agent does. Answered by giving `arango_db_or_skip` a per-process database suffix (`os.getpid()` or a uuid) and a teardown that drops it — noting the teardown is the part that needs care, since an abandoned run would otherwise leave databases behind. Related to Q-43, which fixed the opposite failure: tests that looked green while verifying nothing. This is the mirror image — tests that fail while nothing is wrong — and both erode the same thing. |
 | Q-45 | Can the supply graph be deepened enough to test hop-dependent propagation at all? | D-92, D-88, D-78, `src/lagmatrix/edgar/relations.py` | D-92 could not answer its own question: only **4 of 105 suppliers (4%)** are themselves customers with suppliers, giving **6 hop-2 pairs** and a realised MDE of 0.39 against a 0.25 threshold. The graph is 76 depth-1 stars because only customers' 10-K concentration disclosures were ingested. Answered by ingesting the same disclosures for the 105 suppliers — the `edgar/relations.py` classifier and its migration script already exist and were audited at D-78, so this is acquisition, not new method — then re-running `scripts/experiment_hops_days.py` unchanged and re-reading its realised MDE. **Pre-commit before collecting:** the D-92 design, threshold and decision rule are re-used verbatim; deepening the graph must not be an excuse to re-specify the test. Worth knowing the ceiling first: if the second ingest still yields under ~50 hop-2 pairs, the MDE will stay above 0.25 and the question should be closed as unanswerable with 10-K-derived structure rather than pursued further. |

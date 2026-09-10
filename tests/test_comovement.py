@@ -39,7 +39,7 @@ writing this assertion").
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -613,3 +613,77 @@ def test_comovement_edges_rejects_non_finite_min_abs_corr(bad):
 
     with pytest.raises(ValueError):
         comovement_edges(closes, as_of, trail=60, min_abs_corr=bad)
+
+
+# --- session_available (PHASE-1, PLAN-2026-09-09-ingest-coherence) -----------
+#
+# `session_available(closes, as_of, trail)` reuses `comovement_edges`'s own
+# two silent-`[]` conditions -- `as_of` absent from the index, or fewer than
+# `trail` sessions precede it -- and turns them into an explicit `(bool, str)`
+# result a caller can act on, without changing `comovement_edges`'s existing
+# return-`[]` contract. Does not exist yet in `lagmatrix.comovement`; imported
+# locally inside each test below (not at module scope) so this file's other,
+# already-passing tests do not collect-error alongside it.
+
+
+def test_session_available_true_when_trail_sessions_precede_as_of():
+    """300-row synthetic frame, `as_of` at row 280: exactly 280 sessions
+    precede it, comfortably above `trail=250` -- the fully-available case.
+
+    Falsifies if: this returns `False`, or the message is non-empty for a
+    window that is, in fact, fully available.
+    """
+    from lagmatrix.comovement import session_available
+
+    idx = pd.bdate_range("2026-01-01", periods=300, tz="UTC")
+    closes = pd.DataFrame({"A": np.arange(300, dtype=float)}, index=idx)
+    as_of = idx[280].date()
+
+    result = session_available(closes, as_of, trail=250)
+
+    assert result == (True, "")
+
+
+def test_session_available_false_when_as_of_is_absent():
+    """`as_of` one calendar day past the frame's last index entry -- absent
+    from `closes.index` entirely. This is the exact shape of the real
+    incident: `bars-10y.parquet` frozen at 2026-09-04 while `as_of` resolves
+    to 2026-09-09.
+
+    Falsifies if: this returns `True`, or the message names neither the
+    requested date nor the frame's actual last session (a caller needs both
+    to diagnose the failure, not just a bare `False`).
+    """
+    from lagmatrix.comovement import session_available
+
+    idx = pd.bdate_range("2026-01-01", periods=300, tz="UTC")
+    closes = pd.DataFrame({"A": np.arange(300, dtype=float)}, index=idx)
+    last_session = idx[-1].date()
+    as_of = last_session + timedelta(days=1)
+
+    ok, msg = session_available(closes, as_of, trail=250)
+
+    assert ok is False
+    assert str(as_of) in msg
+    assert str(last_session) in msg
+
+
+def test_session_available_false_when_trail_sessions_do_not_precede_as_of():
+    """`as_of` at row 10 of a 300-row frame: present in the index, but only
+    10 sessions precede it, not the requested `trail=250`.
+
+    Falsifies if: this returns `True`, or the message does not name the
+    number of sessions that actually precede `as_of` (10) -- a message that
+    only ever repeated the requested `trail` back would be useless for
+    telling "10 available" apart from "0 available".
+    """
+    from lagmatrix.comovement import session_available
+
+    idx = pd.bdate_range("2026-01-01", periods=300, tz="UTC")
+    closes = pd.DataFrame({"A": np.arange(300, dtype=float)}, index=idx)
+    as_of = idx[10].date()
+
+    ok, msg = session_available(closes, as_of, trail=250)
+
+    assert ok is False
+    assert "10" in msg

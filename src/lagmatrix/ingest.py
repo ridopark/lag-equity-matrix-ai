@@ -29,3 +29,20 @@ def daily_watermark(df: pd.DataFrame) -> date | None:
     if df.empty:
         return None
     return df["timestamp"].max().date()
+
+
+def split_affected_symbols(actions_data: dict) -> set[str]:
+    """Symbols touched by a split in an already-fetched corporate actions
+    response (splits only -- `cash_dividends` and other action types
+    contribute nothing). `forward_splits`/`reverse_splits` carry `symbol`;
+    `unit_splits` instead carries `old_symbol`/`new_symbol`. Only keys with
+    results are present in the response, so each lookup uses `.get(name, [])`."""
+    symbols: set[str] = set()
+    for row in actions_data.get("forward_splits", []):
+        symbols.add(row.symbol)
+    for row in actions_data.get("reverse_splits", []):
+        symbols.add(row.symbol)
+    for row in actions_data.get("unit_splits", []):
+        symbols.add(row.old_symbol)
+        symbols.add(row.new_symbol)
+    return symbols

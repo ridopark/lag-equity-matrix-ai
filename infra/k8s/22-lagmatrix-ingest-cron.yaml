@@ -47,6 +47,29 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 10001
+            # Without fsGroup, Kubernetes owns secret volumes as root:root, so a
+            # 0400 mount is unreadable by uid 10001 and arango_db() fails with
+            # PermissionError. fsGroup makes volume files group-owned by 10001,
+            # which 0440 below then makes readable. This cost a failed run.
+            fsGroup: 10001
+          initContainers:
+            # The PVC mounts at /app/data and shadows whatever the image baked
+            # there -- so data/excluded-etfs.csv, which IS committed and IS in
+            # the image, was invisible and comovement died on it. This copies
+            # the image's copy onto the volume before the run, which keeps the
+            # repo as the source of truth rather than letting a seeded copy
+            # drift. It mounts the volume at /seed precisely so /app/data stays
+            # unshadowed here and the baked-in file can be read.
+            - name: seed-reference-data
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:99845ed
+              imagePullPolicy: IfNotPresent
+              command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: data, mountPath: /seed}
           containers:
             - name: ingest
               # Pinned to a SHA, not :latest. With :latest and imagePullPolicy:
@@ -60,6 +83,16 @@ spec:
               # after node_long_bars has extended the file (PHASE-4), so there
               # is no date to compute in the manifest.
               command: ["python", "scripts/daily_ingest.py"]
+              env:
+                # serve.py:94 defaults to http://localhost:19999 -- the SSH
+                # tunnel a developer runs, meaningless in a pod. Required, but
+                # NOT what broke the first run: that was the unreadable password
+                # mount above. arango_db()'s bare `except Exception: return
+                # None` reports "ArangoDB not reachable" for a PermissionError
+                # on the credential, so the message sent me to fix the address
+                # while the database was reachable all along.
+                - name: LAGMATRIX_ARANGO_URL
+                  value: http://arangodb:8529
               envFrom:
                 - secretRef: {name: alpaca-credentials}
                 # LAGMATRIX_PG_* -- a role scoped to the lagmatrix schema plus
@@ -105,4 +138,4 @@ spec:
               secret:
                 secretName: arangodb-auth
                 items: [{key: password, path: password}]
-                defaultMode: 0400
+                defaultMode: 0440

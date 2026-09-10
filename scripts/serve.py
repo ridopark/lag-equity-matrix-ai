@@ -111,7 +111,14 @@ def arango_db():
     try:
         from arango import ArangoClient
         pw = pathlib.Path(os.path.expanduser("~/.lagmatrix-arango-pw")).read_text().strip()
-        return ArangoClient(hosts=ARANGO_URL).db("lagmatrix", username="root", password=pw)
+        # LAGMATRIX_ARANGO_USER so the web pod can connect as a read-only
+        # role while the ingest CronJob keeps the writer. Every call
+        # reachable from an HTTP request is an aql.execute read; the only
+        # writer, upsert_comovement, has one caller (daily_ingest.py).
+        # `tests/conftest.py` already read this variable while this line
+        # hardcoded "root" -- the same helper/application drift as Q-43.
+        user = os.environ.get("LAGMATRIX_ARANGO_USER", "root")
+        return ArangoClient(hosts=ARANGO_URL).db("lagmatrix", username=user, password=pw)
     except Exception:
         return None
 

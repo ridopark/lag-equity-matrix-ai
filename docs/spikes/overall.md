@@ -3854,6 +3854,35 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   because a malformed value is still worth rejecting (D-103).
 - **Status:** Accepted
 
+### D-123 — Every script under `scripts/` is import-checked, by discovery
+- **When:** 2026-09-10T19:20:00-05:00
+- **Decision:** `tests/test_scripts_import.py` discovers `scripts/*.py` with a
+  glob instead of naming four modules, and a guard test fails if discovery ever
+  returns nothing.
+- **Why:** D-116's tail. Nothing under `tests/` imports these modules and they
+  are not part of the collected package, so a broken import in any of them
+  leaves the suite green. That has now happened twice: deleting
+  `assessor.rank_by_room` broke `serve.py` while the suite reported 111 passed
+  (Q-43), and D-101's fastembed swap removed `scipy` — never a declared
+  dependency, it arrived transitively via sentence-transformers — which stopped
+  **both of D-95's reproduction scripts importing at all**, with the suite green
+  at 248 and ruff clean. Nobody noticed until one was run by hand.
+  **Discovered rather than enumerated, because the failure mode is forgetting.**
+  A hardcoded list is exactly what the second incident defeated: those scripts
+  had existed for weeks and had never been added to it. Coverage went from 4
+  modules to 34.
+  The guard on the guard exists because a glob that returns nothing would make
+  every import test below pass vacuously — the same silent-skip shape as Q-43,
+  one level up.
+- **Outcome:** 36 tests in that file, 315 in the suite. Verified it catches the
+  real thing rather than assumed: with `scipy` made unimportable, exactly
+  `experiment_chains` and `experiment_lag_matrix` fail and the other 34 scripts
+  pass. It would have caught D-101 on the day.
+  It also pins that these scripts do no work at module scope — no server, no
+  socket, no market data, no ArangoDB — so a script that starts doing work at
+  import time fails here rather than at 3am.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

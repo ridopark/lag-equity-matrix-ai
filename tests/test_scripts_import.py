@@ -1,11 +1,20 @@
-"""The two scripts nothing else imports.
+"""Every script under `scripts/` must import cleanly.
 
-`scripts/serve.py` and `scripts/capture_showcase.py` are not part of the
-collected package, so nothing under `tests/` has ever imported them. A broken
-import in either — a deleted function still being imported, a renamed field —
-left the suite fully green. That is not hypothetical: deleting
-`assessor.rank_by_room` (D-87) broke `serve.py`'s import and the suite still
-reported 111 passed, with only a manual run catching it (Q-43).
+Nothing under `tests/` imports these modules, and they are not part of the
+collected package, so a broken import in any of them leaves the suite fully
+green. That is not hypothetical, twice over:
+
+  - Deleting `assessor.rank_by_room` (D-87) broke `serve.py`'s import and the
+    suite still reported 111 passed; only a manual run caught it (Q-43).
+  - D-101's fastembed swap removed `scipy` -- never a declared dependency, it
+    arrived transitively via sentence-transformers -- and both of D-95's
+    reproduction scripts stopped importing entirely. The suite was green at 248,
+    ruff was clean, and nobody noticed until one was run by hand (D-116).
+
+The list is **discovered, not enumerated**, because the failure mode is
+forgetting: the second incident happened to scripts that existed for weeks and
+had never been added to a hardcoded list. A new script is covered the moment it
+is written.
 
 These are deliberately import-only. They do not start a server, open a socket,
 read market data or touch ArangoDB — `serve.py` does all of that inside
@@ -30,12 +39,25 @@ def _scripts_on_path():
     sys.path.remove(str(SCRIPTS))
 
 
-@pytest.mark.parametrize(
-    "name", ["serve", "capture_showcase", "capture_trace", "fetch_daily_bars"]
-)
+SCRIPT_NAMES = sorted(p.stem for p in SCRIPTS.glob("*.py") if not p.stem.startswith("_"))
+
+
+def test_discovery_found_the_scripts():
+    """A guard on the guard: if the glob ever returns nothing -- a moved
+    directory, a renamed folder -- every import test below would vacuously
+    pass. Falsifies if discovery breaks silently."""
+    assert len(SCRIPT_NAMES) > 20, f"only discovered {SCRIPT_NAMES}"
+
+
+@pytest.mark.parametrize("name", SCRIPT_NAMES)
 def test_script_imports_cleanly(name):
-    """Falsifies if the module raises on import — the exact failure that
-    deleting a function another script still imports would produce."""
+    """Falsifies if the module raises on import — a deleted function another
+    script still imports, or a dependency that quietly left the lockfile.
+
+    Import-only on purpose. These scripts must do no work at module scope: no
+    server, no socket, no market data, no ArangoDB. This test is also the check
+    that that stays true, so a script that starts doing work at import time
+    fails here rather than at 3am."""
     __import__(name)
 
 

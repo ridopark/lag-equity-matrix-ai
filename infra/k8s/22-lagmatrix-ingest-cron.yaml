@@ -1,44 +1,28 @@
-# NOT DEPLOYABLE AS WRITTEN. Every node fails. Read this before applying it.
+# The nightly ingest. Until this exists, daily_ingest.py runs only when a human
+# types the command (Q-50).
 #
-# Measured by running the image, not by reading the manifest back:
+# The graph is one ordered chain (D-115), and every node's inputs are either
+# produced by an earlier node or fetched from outside:
 #
-#   node        blocker
-#   ----------  ------------------------------------------------------------
-#   bars        fetch_bars.py reads data/fires.csv -- private signal data,
-#               deliberately in neither the repo nor the image
-#   long_bars   fetch_daily_bars.py needs data/bars-10y.parquet to exist; on
-#               an empty PVC it exits "seed it with fetch_history.py first"
-#   news        load_news.py needs fires.csv AND writes to copytrade's
-#               postgres through `kubectl -n copytrade exec -i postgres-0`
-#   vectors     load_vectors.py needs fires.csv AND the same kubectl path,
-#               plus a second one into deploy/arangodb
-#   comovement  COMOVE_CLOSES() finds no bars-10y.parquet, so
-#               session_available reports "not found in data" (D-110 doing
-#               its job -- a loud failure, not a silent one)
+#   extract_fires  postgres            -> data/fires.csv
+#   bars           fires.csv + Alpaca  -> data/bars.parquet
+#   long_bars      bars-10y.parquet    -> extends it   <- THE ONE SEEDED FILE
+#   comovement     bars-10y.parquet    -> ArangoDB edges
+#   news           bars.parquet        -> postgres
+#   vectors        fires.csv + postgres-> ArangoDB embeddings
 #
-# Two independent problems, both one-time rather than ongoing:
+# `long_bars` is the only node that cannot start from nothing:
+# fetch_daily_bars.py extends the long file and exits "seed it with
+# fetch_history.py first" on an empty volume. That is deliberate (D-112) --
+# a nightly 10-year, 2,183-symbol refetch is unaffordable. So the PVC is seeded
+# once, out of band, with data/bars-10y.parquet. Everything else regenerates.
 #
-# 1. The PVC has to be seeded once with fires.csv, bars.parquet and
-#    bars-10y.parquet. The ingest extends those files; it does not create them
-#    from nothing. fires.csv is private data, so seeding is an out-of-band
-#    operator step, not something CI can do.
-#
-# 2. load_news.py and load_vectors.py reach postgres by shelling out to
-#    `kubectl exec`, which works from a laptop with a kubeconfig and cannot
-#    work from a pod with no kubectl, no service-account token and a read-only
-#    root filesystem. A direct postgres connection is the clean fix: they are
-#    already piping SQL over a pipe, so it is a connection string and a Secret,
-#    and it removes cluster credentials from a batch job that should not hold
-#    them.
-#
-# What IS ready: the image builds at 725MB, runs, reports healthy, and carries
-# no torch. These manifests pass `kubectl apply --dry-run=server`. And the
-# pipeline itself is correct -- it ran end to end tonight on a machine that has
-# the data, extending bars-10y to 2026-09-09, repairing two live splits, and
-# writing 24,104 co-movement edges.
-#
-# The gap is not the code. It is that nothing has ever put this repo's data
-# where a pod could see it.
+# Two earlier blockers are gone. The scripts reached postgres through
+# `kubectl exec`, which no pod can do (Q-54); they now connect directly with a
+# role scoped to the lagmatrix schema. And `news` used to read bars.parquet in
+# the same superstep that `bars` wrote it, so on an empty volume it failed and
+# retried three times where its dependency could not yet exist; the chain
+# orders them (D-115).
 
 apiVersion: batch/v1
 kind: CronJob
@@ -65,13 +49,12 @@ spec:
             runAsUser: 10001
           containers:
             - name: ingest
-              # :latest is a placeholder until CI publishes SHA tags. It is a
-              # mutable pointer -- with imagePullPolicy: Always, what runs
-              # tonight is whatever was pushed last, and rolling back means
-              # retagging rather than naming a known-good build. Pin to
-              # :${GITHUB_SHA} once the build workflow exists.
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:latest
-              imagePullPolicy: Always
+              # Pinned to a SHA, not :latest. With :latest and imagePullPolicy:
+              # Always, what runs tonight is whatever was pushed last, and
+              # rolling back means retagging rather than naming a known-good
+              # build. This tag is the commit the image was built from.
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:99845ed
+              imagePullPolicy: IfNotPresent
               # Overrides the image's CMD (which serves the web UI). main()
               # no longer resolves as_of up front -- node_comovement resolves it
               # after node_long_bars has extended the file (PHASE-4), so there
@@ -79,6 +62,11 @@ spec:
               command: ["python", "scripts/daily_ingest.py"]
               envFrom:
                 - secretRef: {name: alpaca-credentials}
+                # LAGMATRIX_PG_* -- a role scoped to the lagmatrix schema plus
+                # read-only on public.audit_log, denied DELETE, DDL and every
+                # other trading table. Deliberately not libpq's PGHOST/PGPASSWORD:
+                # those get picked up from an ambient environment silently.
+                - secretRef: {name: lagmatrix-pg}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

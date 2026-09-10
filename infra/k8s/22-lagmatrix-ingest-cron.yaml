@@ -6,6 +6,29 @@
 # the following day leaves margin for Alpaca's EOD bars to finalise; Tue-Sat UTC
 # covers every Mon-Fri US session exactly once. A reasonable default, not a
 # measured requirement -- retune freely.
+# NOT APPLIABLE AS WRITTEN -- read this before deploying it.
+#
+# `scripts/load_vectors.py` shells out to `kubectl exec` twice: line 32 reaches
+# `postgres-0` in the `copytrade` namespace, line 41 reaches `deploy/arangodb`
+# in this one. That works from a laptop with a kubeconfig. It cannot work from
+# this pod, which has no `kubectl` binary, `automountServiceAccountToken: false`,
+# and a read-only root filesystem. The `vectors` node will fail here.
+#
+# The other four nodes are fine: bars, long_bars and news use the Alpaca API,
+# and comovement talks to ArangoDB over HTTP through `serve.arango_db()`.
+#
+# Three ways out, none chosen: give load_vectors.py a direct postgres
+# connection (it is already reading over a pipe, so this is mostly a connection
+# string plus a Secret, and it removes a kubectl dependency from a batch job
+# that has no business holding cluster credentials); or grant the CronJob a
+# ServiceAccount with exec rights into `copytrade` and ship kubectl in the
+# image (which hands a nightly batch job the ability to exec into the trading
+# namespace -- the opposite direction from where this should go); or split
+# vectors out and keep running it from an operator machine.
+#
+# Found by checking what the scripts need at runtime rather than by reading the
+# manifest back to myself.
+
 apiVersion: batch/v1
 kind: CronJob
 metadata:

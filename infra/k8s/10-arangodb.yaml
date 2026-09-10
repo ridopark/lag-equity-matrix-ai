@@ -4,13 +4,34 @@
 #
 # Its own namespace, and modest limits because the homelab node is shared.
 #
-# CORRECTION (2026-09-10): the namespace claim above was wrong and is left here
-# rather than deleted, because it is the kind of sentence that gets trusted.
-# There is no NetworkPolicy in this cluster -- `kubectl get networkpolicy -A`
-# returns nothing -- and Kubernetes defaults to allow-all in both directions.
-# A namespace partitions names, not traffic: a pod here can reach the trading
-# workloads today. A default-deny NetworkPolicy is what would make the sentence
-# true, and it does not exist yet.
+# CORRECTION (2026-09-10): the namespace claim above is wrong, and so was my
+# first correction of it. Both are left here because these are exactly the
+# sentences that get trusted later.
+#
+# I originally wrote that `kubectl get networkpolicy -A` returns nothing. I had
+# not run it. It returns two policies, both in `copytrade`, both ingress-only:
+# `exec-alpaca-live` and `exec-alpaca-paper` accept traffic only from
+# `app=api-gateway` in their own namespace.
+#
+# Measured from a pod in THIS namespace on 2026-09-10 (busybox, `nc -z`, with a
+# control target to prove the method worked -- the first attempt reported
+# everything "blocked" because the arangodb image has no bash and the command
+# never ran):
+#
+#     REACHABLE   postgres.copytrade:5432      <- the trading database
+#     REACHABLE   redis.copytrade:6379
+#     REACHABLE   api-gateway.copytrade:8082   <- broker-credential write routes
+#     REACHABLE   dashboard.copytrade:3000
+#     REACHABLE   market-data.copytrade:8080
+#     blocked     exec-alpaca-live:8080        <- its NetworkPolicy works
+#     blocked     orchestrator:8080            <- has an endpoint; unexplained
+#     blocked     audit:8081                   <- 0 endpoints, proves nothing
+#
+# So the namespace does not isolate: a pod here reaches the trading system's
+# postgres, its redis, and its api-gateway today. That is the same postgres
+# D-103's injection would have reached. The two existing policies protect the
+# execution pods specifically and nothing else. A default-deny egress policy in
+# `lagmatrix` is what would make the header sentence true; it does not exist.
 #
 # The "~4 GB headroom" figure was also wrong: it measured *requests*, which is
 # not what gets a pod killed. The node's limits already sum to ~115% of

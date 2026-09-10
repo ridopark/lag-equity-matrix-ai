@@ -127,24 +127,20 @@ spec:
       ports:
         - {protocol: TCP, port: 443}
 ---
-# ArangoDB lives in this namespace, so the default-deny above selects it too.
-# It serves rather than calls out, but give it DNS: a database that cannot
-# resolve anything fails in confusing ways, and this grants nothing else.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: arangodb-egress
-  namespace: lagmatrix
-spec:
-  podSelector:
-    matchLabels: {app: arangodb}
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: kube-system}
-          podSelector:
-            matchLabels: {k8s-app: kube-dns}
-      ports:
-        - {protocol: UDP, port: 53}
-        - {protocol: TCP, port: 53}
+# ArangoDB deliberately has NO allow policy, so the default-deny gives it zero
+# egress. An earlier draft granted it DNS defensively, on the theory that a
+# database unable to resolve fails confusingly. The evidence says otherwise:
+# its network namespace holds exactly one socket -- LISTEN on 8529 -- with no
+# established outbound and conntrack showing zero flows across 15h of uptime;
+# `arangod --dump-options` (416KB, the complete set) contains no telemetry
+# option; and it runs single-server, so there is no agency traffic. Kubernetes
+# also writes the pod's own name into /etc/hosts, so self-resolution never
+# reaches DNS.
+#
+# Granting nothing is the more informative configuration. If a future version,
+# or a backup-to-object-storage job, starts reaching out, it should fail
+# visibly at that moment rather than have been silently pre-authorised.
+#
+# The kubelet's tcpSocket readiness probe on 8529 is unaffected: that is
+# ingress, it originates on the node, and every pod chain accepts it via
+# `-m addrtype --src-type LOCAL -j ACCEPT` as its first rule.

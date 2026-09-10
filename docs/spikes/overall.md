@@ -3776,11 +3776,53 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   person to optimise something that does not happen.
 - **Status:** Accepted
 
+### D-121 — Default-deny egress on `lagmatrix`, answering Q-53
+- **When:** 2026-09-10T18:35:00-05:00
+- **Decision:** `default-deny-egress` plus two per-workload allows. ArangoDB
+  gets **no** policy, so it has zero egress.
+- **Why:** the namespace reached the trading system. Measured before:
+  `postgres.copytrade:5432`, `redis:6379`, `api-gateway:8082` (broker-credential
+  write routes), `dashboard:3000` and `market-data:8080` all reachable from a
+  pod here.
+  **The question that decided whether any of this was worth doing** was whether
+  k3s enforces NetworkPolicy at all — flannel historically did not, and a
+  manifest that lints and does nothing would have been false comfort. It does:
+  k3s runs kube-router's netpol controller **in-process in the k3s server**,
+  which is why no controller pod appears in `kube-system`. Verified from
+  iptables (452 `KUBE-NWPLCY`/`KUBE-POD-FW` rules, a per-pod chain already
+  programmed for `lagmatrix-web` ending in REJECT) rather than by probing —
+  which shows the enforcement path itself rather than one sampled outcome.
+  **The trap in the except list.** kube-router compiles selectors into ipsets of
+  **pod** IPs and evaluates in FORWARD/OUTPUT, i.e. *after* kube-proxy has
+  DNAT'd a ClusterIP to a backend. So `except: 10.42.0.0/16` is load-bearing and
+  the obvious edit — excepting only the service CIDR `10.43.0.0/16` — would leak
+  the entire cluster.
+  **The prerequisite that would have broken the nightly job.** The CronJob's pod
+  template had no `metadata` at all, so its pods carried only `job-name` and
+  `controller-uid`, regenerated every run. A default-deny selects every pod; with
+  no stable label no allow could match, and the ingest would have gone from
+  working to fully blocked, unattended, at 09:00 UTC. The label went on first
+  and a full run went green before any policy existed.
+  ArangoDB gets nothing rather than a defensive DNS grant: its netns holds
+  exactly one socket (LISTEN 8529), zero conntrack flows across 15h, no
+  telemetry option in `--dump-options`, and `/etc/hosts` carries its own name so
+  self-resolution never reaches DNS. Granting nothing is also more informative —
+  a future version that starts reaching out fails visibly instead of having been
+  pre-authorised.
+- **Outcome:** From the web pod: `arangodb:8529` reachable;
+  `postgres.copytrade:5432` and `api-gateway.copytrade:8082` both
+  **ConnectionRefusedError** — kube-router's REJECT signature, observed from
+  inside a pod. A full ingest run under the policies completed with all six
+  nodes ok and 24,104 edges, so every allow is validated by use rather than by
+  inspection; the absence of a HuggingFace exception is validated too, since
+  `vectors` still embedded 85 articles from the baked-in model.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-53 | The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |
+| Q-53 | ~~The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway~~ **ANSWERED by D-121** | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |
 | Q-54 | ~~The ingest CronJob cannot run **any** node in-cluster~~ **CODE HALF ANSWERED 2026-09-10** — `src/lagmatrix/pg.py` plus refactors of `extract_fires.py`, `load_vectors.py` and `load_news.py` (c37498e, a9468a8, 7f71270, e618202). No executable line in the ingest path shells out any more, verified by AST rather than grep. A scoped `lagmatrix_ingest` role replaces `kubectl exec` as the `temporal` superuser: read/write on our seven tables, read-only on `public.audit_log`, denied on every other table, on DELETE and on DDL — each denial tested, not assumed. Every SQL statement in those scripts was built by f-string interpolation and is now parameterised, closing the last of D-103's pattern here. Regression-checked by a full real ingest: identical output to the previous night's kubectl run (230,317 articles, 85 embeddings, 24,104 edges), stores unchanged, reference embeddings bit-identical. **Still open:** the PVC has never been seeded with `bars-10y.parquet`, and nothing has applied the CronJob. | `scripts/load_vectors.py:32` shells out to `kubectl -n copytrade exec -i postgres-0 -- psql`, and `:41` to `kubectl -n lagmatrix exec -i deploy/arangodb`. That works from a laptop with a kubeconfig and cannot work from the pod in `22-lagmatrix-ingest-cron.yaml`, which ships no kubectl, sets `automountServiceAccountToken: false`, and mounts a read-only root filesystem. **I first reported this as "4 of 5 nodes work" and that was wrong** — measured by running the image, all five fail. `bars` reads `data/fires.csv` (private, in neither repo nor image); `long_bars` exits "seed it with fetch_history.py first" on an empty PVC; `news` needs fires.csv and the same kubectl path into postgres; `comovement` finds no bars-10y.parquet and reports it via D-110. Two independent problems, both one-time: the PVC has never been seeded with fires.csv/bars.parquet/bars-10y.parquet (the ingest extends those files, it does not create them, and fires.csv is private so seeding is an operator step CI cannot do), and two scripts reach postgres by shelling out to kubectl. Three options, none chosen: give `load_vectors.py` a direct postgres connection (mostly a connection string and a Secret, and it removes cluster credentials from a batch job that should not hold them); or grant the CronJob exec rights into `copytrade` and ship kubectl (which hands a nightly batch job the ability to exec into the trading namespace — the wrong direction); or keep vectors on an operator machine. This also gates Q-53's egress allow-list, since option 1 needs postgres reachable and option 3 does not. Found by checking what the scripts need at runtime rather than by re-reading the manifest. |
 | Q-52 | A stale `.ruff_cache` reported a lint error as clean, locally, for an unknown period | trust in every local `ruff check` result | CI failed PR #1 on `I001` in `tests/test_edgar_relations.py`, a file nobody had touched. Locally `ruff check` said **All checks passed**; `ruff check --no-cache` on the same bytes found the error. Same ruff (0.16.6), same config, same file content in HEAD and the working tree — the cache alone differed. Likely cause: `[tool.ruff] src = ["src", "tests"]` makes isort classify `lagmatrix` as first-party, and the cached verdict predates the environment change that made that resolvable (the fastembed re-sync reinstalled the project); ruff's cache key did not capture it. **Unverified**, and worth verifying before relying on any local lint result again. The consequence is the part that matters: every "ruff clean" reported in this session's commit messages was taken from the cached path and was not trustworthy. CI is unaffected — a fresh runner has no cache, which is why it caught this and local runs did not. Options: run `--no-cache` locally before pushing, drop the cache in a pre-commit hook, or treat CI as the only authority on lint. Not decided. |
 | Q-50 | Nothing schedules `daily_ingest.py`; there is no "tomorrow's run" | the entire point of a *daily* ingest | Checked 2026-09-10: no crontab entry, no systemd timer, and `kubectl -n lagmatrix get cronjobs` returns **No resources found**. The pipeline is correct and verified end to end, but it executes only when a human types the command. Every "tomorrow's run will now fail loudly instead of silently" claim in D-110/D-111 is conditional on something invoking it, and today nothing does. Three options, none chosen: a local cron on the dev box (unreliable — it is WSL, not always running), a systemd timer (same caveat), or the k8s CronJob that `PLAN-2026-09-09-homelab-deploy.md` PHASE-5 specifies, which is the real answer and is blocked behind containerisation and D-101's unimplemented torch swap. Worth deciding before treating the ingest as operational. |

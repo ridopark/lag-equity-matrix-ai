@@ -62,6 +62,8 @@ import sys
 
 import pytest
 
+from conftest import require_local_file
+
 SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 
 # The date D-95/D-100's co-movement work was measured on; also the one used
@@ -105,6 +107,7 @@ def test_leader_source_with_known_symbol_returns_non_empty_candidates():
 
     Falsifies if: this raises, or `cands` is empty.
     """
+    require_local_file("data/bars-10y.parquet", "real long bars, vendor data")
     import serve
 
     serve.ALLOW_REAL = True

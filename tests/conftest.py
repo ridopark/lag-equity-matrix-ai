@@ -124,6 +124,23 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 
+def require_local_file(path: str, what: str) -> None:
+    """Skip when a file that is deliberately not in the repo is absent, or fail
+    when `LAGMATRIX_REQUIRE_LIVE=1` promised it would be there.
+
+    Vendor bars and the embedding reference are gitignored -- this repo is
+    public -- so CI genuinely cannot have them and a skip there is honest. What
+    is not honest is skipping on a machine that was supposed to have them,
+    which is how nine live tests stayed dead for weeks (Q-43). Same fail-vs-skip
+    rule as `arango_db_or_skip`, so there is one convention rather than three.
+    """
+    if pathlib.Path(path).exists():
+        return
+    if REQUIRE_LIVE:
+        pytest.fail(f"LAGMATRIX_REQUIRE_LIVE=1 but {path} is missing ({what})")
+    pytest.skip(f"{path} not present on this machine ({what})")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_allow_real():
     """Restore `serve.ALLOW_REAL` after every test.

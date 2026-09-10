@@ -40,7 +40,8 @@ import subprocess
 import sys
 
 import numpy as np
-import pytest
+
+from conftest import require_local_file
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 THIS_FILE = pathlib.Path(__file__).resolve()
@@ -149,14 +150,7 @@ def _load_fixture() -> list[dict]:
     something supplies it there -- a decision for whoever owns that
     pipeline, not silently defaulted here.
     """
-    if not FIXTURE_PATH.exists():
-        pytest.fail(
-            f"{FIXTURE_PATH} is missing. This is a committed-format, "
-            "gitignored fixture of real stored embeddings -- regenerate it "
-            "read-only from the live `article` collection (see the "
-            "surrounding comment in .gitignore) rather than skipping this "
-            "test."
-        )
+    require_local_file(str(FIXTURE_PATH), "real stored embeddings")
     return json.loads(FIXTURE_PATH.read_text())
 
 

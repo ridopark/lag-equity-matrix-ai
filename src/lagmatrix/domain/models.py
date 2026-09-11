@@ -136,3 +136,24 @@ class QuantPerspective(BaseModel):
     split_half_sign_agree_pct: float | None
     candidate_is_etf: bool
     note: str
+
+
+class DayTradePerspective(BaseModel):
+    """Deterministic read of a candidate's own trailing liquidity and gap
+    behaviour (PHASE-2), computed over sessions strictly before `as_of`
+    (D-16) -- describes measured history only, never a forecast of
+    tomorrow's session (D-96). Not read by `assess()`'s
+    verdict/`effective_evidence`/`odds_adjustment` logic; exists for the
+    (future) day-trade analyst node to reason over.
+    """
+
+    median_dollar_vol: float | None
+    median_trade_count: float | None
+    n_sessions: int
+    gap_ratio: float | None
+    # unconditional: this pipeline has no spread, slippage or borrow-rate
+    # data anywhere (Q-33/Q-22), so absence is stated here rather than left
+    # for a reader to infer from three fields that simply never appear.
+    # Each entry: {"kind": ..., "reason": ...}.
+    not_measurable: list[dict[str, str]]
+    note: str

@@ -246,6 +246,52 @@ def closes() -> pd.DataFrame:
 
 
 @pytest.fixture
+def bars_ohlcv() -> pd.DataFrame:
+    """Long-form synthetic daily bars for CAND, matching `data/bars.parquet`'s
+    exact columns (symbol, timestamp, open, high, low, close, volume,
+    trade_count, vwap, dollar_vol).
+
+    10 ordinary trailing sessions, each with a plain, distinct volume /
+    trade_count so a median over them is unambiguous, followed by one more
+    session -- a stand-in for "today's" bar, carrying deliberately extreme
+    volume / trade_count. Callers whose `candidate.as_of` is that last
+    session's date get a fixture where an implementation that (incorrectly)
+    folds the as_of session into its trailing liquidity read produces a
+    visibly different median than one that correctly excludes it (D-16).
+    """
+    sessions = pd.bdate_range("2026-01-01", periods=11, tz="UTC")
+    trailing, as_of_session = sessions[:10], sessions[10]
+    volume = np.arange(1, 11) * 1_000
+    trade_count = np.arange(1, 11) * 100
+    close = np.full(10, 50.0)
+    ordinary = pd.DataFrame({
+        "symbol": "CAND",
+        "timestamp": trailing,
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "volume": volume,
+        "trade_count": trade_count,
+        "vwap": close,
+        "dollar_vol": close * volume,
+    })
+    extreme = pd.DataFrame({
+        "symbol": ["CAND"],
+        "timestamp": [as_of_session],
+        "open": [50.0],
+        "high": [50.0],
+        "low": [50.0],
+        "close": [50.0],
+        "volume": [10_000_000],
+        "trade_count": [1_000_000],
+        "vwap": [50.0],
+        "dollar_vol": [50.0 * 10_000_000],
+    })
+    return pd.concat([ordinary, extreme], ignore_index=True)
+
+
+@pytest.fixture
 def run_graph(closes):
     def _run(candidates, *, signal_universe=frozenset(), with_news=False):
         g = build_graph(with_news=with_news)

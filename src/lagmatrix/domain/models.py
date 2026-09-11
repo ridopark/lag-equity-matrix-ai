@@ -75,6 +75,9 @@ class Candidate(BaseModel):
     # the shocked leader this candidate was discovered from (`MarketScan` only);
     # `None` for alert-fed (`origin="external"`) candidates
     origin_leader: str | None = None
+    # the claiming leader's own signed z-score (`MarketScan` only); `None` for
+    # alert-fed (`origin="external"`) candidates, which have no shock z
+    origin_sigma: float | None = None
 
 
 class Evidence(BaseModel):

@@ -329,6 +329,15 @@ def test_candidates_are_plain_candidates_with_no_forward_looking_field():
     subclass smuggling extra data), or its field set differs from
     `Candidate`'s current declared set -- in particular if a forward-looking
     field such as an expected move or a score were added for this mode.
+
+    `origin_sigma` was added 2026-09-11 (D-130) and this guard correctly
+    fired on it. It is admitted deliberately, not waved through: it is the
+    claiming leader's **signed z over the window ending at `as_of`** -- a
+    move that has already happened -- not an expectation, a forecast or a
+    score. `direction` is already derived from that same z's sign and has
+    always been in this set, so the model demonstrably already carried the
+    quantity; this adds its magnitude. A field naming something that has not
+    happened yet still falsifies this test, which is the point.
     """
     closes, as_of = _leader_followers_fixture()
     source = CoMovementFollowers(closes, "LEAD", trail=TRAIL, min_abs_corr=0.3)
@@ -345,4 +354,5 @@ def test_candidates_are_plain_candidates_with_no_forward_looking_field():
             "as_of_ts",
             "origin",
             "origin_leader",
+            "origin_sigma",
         }

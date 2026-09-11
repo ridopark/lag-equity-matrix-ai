@@ -4240,11 +4240,62 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   did not.
 - **Status:** Accepted
 
+### D-130 — `Candidate` carries the claiming leader's shock magnitude
+
+- **When:** 2026-09-11T18:55:00-05:00
+- **Decision:** `Candidate` gains `origin_sigma: float | None = None`, populated
+  by `MarketScan.candidates()` with the claiming leader's **signed** z.
+  `ExternalSignals` leaves it `None`.
+- **Why:** Amends PLAN-2026-09-11-quant-daytrade-perspectives mid-execution.
+  `red-p3-llm` found that `cap_for_llm`'s sigma-ordering branch was
+  unreachable — `Candidate` had no such field and, being pydantic, rejects one
+  on attribute assignment. Checking the consequence made it worse than dead
+  code: `MarketScan.candidates()` sorts leaders by shock magnitude at
+  `candidates.py:121`, has `z` in scope at `:123`, and then returns
+  `sorted(claims.values(), key=lambda c: c.symbol)` at `:136` — **the shock
+  ordering is computed and discarded, and the output is alphabetical.**
+  With the plan's 20-candidate cap against D-92's mean of ~121 candidates per
+  date, that meant paying to analyse the alphabetically-first 20 every day,
+  the same names each time, skipping the largest movers. A stable, invisible
+  selection bias, which is this project's signature failure.
+  Two alternatives lost. **Accepting alphabetical capping** and documenting the
+  bias: cheapest, and wrong for exactly the reason above. **Dropping the cap**:
+  removes the bias by removing the choice, and unbounds a cost the cap existed
+  to bound.
+  The signed z is stored rather than `abs(z)` because `direction` is already
+  derived from that z's sign one line later, so the sign was already in the
+  model implicitly; storing the raw value preserves the measurement and lets
+  `cap_for_llm` apply `abs()` itself.
+- **Outcome:** Two lines of implementation. The interesting part is what the
+  existing tests did.
+  **`test_candidates_are_plain_candidates_with_no_forward_looking_field` fired,
+  correctly** — it pins `Candidate`'s exact field set specifically to catch an
+  added field, and its docstring already cited the `extra="ignore"` trap.
+  `origin_sigma` was admitted deliberately and the justification written into
+  that docstring rather than the set being quietly widened: it is a realised
+  move over the window ending at `as_of`, not an expectation or a score, and
+  `direction` already encoded its sign. A field naming something that has not
+  happened yet still falsifies the guard.
+  Two `test_market_scan.py` equality assertions also went stale. Both were
+  repaired by reading the expected z back from `shocked_leaders()` — a
+  different code path from `candidates()`, so it is not circular — which
+  **strengthened the dedup test**: `SHARED` must now carry the winning
+  leader's z, so a dedup that kept the wrong leader fails on the value as well
+  as the name.
+  Surfaced **Q-61**: `Candidate` has an empty `model_config`, so pydantic
+  silently drops unknown kwargs. Verified — `Candidate(..., origin_sigma=5.0)`
+  constructed cleanly *before* this change and discarded the value. Adding the
+  kwarg to `MarketScan` without the model field would therefore have been a
+  silent no-op that left the bias in place with no diagnostic at all.
+  340 passed, 1 skipped; ruff clean.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
 | Q-60 | ~~The trading system's redis requires no password, and any pod in the cluster can reach it~~ **CLOSED by D-127 — accepted risk, declined** | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Closed 2026-09-11 by D-127: accepted and declined.** Weighed against the verified exposure boundary (ClusterIP, no nodePort, no host listener, LAN-only ingresses) and the cost of restarting a live real-money service. D-127 records the condition that would change the answer — `cloudflared` is a remotely-managed tunnel whose routing is configured outside this cluster, so the "nothing gets in" premise is not verifiable from within it. |
+| Q-61 | `Candidate` silently discards unknown constructor kwargs, so a forgotten or mistyped field is a no-op rather than an error | any change that adds a field to a domain model | Surfaced 2026-09-11 while executing PLAN-2026-09-11-quant-daytrade-perspectives. `Candidate` is a plain pydantic model with an empty `model_config`, so it inherits `extra='ignore'`. Verified directly: `Candidate(symbol='A', ..., origin_sigma=5.0)` constructs successfully today and `hasattr(c, 'origin_sigma')` is `False` — the value is dropped with no error and no warning. The immediate consequence was concrete: adding `origin_sigma=` to `MarketScan.candidates()` **without** also adding the model field would have run clean, produced no diagnostic, and left candidates ordered alphabetically — i.e. silently failed to fix the very bias it was written to remove. Caught by a red test asserting the actual per-leader signed values rather than merely "not None". The narrow case is closed by D-130, but the general hazard is not: every `Candidate` construction site in `src/` and `tests/` is exposed to the same silent drop, and the same is true of any other domain model with a default `model_config`. **Not fixed:** `extra='forbid'` would change validation behaviour for every construction in the codebase and was deliberately kept out of an in-flight plan execution (CLAUDE.md §3). Worth deciding on its own, across `domain/models.py` as a whole rather than one model. |
 | Q-58 | ~~NetworkPolicy is unenforced for the first ~1–3 seconds of a pod's life~~ **ANSWERED by D-126** — the window is real and cannot be closed without changing CNI; the ingest now refuses to start until enforcement is observable | D-121's isolation claim, for Jobs specifically | Measured by `postmortem` 2026-09-10 with a looping probe and a control pod (no `app` label, so only `default-deny-egress` selects it): `t+0.1s alpaca=OPEN arango=OPEN pg-copytrade=OPEN`, `t+3.1s` all three `ConnectionRefusedError`. kube-router programs the pod's `KUBE-POD-FW-*` chain on the pod-add event; until it does, the pod has no chain and the namespace default-deny does not reach it. The ingest-labelled pod shows the same window on its denied target. **Irrelevant for a Deployment; the ingest is a Job — the workload class where a fast-failing container is most likely to open a socket inside the window.** We are not exposed today only because the pod spends those seconds importing pandas and langgraph before it opens anything: that is timing, not a boundary. Worth recording that `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. **Fixed by D-126** with an `await-netpol` init container rather than a `sleep`, after reproducing the window here. Worth keeping: `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. My own first re-measurement then printed computed timestamps as if they were observations. The window survived two bad measurements by two different parties before either of us measured it properly. |
 | Q-59 | ~~The deployed image is seven commits stale, and nothing was ever going to build a newer one~~ **ANSWERED 2026-09-10 by the cutover to `faa1076`** | every claim in D-119, D-120, D-122 and D-123 about what *runs* | The CronJob and `lagmatrix-web` both run `ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5`, which is the commit **before** D-119. Raised by `postmortem` as "nothing newer was ever built"; the root cause is mine to state: `.github/workflows/build-images.yml` triggers only on `push: branches: [main]`, and all seven commits are on `graphrag-showcase-and-scan` (PR #2, unmerged). **No build failed — none was ever triggered.** `imagePullPolicy: IfNotPresent` plus two hand-imported tags in `k3s ctr images ls` confirms 66b11a5 arrived by hand, not by the pipeline. `postmortem`'s "nothing newer was deployed" was too broad and it withdrew it: the **yaml-carried** work *is* live (three netpols present, arango limit 2560Mi, `0 9 * * 2-6 tz=UTC`, and now D-125's 3Gi), because `kubectl apply` needs no image. Only three of the seven commits carry runtime code: 90a1c17 (`load_vectors.py`, `ingest.py`), a5241ac (`serve.py`, `daily_ingest.py`), ee31cf9 (`daily_ingest.py` — verified comment-only, zero runtime risk). Consequence while it stands: D-119's distinct failure messages and D-122's fixed-floor candidates do not exist in the pod, so an ArangoDB failure tomorrow still reads "ArangoDB not reachable" — the exact message D-119 exists to delete. **Closed 2026-09-10T18:07:** built `faa1076` from HEAD, verified the image *contains* the four fixes before shipping rather than trusting the build, imported it to the node and cut both the CronJob and `lagmatrix-web` over. Attended run succeeded at 899 MiB of a 3072 MiB limit. **The structural cause is not closed and became Q-57's recurrence:** `main` is now behind the code that is actually running, so a rebuild from `main` still yields an image without D-122/D-124. Merging the branch is what fixes that, not the cutover. |
 | Q-53 | ~~The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway~~ **ANSWERED by D-121** | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |

@@ -249,9 +249,19 @@ def test_candidates_emits_one_per_lagger_with_scan_origin():
     result = scan.candidates(as_of)
 
     assert result[0].origin_leader == "LEADUP"
+    # `origin_sigma` is read back from `shocked_leaders()` rather than hardcoded:
+    # a different code path from `candidates()`, so this is not circular, and it
+    # pins that the candidate carries *its claiming leader's* z rather than any z.
+    expected_z = scan.shocked_leaders(as_of)["LEADUP"]
+    assert result[0].origin_sigma == expected_z
     assert result == [
         Candidate(
-            symbol="SUP1", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
+            symbol="SUP1",
+            direction="up",
+            as_of=as_of,
+            origin="scan",
+            origin_leader="LEADUP",
+            origin_sigma=expected_z,
         )
     ]
 
@@ -342,12 +352,6 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         "LEADDOWN": [_lag_edge("LEADDOWN", "SHARED")],
     }
     reversed_edges = {"LEADDOWN": edges["LEADDOWN"], "LEADUP": edges["LEADUP"]}
-    expected = [
-        Candidate(
-            symbol="SHARED", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
-        )
-    ]
-
     for edge_map in (edges, reversed_edges):
         fake = FakeArangoTopology(edge_map)
         scan = MarketScan(
@@ -361,7 +365,22 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         result = scan.candidates(as_of)
 
         assert result[0].origin_leader == "LEADUP"
-        assert result == expected
+        # The winning leader's own z, read from a different code path than
+        # `candidates()`. This strengthens the dedup claim: `SHARED` must carry
+        # LEADUP's z, not LEADDOWN's, so a dedup that kept the wrong leader is
+        # now caught by the value as well as by the name.
+        expected_z = scan.shocked_leaders(as_of)["LEADUP"]
+        assert result[0].origin_sigma == expected_z
+        assert result == [
+            Candidate(
+                symbol="SHARED",
+                direction="up",
+                as_of=as_of,
+                origin="scan",
+                origin_leader="LEADUP",
+                origin_sigma=expected_z,
+            )
+        ]
         assert len([c for c in result if c.symbol == "SHARED"]) == 1
 
 

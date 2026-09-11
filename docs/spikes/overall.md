@@ -4193,6 +4193,53 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   day and could not have told them so.
 - **Status:** Accepted
 
+### D-129 — The correlation threshold defaults to 0.4, and the control now works
+
+- **When:** 2026-09-11T17:05:00-05:00
+- **Decision:** `min_abs_corr` defaults to **0.4** rather than 0.5, and
+  `/followers` honours the query parameter it had been ignoring.
+- **Why:** The owner asked for 0.4 after D-128's investigation showed LULU's
+  best match (ABNB, 0.436) sitting just under the old cutoff — a real
+  co-movement the page could not show. Answering that request surfaced a
+  second, worse defect: **`/followers` never parsed `min_abs_corr` at all.**
+  Measured on the live pod, every value returned the same result, including a
+  deliberately absurd one:
+
+  ```
+  /followers?symbol=LULU&as_of=2026-09-08                  -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.4 -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.3 -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.9 -> min_abs_corr=0.5
+  ```
+
+  The UI compounded it. `serve_index.html:1097` overwrote the server's echoed
+  value with the input box's value *after* the fetch, so the page labelled every
+  result with a threshold that had never been applied. The displayed threshold
+  and the applied threshold were independent quantities that happened to agree
+  only at 0.5. **Changing the default alone would have left the control inert**,
+  which is why this is one decision and not two.
+  `/network` had parsed it correctly all along, so the asymmetry was between two
+  sibling endpoints — the same shape as D-104 and D-108.
+- **Outcome:** Defaults changed in four places that can drift independently
+  (both signatures, both handler fallbacks), `/followers` now uses
+  `parse_bounded(..., 0.1, 1.0)` and 400s on an out-of-range value like
+  `/network` already did, the page sends the box's value, and the post-fetch
+  overwrite is deleted so the label reflects what was actually filtered.
+  `CoMovementFollowers(..., min_abs_corr=0.6)` at `serve.py:206` is a different
+  feature and was deliberately left alone.
+  Red wrote 7 tests, 6 failing, verified before green ran. **Red's first draft of
+  the pass-through test used `0.5` as its explicit value and passed against the
+  broken handler**, because 0.5 was the hardcoded fallback — it caught this
+  itself and switched to `0.3`, outside both the old and new defaults, so no
+  coincidence with either can satisfy it. That is the whole reason the test is
+  worth having.
+  Suite 322 -> **329 passed, 1 skipped**; ruff clean.
+  Verified on real data: **LULU 0 -> 13 followers, top ABNB at +0.436**; DELL
+  4 -> 11, top HPE at +0.648. RARE, TARS, TDS and OXM stay at 0, consistent with
+  their measured bests of 0.339-0.386 — the threshold moved, the measurements
+  did not.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -388,7 +388,7 @@ def movers(as_of: str, top_n: int = 25) -> dict:
 
 
 def followers(symbol: str, as_of: str, trail: int = 250,
-              min_abs_corr: float = 0.5, top_n: int = 25) -> dict:
+              min_abs_corr: float = 0.4, top_n: int = 25) -> dict:
     """Step 2 of the UI: given a leader, the names that move with it.
 
     Edges come from `lagmatrix.comovement` — measured pairwise correlation of
@@ -462,7 +462,7 @@ def followers(symbol: str, as_of: str, trail: int = 250,
 
 
 def network(symbol: str, as_of: str, trail: int = 250,
-            min_abs_corr: float = 0.5, top_n: int = 40) -> dict:
+            min_abs_corr: float = 0.4, top_n: int = 40) -> dict:
     """The leader's neighbourhood as a graph, including edges *among* followers.
 
     The flat follower list hides the thing that matters most about a
@@ -635,8 +635,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, str(e))
                 return
             try:
+                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.4"])[0], float, 0.1, 1.0)
+            except ValueError as e:
+                self.send_error(400, str(e))
+                return
+            try:
                 self._json(followers(s, (q.get("as_of") or [default_as_of()])[0],
-                                     top_n=top_n))
+                                     top_n=top_n, min_abs_corr=min_abs_corr))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return
@@ -647,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, "symbol must be alphanumeric")
                 return
             try:
-                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.5"])[0], float, 0.1, 1.0)
+                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.4"])[0], float, 0.1, 1.0)
             except ValueError as e:
                 self.send_error(400, str(e))
                 return

@@ -75,6 +75,74 @@ spec:
             # which 0440 below then makes readable. This cost a failed run.
             fsGroup: 10001
           initContainers:
+            # Q-58: kube-router programs this pod's KUBE-POD-FW-* chain from a
+            # pod-add informer event, which needs status.podIP and therefore
+            # cannot happen until after CNI ADD. So the netns is wired -- the
+            # container can send packets -- for 1-3s before the NetworkPolicy
+            # reaches it. Measured here: a labelled pod probing every 250ms saw
+            # the denied target OPEN through that window. Nothing in the
+            # NetworkPolicy API expresses "fail closed until programmed", and
+            # --iptables-sync-period governs the periodic full sync, not the
+            # pod-add path. Only a CNI that programs the drop chain during ADD
+            # (Calico, Cilium) removes the window, and swapping the CNI on the
+            # node that runs real-money trading to fix three seconds on a batch
+            # job is disproportionate.
+            #
+            # This is a precondition with an explicit outcome, not a relocated
+            # sleep: the run does not begin until the boundary is observably up,
+            # and with backoffLimit: 0 it dies loudly rather than proceeding
+            # unattended with postgres credentials in an unenforced namespace.
+            # It also catches a k3s upgrade that breaks enforcement outright,
+            # which is the durable worry behind D-121.
+            #
+            # Two details are load-bearing. **Probe a DENIED target, never an
+            # allowed one**: during the window everything is open, so "arangodb
+            # reachable" is true in both states and proves nothing. Only a
+            # target the allow-list excepts -- :6443 on the LAN, covered by
+            # `except: 192.168.10.0/24` and not port 443 -- separates them.
+            # **And require an allowed target to be UP as well.** Waiting only
+            # for the denied target to close passes when the network is simply
+            # broken (DNS down, CNI wedged, the API server itself offline): the
+            # connection fails for the wrong reason and the guard is satisfied
+            # while nothing is enforced. Verified rather than assumed -- a pod
+            # in this namespace carrying the wrong `app` label is selected only
+            # by default-deny-egress, so everything is blocked; it reports
+            # `denied_blocked=True, allowed_up=False` and fails. A denied-only
+            # probe would have passed it.
+            #
+            # Costs 0.5s on the normal path (measured), 30s to fail.
+            - name: await-netpol
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:faa1076
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-c"]
+              args:
+                - |
+                  import socket, sys, time
+                  DENIED = ("192.168.10.123", 6443)
+                  ALLOWED = ("arangodb", 8529)
+                  DEADLINE = 30.0
+                  def open_(t):
+                      try:
+                          socket.create_connection(t, timeout=2).close()
+                          return True
+                      except OSError:
+                          return False
+                  t0 = time.time()
+                  while time.time() - t0 < DEADLINE:
+                      denied_blocked = not open_(DENIED)
+                      allowed_up = open_(ALLOWED)
+                      if denied_blocked and allowed_up:
+                          print("egress policy enforced after %.1fs" % (time.time() - t0), flush=True)
+                          sys.exit(0)
+                      time.sleep(0.25)
+                  sys.exit("egress policy not enforced after %.0fs "
+                           "(denied_blocked=%s, allowed_up=%s); refusing to run"
+                           % (DEADLINE, denied_blocked, allowed_up))
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+
             # The PVC mounts at /app/data and shadows whatever the image baked
             # there -- so data/excluded-etfs.csv, which IS committed and IS in
             # the image, was invisible and comovement died on it. This copies

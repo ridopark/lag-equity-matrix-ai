@@ -408,7 +408,7 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     """
     if not ALLOW_REAL:
         raise PermissionError("followers needs real market data; start with --allow-real")
-    from lagmatrix.comovement import comovement_edges
+    from lagmatrix.comovement import comovement_edges, session_available
 
     # Co-movement needs history, and the two price files serve different jobs:
     # `bars.parquet` sweeps wider (3,204 symbols) but reaches back only 159
@@ -424,6 +424,9 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     sym = symbol.upper()
     if sym not in closes.columns:
         return {"error": f"{sym} not in the price file"}
+    ok, reason = session_available(closes, d, trail)
+    if not ok:
+        return {"error": reason}
 
     edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
                              exclude=excluded)
@@ -477,7 +480,7 @@ def network(symbol: str, as_of: str, trail: int = 250,
     """
     if not ALLOW_REAL:
         raise PermissionError("network needs real market data; start with --allow-real")
-    from lagmatrix.comovement import comovement_edges
+    from lagmatrix.comovement import comovement_edges, session_available
 
     closes = COMOVE_CLOSES()
     excluded = frozenset(
@@ -488,6 +491,9 @@ def network(symbol: str, as_of: str, trail: int = 250,
     sym = symbol.upper()
     if closes is None or sym not in closes.columns:
         return {"error": f"{sym} not in the price file"}
+    ok, reason = session_available(closes, d, trail)
+    if not ok:
+        return {"error": reason}
 
     edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
                              exclude=excluded)

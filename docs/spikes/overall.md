@@ -4145,6 +4145,54 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   rather than a cache miss.
 - **Status:** Accepted
 
+### D-128 — "No company moved with it" no longer covers for a missing session
+
+- **When:** 2026-09-11T15:10:00-05:00
+- **Decision:** `followers()` and `network()` call `session_available()` before
+  `comovement_edges()` and return `{"error": reason}` when the requested session
+  cannot be answered, instead of an empty-but-successful payload.
+- **Why:** Reported by the user: picking some recent dates showed *"No company
+  has moved with X reliably enough to clear |r| >= 0.5 ... some names really do
+  move on their own."* That sentence is a claim about the market, and it was
+  being rendered in three cases where the truth is "there is no data for that
+  date". `comovement_edges` returns `[]` when `as_of` is absent from the frame
+  or when fewer than `trail` sessions precede it — a deliberate contract — and
+  both endpoints turned that silence into a finding.
+  Measured on the live service, all three return 0 followers with `error=None`
+  for DELL, which genuinely has 4 followers on a real session:
+  **2026-09-12** (a Saturday, selectable from the date box), **2026-09-11**
+  (newer than the file), and **2016-09-20** (inside the first 250 sessions).
+  The second is the everyday case and the reason the report said *recent* dates:
+  **`bars-10y.parquet` can never contain today.** Alpaca publishes no daily bar
+  for the current session even after the close — measured in D-125, where two
+  separate attempts to exercise the bars write both returned `+0 new rows`. So
+  the newest session is always yesterday, and picking today always looked like
+  nothing moved with anything.
+  `session_available()` already existed for exactly this, returns `(ok, reason)`,
+  and was used by `daily_ingest.py:195` but by neither endpoint. The alternative
+  that lost was a new error path in `serve.py`: it would have duplicated the
+  message and let the two drift, which is why a test pins that the string comes
+  from the helper rather than a local copy.
+- **Outcome:** Two lines per endpoint. **No UI change was needed** —
+  `serve_index.html:1093` already checked `d.error` first and returned before
+  touching `d.followers`, so the seam existed and simply was not used by these
+  two callers.
+  Red wrote 5 tests and I verified the failure myself before green ran: 4 failed,
+  1 passed. The pass is the positive control, which exists because an
+  implementation that returned an error unconditionally would otherwise satisfy
+  every other test. Suite 317 -> **322 passed, 1 skipped**; ruff clean.
+  Verified against real data rather than the fixture alone: 2026-09-08 and
+  2026-09-09 still return 4 followers, while the three bad dates now report
+  `2026-09-12 not found in data (last session available: 2026-09-09)` and
+  `only 10 sessions precede 2016-09-20, need 250`.
+  **The user's original question was answered separately and the answer was "it
+  was real".** On 2026-09-08 the data was complete — 250 sessions, 2,183 symbols
+  — and RARE (best 0.339 with DNLI), TARS (0.386, IONS), TDS (0.373, DUKU),
+  LULU (0.436, ABNB) and OXM (0.382, OPEN) genuinely had no peer clearing 0.5.
+  LULU is the near miss: 13 names appear at 0.4. So the message was true that
+  day and could not have told them so.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

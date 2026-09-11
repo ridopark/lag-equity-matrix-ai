@@ -4034,6 +4034,28 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `today - 1` ahead of the file. The write risk is therefore covered by the
   965 MiB measurement and the 3Gi headroom — not by tonight's green result, and
   a green result should not be read as covering it.
+
+  **Ran 2026-09-11T09:00Z, and the write executed.** `wrote
+  data/bars-10y.parquet: 4,738,804 rows (+2,183 new rows, 2,183 fetched)` — the
+  first in-cluster execution of the zstd path, in a job that succeeded in 3m43s
+  (against 1m46s for the attended run that skipped it). Everything downstream
+  ran: 24,145 edges, 18 new embeddings, 80,691 indexed.
+
+  **Peak was 919 MiB of the 3072 MiB limit**, from Prometheus
+  (`container_memory_working_set_bytes`, which is the metric the cgroup OOM
+  killer acts on, so it is the right one for this question).
+
+  **So the raise was not needed, and that should be said plainly rather than
+  left to look vindicated.** 919 MiB fits inside the original 2Gi with room to
+  spare, and the write added only ~20 MiB over the attended run's 899 MiB —
+  nowhere near the 400–500 MB `postmortem` estimated on top, nor my own 965 MiB
+  for the subprocess in isolation. The parent's and child's peaks evidently do
+  not coincide the way both of us assumed, and max-RSS (what I measured locally)
+  is not working-set (what the cgroup enforces).
+  The decision stands anyway: limits are not reserved, so 3Gi costs nothing, and
+  2.2x headroom over a corpus that grows daily is thin. But it was insurance
+  bought on an estimate that the measurement has now superseded, and D-125's
+  reasoning was better than its arithmetic.
 - **Status:** Accepted
 
 ## Open Questions

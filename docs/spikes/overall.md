@@ -3737,6 +3737,15 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `credential /home/.../.lagmatrix-arango-pw unreadable: permission or path
   error`; and a connect failure naming the user and the driver's own error.
   The second is the one that cost two wrong fixes.
+
+  **Amended 2026-09-10T17:55 — the fix reached `serve.py` and stopped there.**
+  `load_vectors.py:arango()` still exited with the bare
+  `sys.exit("ArangoDB not reachable")`, so the message this entry exists to
+  delete survived in the one other caller — including on the nightly path. It
+  now reports `arango_reason()`. Found by reading the write path before running
+  it against the live database, not by a test. Grepped afterwards: no other copy
+  of the bare string remains.
+  Separately, per Q-59, none of this is in the running pod.
 - **Status:** Accepted
 
 ### D-120 — ArangoDB's OOM kills were cache sizing, not the vector index
@@ -3777,6 +3786,16 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Status:** Accepted
 
 ### D-121 — Default-deny egress on `lagmatrix`, answering Q-53
+
+> **Correction, 2026-09-10T18:00 — "every allow is validated by use" was not
+> evidenced by the run I cited.** In that run `bars` and `long_bars` returned
+> `already current` (PVC mtimes show neither file was ever written by a job)
+> and `news` fetched 0 articles with every window already covered. No node
+> made an outbound 443 connection; four of the six "ok" nodes were no-ops.
+> The `ipBlock 0.0.0.0/0` rule with the `except` list — the one the comment
+> spends fifteen lines defending — was not exercised at all. `postmortem`
+> measured it separately and it is correct; the *evidence sentence* was not.
+> The policy stands; the proof I offered for it did not. See also Q-58.
 - **When:** 2026-09-10T18:35:00-05:00
 - **Decision:** `default-deny-egress` plus two per-workload allows. ArangoDB
   gets **no** policy, so it has zero egress.
@@ -3818,15 +3837,182 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `vectors` still embedded 85 articles from the baked-in model.
 - **Status:** Accepted
 
+### D-122 — Embedding candidates come from a fixed floor, not the watermark (Q-56)
+- **When:** 2026-09-10T19:00:00-05:00
+- **Decision:** `plan_embeddings(candidate_ids, existing_keys)` in
+  `lagmatrix.ingest` does a key-set anti-join; `load_vectors.py` selects
+  candidates from a fixed `CORPUS_FLOOR = "2025-01-01"` and embeds whatever is
+  not already in ArangoDB. `--since` becomes informational.
+- **Why:** the query was bounded by the **global** corpus watermark while the
+  ticker list was read fresh, so a ticker firing for the first time after the
+  watermark had passed its own history was never a candidate at all. **412
+  articles were missing and could never have been recovered** — their
+  `created_at` is permanently behind the frontier. Forward exposure is larger:
+  3,757 marginal articles for the six tickers that joined in the last month,
+  41,741 across all 24 arrivals, with a new ticker every 4-5 days.
+  It was invisible because a manual full re-embed on 2026-09-07 had swept it up
+  — and D-115, by putting `extract_fires` in the nightly graph, removed the hand
+  that was doing the sweeping.
+  **The alternative that lost was a per-symbol coverage ledger**, mirroring
+  `load_news.py`'s `already_covered`. Rejected: it would be a second copy of
+  `article`'s own key set — a new thing that can go stale, which is this exact
+  failure class — and it would not have caught the 412, whose symbols are
+  already covered. Set membership against a store we own needs no ledger.
+  **The observability half is why nobody saw it.** The run printed one figure,
+  `47,829 articles since ...`, identical whether the candidate set was right or
+  wrong. It now prints candidates / already embedded / to embed, and the
+  three-way count is the function's return type rather than a print statement
+  someone can drop.
+- **Outcome:** 279 passed. Run against the live corpus: `48,241 candidates`,
+  `47,829 already embedded`, **`412 to embed`** — the exact number measured
+  independently beforehand. After it, eligible 48,241 and embedded 48,241,
+  **missing 0**, with the 8 reference embeddings unchanged at cosine 1.000000.
+  `--since` no longer bounds the query and now says so in its own `--help`: a
+  flag that looks like it narrows the query and silently does not would be the
+  same defect in a new place. It is kept because `daily_ingest.py` passes it and
+  because a malformed value is still worth rejecting (D-103).
+- **Status:** Accepted
+
+### D-123 — Every script under `scripts/` is import-checked, by discovery
+- **When:** 2026-09-10T19:20:00-05:00
+- **Decision:** `tests/test_scripts_import.py` discovers `scripts/*.py` with a
+  glob instead of naming four modules, and a guard test fails if discovery ever
+  returns nothing.
+- **Why:** D-116's tail. Nothing under `tests/` imports these modules and they
+  are not part of the collected package, so a broken import in any of them
+  leaves the suite green. That has now happened twice: deleting
+  `assessor.rank_by_room` broke `serve.py` while the suite reported 111 passed
+  (Q-43), and D-101's fastembed swap removed `scipy` — never a declared
+  dependency, it arrived transitively via sentence-transformers — which stopped
+  **both of D-95's reproduction scripts importing at all**, with the suite green
+  at 248 and ruff clean. Nobody noticed until one was run by hand.
+  **Discovered rather than enumerated, because the failure mode is forgetting.**
+  A hardcoded list is exactly what the second incident defeated: those scripts
+  had existed for weeks and had never been added to it. Coverage went from 4
+  modules to 34.
+  The guard on the guard exists because a glob that returns nothing would make
+  every import test below pass vacuously — the same silent-skip shape as Q-43,
+  one level up.
+- **Outcome:** 36 tests in that file. **I logged "315 in the suite" and that
+  was wrong** — it was 310 passed and 1 skipped; `postmortem` caught it. 317
+  passed / 1 skipped as of D-124. Verified it catches the
+  real thing rather than assumed: with `scipy` made unimportable, exactly
+  `experiment_chains` and `experiment_lag_matrix` fail and the other 34 scripts
+  pass. It would have caught D-101 on the day.
+  It also pins that these scripts do no work at module scope — no server, no
+  socket, no market data, no ArangoDB — so a script that starts doing work at
+  import time fails here rather than at 3am.
+- **Status:** Accepted
+
+### D-124 — The embedding corpus covers the graph, not just `fires.csv`
+
+- **When:** 2026-09-10T17:52:00-05:00
+- **Decision:** `load_vectors.py` builds its ticker universe from
+  `embedding_universe(db, fires_tickers)` — both endpoints of every
+  `supplies_to` and `moves_with` edge, unioned with the alert set — instead of
+  `fires.csv`'s 24 symbols alone.
+- **Why:** `/movers` and `leader:` mode reach symbols the graph knows about and
+  `fires.csv` does not, and those symbols had no embedded news at all, so
+  GraphRAG returned nothing for them and looked like an absence of news rather
+  than an absence of corpus. The alternative that lost was embedding the whole
+  postgres corpus: 264,079 articles against 80,589, most of them about symbols
+  no edge reaches, for retrieval nobody performs.
+  The union never *replaces* the alert set, so a symbol that fires but has no
+  edge yet still gets its news — the failure D-122 exists to prevent, one layer
+  out.
+- **Outcome:** Ran it attended rather than letting the CronJob discover it
+  unattended, having measured all three variants against live postgres and
+  ArangoDB first: deployed-today selects **35** to embed, HEAD alone selects the
+  **same 35**, HEAD+widening selects **32,348**. That measurement corrected my
+  own framing and `postmortem`'s: D-122 changes nothing about volume, because
+  `fires.csv`'s 24 tickers were already fully embedded. The entire 32,348 is the
+  widening.
+  Embedded 32,348; `article` 48,241 → **80,589**, exactly the predicted target;
+  peak RSS 1,284 MiB. Coverage 3,899 → **5,516** symbols; **1,617** symbols went
+  from zero embedded articles to present; **315** previously-thin symbols crossed
+  10+. BKR 9 → 289, VEEV 7 → 245.
+  Retrieval verified end-to-end rather than inferred from counts, because
+  coverage is not retrieval: both return relevant, correctly-attributed hits at
+  74ms. **0 lookahead violations** across 12 symbol/`as_of` pairs after a 67%
+  corpus growth.
+  I expected to find that the `LET score = APPROX_NEAR_COSINE(...)` / `FILTER`
+  shape post-filters, which would starve thin symbols *worse* as the corpus grew.
+  It does not: the optimiser folds the predicate into `EnumerateNearVectorNode`
+  and pre-filters inside the ANN scan. There is no `FilterNode` in the plan at
+  all, which is what made me look — and for a moment looked like the
+  point-in-time guard had been silently dropped.
+  Still true and worth stating: **4,531 of 5,516 symbols remain thin (<10
+  articles)**, because the widening admitted 1,617 new symbols mostly at low
+  counts. Coverage broadened; it did not deepen.
+  **Verified in-cluster 2026-09-10T18:07** on image `faa1076`, attended: the job
+  succeeded at **899 MiB peak of a 3072 MiB limit**, and `node_vectors` reported
+  `80,589 already embedded / 84 to embed -> indexed: 80,673`. The delta is small,
+  which is the whole point of having run the 32,348 attended first.
+  `postmortem` predicted the job would see "35 + a day or two of alert-universe
+  news", not 35, because `node_vectors` runs after `node_news`. It saw **84**.
+  Logging 35 as the expected value would have sent someone hunting a bug.
+- **Status:** Accepted
+
+### D-125 — The ingest's memory limit is 3Gi, from the write that had never run
+
+- **When:** 2026-09-10T17:58:00-05:00
+- **Decision:** `22-lagmatrix-ingest-cron.yaml` raises `limits.memory` 2Gi →
+  **3Gi** and deliberately leaves `requests.memory` at **512Mi**.
+- **Why:** `fetch_daily_bars.write()` — `to_parquet(compression="zstd",
+  compression_level=6)` over 4.7M rows — is guarded by `if len(new)` and had
+  therefore **never once executed in-cluster**. Every memory figure this
+  deployment was sized from structurally excluded it, including the 799 MiB I
+  cited. Raised by `postmortem`, which estimated 1.2–1.6 GiB.
+  Request and limit answer *different* failures and want opposite levers. The
+  kubelet ranks eviction by usage-above-request, so a Burstable pod asking 512Mi
+  and using ~1.3Gi is the first thing evicted when the **node** runs short — and
+  this node runs real-money trading with ~2.2 GiB available. That is the outcome
+  we want: the ingest dies, copytrade does not. The limit is what stops the
+  **cgroup** killing a job that would have finished, which matters because
+  `backoffLimit: 0` means an OOMKill loses the whole run with no retry.
+  `compression_level` was rejected as the lever: zstd 6 vs 1 trades CPU, not peak
+  memory. Writing uncompressed was rejected as actively worse — it removes a
+  ~30 MB compressor buffer and inflates the in-memory output from ~30 MB to
+  ~150–200 MB, raising peak.
+- **Outcome:** Measured, not estimated: the full path — fetch, non-empty
+  `merge_bars` over 4.7M rows, zstd level-6 write — peaks at **965 MiB**
+  (988,184 KB) in 5.5s. Read-plus-write in isolation is 539 MiB. `postmortem`'s
+  range was ~35% high.
+  **My first two attempts to measure it both returned `+0 new rows`** and would
+  have been reported as measurements of a path that never executed — the
+  identical structural gap I was deliberately hunting, reproduced twice while
+  hunting it. Alpaca publishes no daily bar for the current day even after the
+  close, so `watermark+1 -> today` fetches nothing. The real path required
+  trimming the last day (2,183 rows) out of a scratchpad copy to force a genuine
+  fetch and a non-empty merge; it restored the file to exactly 4,736,621 rows and
+  incidentally exercised the split path (`APH`).
+  It runs as a **subprocess** of `daily_ingest.py` (`_run([sys.executable, ...])`),
+  charged to the same cgroup while the parent holds pandas, pyarrow and
+  langgraph — so 965 MiB is the child's share, not the cgroup total. Live
+  CronJob confirms `{"limits":{"memory":"3Gi"},"requests":{"memory":"512Mi"}}`.
+
+  **The attended run did NOT exercise this path, and that was predicted, not
+  discovered.** `node_long_bars` skips when `last >= today - 1`; the PVC holds
+  through 2026-09-09 and it was 09-10, so the log printed `long_bars: already
+  current through 2026-09-09` exactly as forecast. **Tomorrow's 09:00 UTC run is
+  the first execution of the zstd write in-cluster**, because only then is
+  `today - 1` ahead of the file. The write risk is therefore covered by the
+  965 MiB measurement and the 3Gi headroom — not by tonight's green result, and
+  a green result should not be read as covering it.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
+| Q-60 | The trading system's redis requires no password, and any pod in the cluster can reach it | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Not fixed — this is the user's trading infrastructure and not mine to change.** |
+| Q-58 | NetworkPolicy is unenforced for the first ~1–3 seconds of a pod's life | D-121's isolation claim, for Jobs specifically | Measured by `postmortem` 2026-09-10 with a looping probe and a control pod (no `app` label, so only `default-deny-egress` selects it): `t+0.1s alpaca=OPEN arango=OPEN pg-copytrade=OPEN`, `t+3.1s` all three `ConnectionRefusedError`. kube-router programs the pod's `KUBE-POD-FW-*` chain on the pod-add event; until it does, the pod has no chain and the namespace default-deny does not reach it. The ingest-labelled pod shows the same window on its denied target. **Irrelevant for a Deployment; the ingest is a Job — the workload class where a fast-failing container is most likely to open a socket inside the window.** We are not exposed today only because the pod spends those seconds importing pandas and langgraph before it opens anything: that is timing, not a boundary. Worth recording that `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. Not fixed, and a `sleep` would paper over it rather than close it. |
+| Q-59 | ~~The deployed image is seven commits stale, and nothing was ever going to build a newer one~~ **ANSWERED 2026-09-10 by the cutover to `faa1076`** | every claim in D-119, D-120, D-122 and D-123 about what *runs* | The CronJob and `lagmatrix-web` both run `ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5`, which is the commit **before** D-119. Raised by `postmortem` as "nothing newer was ever built"; the root cause is mine to state: `.github/workflows/build-images.yml` triggers only on `push: branches: [main]`, and all seven commits are on `graphrag-showcase-and-scan` (PR #2, unmerged). **No build failed — none was ever triggered.** `imagePullPolicy: IfNotPresent` plus two hand-imported tags in `k3s ctr images ls` confirms 66b11a5 arrived by hand, not by the pipeline. `postmortem`'s "nothing newer was deployed" was too broad and it withdrew it: the **yaml-carried** work *is* live (three netpols present, arango limit 2560Mi, `0 9 * * 2-6 tz=UTC`, and now D-125's 3Gi), because `kubectl apply` needs no image. Only three of the seven commits carry runtime code: 90a1c17 (`load_vectors.py`, `ingest.py`), a5241ac (`serve.py`, `daily_ingest.py`), ee31cf9 (`daily_ingest.py` — verified comment-only, zero runtime risk). Consequence while it stands: D-119's distinct failure messages and D-122's fixed-floor candidates do not exist in the pod, so an ArangoDB failure tomorrow still reads "ArangoDB not reachable" — the exact message D-119 exists to delete. **Closed 2026-09-10T18:07:** built `faa1076` from HEAD, verified the image *contains* the four fixes before shipping rather than trusting the build, imported it to the node and cut both the CronJob and `lagmatrix-web` over. Attended run succeeded at 899 MiB of a 3072 MiB limit. **The structural cause is not closed and became Q-57's recurrence:** `main` is now behind the code that is actually running, so a rebuild from `main` still yields an image without D-122/D-124. Merging the branch is what fixes that, not the cutover. |
 | Q-53 | ~~The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway~~ **ANSWERED by D-121** | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |
 | Q-54 | ~~The ingest CronJob cannot run **any** node in-cluster~~ **CODE HALF ANSWERED 2026-09-10** — `src/lagmatrix/pg.py` plus refactors of `extract_fires.py`, `load_vectors.py` and `load_news.py` (c37498e, a9468a8, 7f71270, e618202). No executable line in the ingest path shells out any more, verified by AST rather than grep. A scoped `lagmatrix_ingest` role replaces `kubectl exec` as the `temporal` superuser: read/write on our seven tables, read-only on `public.audit_log`, denied on every other table, on DELETE and on DDL — each denial tested, not assumed. Every SQL statement in those scripts was built by f-string interpolation and is now parameterised, closing the last of D-103's pattern here. Regression-checked by a full real ingest: identical output to the previous night's kubectl run (230,317 articles, 85 embeddings, 24,104 edges), stores unchanged, reference embeddings bit-identical. **Still open:** the PVC has never been seeded with `bars-10y.parquet`, and nothing has applied the CronJob. | `scripts/load_vectors.py:32` shells out to `kubectl -n copytrade exec -i postgres-0 -- psql`, and `:41` to `kubectl -n lagmatrix exec -i deploy/arangodb`. That works from a laptop with a kubeconfig and cannot work from the pod in `22-lagmatrix-ingest-cron.yaml`, which ships no kubectl, sets `automountServiceAccountToken: false`, and mounts a read-only root filesystem. **I first reported this as "4 of 5 nodes work" and that was wrong** — measured by running the image, all five fail. `bars` reads `data/fires.csv` (private, in neither repo nor image); `long_bars` exits "seed it with fetch_history.py first" on an empty PVC; `news` needs fires.csv and the same kubectl path into postgres; `comovement` finds no bars-10y.parquet and reports it via D-110. Two independent problems, both one-time: the PVC has never been seeded with fires.csv/bars.parquet/bars-10y.parquet (the ingest extends those files, it does not create them, and fires.csv is private so seeding is an operator step CI cannot do), and two scripts reach postgres by shelling out to kubectl. Three options, none chosen: give `load_vectors.py` a direct postgres connection (mostly a connection string and a Secret, and it removes cluster credentials from a batch job that should not hold them); or grant the CronJob exec rights into `copytrade` and ship kubectl (which hands a nightly batch job the ability to exec into the trading namespace — the wrong direction); or keep vectors on an operator machine. This also gates Q-53's egress allow-list, since option 1 needs postgres reachable and option 3 does not. Found by checking what the scripts need at runtime rather than by re-reading the manifest. |
 | Q-52 | A stale `.ruff_cache` reported a lint error as clean, locally, for an unknown period | trust in every local `ruff check` result | CI failed PR #1 on `I001` in `tests/test_edgar_relations.py`, a file nobody had touched. Locally `ruff check` said **All checks passed**; `ruff check --no-cache` on the same bytes found the error. Same ruff (0.16.6), same config, same file content in HEAD and the working tree — the cache alone differed. Likely cause: `[tool.ruff] src = ["src", "tests"]` makes isort classify `lagmatrix` as first-party, and the cached verdict predates the environment change that made that resolvable (the fastembed re-sync reinstalled the project); ruff's cache key did not capture it. **Unverified**, and worth verifying before relying on any local lint result again. The consequence is the part that matters: every "ruff clean" reported in this session's commit messages was taken from the cached path and was not trustworthy. CI is unaffected — a fresh runner has no cache, which is why it caught this and local runs did not. Options: run `--no-cache` locally before pushing, drop the cache in a pre-commit hook, or treat CI as the only authority on lint. Not decided. |
-| Q-50 | Nothing schedules `daily_ingest.py`; there is no "tomorrow's run" | the entire point of a *daily* ingest | Checked 2026-09-10: no crontab entry, no systemd timer, and `kubectl -n lagmatrix get cronjobs` returns **No resources found**. The pipeline is correct and verified end to end, but it executes only when a human types the command. Every "tomorrow's run will now fail loudly instead of silently" claim in D-110/D-111 is conditional on something invoking it, and today nothing does. Three options, none chosen: a local cron on the dev box (unreliable — it is WSL, not always running), a systemd timer (same caveat), or the k8s CronJob that `PLAN-2026-09-09-homelab-deploy.md` PHASE-5 specifies, which is the real answer and is blocked behind containerisation and D-101's unimplemented torch swap. Worth deciding before treating the ingest as operational. |
-| Q-56 | `load_vectors.py` bounds articles by a **global** watermark but reads the **current** ticker list, so a newly-fired ticker never gets its history embedded | retrieval quality for any ticker that enters the alert set | `load_vectors.py:100` uses `WHERE a.created_at >= %s` where `since` is `MAX(article.date)` across the whole corpus (`daily_ingest.py:82`), while `:84` reads today's `fires.csv`. A ticker that first fires next week therefore enters the embedding universe with `--since` already at the corpus frontier, and its **historical** articles are never embedded — so retrieval for it at a past `as_of` returns thin or empty results. Wrong in the safe direction, and silent, which is this project's signature failure. `load_news.py` gets the same problem right with a per-symbol `already_covered` window ledger (`:203`); the asymmetry is that one script tracks coverage per symbol and the other assumes a single global frontier. Dormant while `fires.csv` was a static artefact; **D-115 made it live** by putting `extract_fires` in the nightly graph. Found by `quant-fires` while answering a different question. Not fixed: the fix is a per-symbol coverage ledger for embeddings, which is its own cycle. |
+| Q-50 | ~~Nothing schedules `daily_ingest.py`; there is no "tomorrow's run"~~ **ANSWERED by D-117** | the entire point of a *daily* ingest | Checked 2026-09-10: no crontab entry, no systemd timer, and `kubectl -n lagmatrix get cronjobs` returns **No resources found**. The pipeline is correct and verified end to end, but it executes only when a human types the command. Every "tomorrow's run will now fail loudly instead of silently" claim in D-110/D-111 is conditional on something invoking it, and today nothing does. Three options, none chosen: a local cron on the dev box (unreliable — it is WSL, not always running), a systemd timer (same caveat), or the k8s CronJob that `PLAN-2026-09-09-homelab-deploy.md` PHASE-5 specifies, which is the real answer and is blocked behind containerisation and D-101's unimplemented torch swap. Worth deciding before treating the ingest as operational. **Closed 2026-09-10:** the k8s CronJob is applied and `0 9 * * 2-6` with `timeZone: UTC` (D-115 records why the timezone was not optional — unset, it ran at 14:00 UTC, 30 minutes after the US open, where `fetch_bars.py` would have written a partial current-day bar). It has now run unattended on schedule and attended on demand, succeeding both times. |
+| Q-56 | ~~**ANSWERED by D-122**~~ `load_vectors.py` bounds articles by a **global** watermark but reads the **current** ticker list, so a newly-fired ticker never gets its history embedded | retrieval quality for any ticker that enters the alert set | `load_vectors.py:100` uses `WHERE a.created_at >= %s` where `since` is `MAX(article.date)` across the whole corpus (`daily_ingest.py:82`), while `:84` reads today's `fires.csv`. A ticker that first fires next week therefore enters the embedding universe with `--since` already at the corpus frontier, and its **historical** articles are never embedded — so retrieval for it at a past `as_of` returns thin or empty results. Wrong in the safe direction, and silent, which is this project's signature failure. `load_news.py` gets the same problem right with a per-symbol `already_covered` window ledger (`:203`); the asymmetry is that one script tracks coverage per symbol and the other assumes a single global frontier. Dormant while `fires.csv` was a static artefact; **D-115 made it live** by putting `extract_fires` in the nightly graph. Found by `quant-fires` while answering a different question. Not fixed: the fix is a per-symbol coverage ledger for embeddings, which is its own cycle. |
 | Q-57 | `:latest` on ghcr means "whatever was pushed last", and main cannot run in-cluster | anyone redeploying from `:latest` | CI published `:latest` from main at 08:37; a manual push overwrote it at 17:00 with the correct code, so it happens to be right **by push ordering alone**. main still shells out to `kubectl` in `load_news.py` and has no `extract_fires` node, so an image built from it cannot run any node in a pod (Q-54). The deployed pods are pinned to a SHA and are unaffected, which is precisely why sec-deploy recommended pinning. Resolved by merging the branch; recorded because the hazard is structural, not a one-off — any future CI run on a stale main silently repoints `:latest` at code that cannot run. |
 | Q-55 | ~~`arango_db()` reports "not reachable" for any failure~~ **ANSWERED by D-119** | diagnosing an unattended 3am failure | `scripts/serve.py:105` is `except Exception: return None`, and callers render that as "ArangoDB not reachable". During D-117's deployment a `PermissionError` on the mounted password file was reported that way, and the database was reachable the whole time — the message sent the search to the URL, which was changed for nothing. The socket probe above it already distinguishes unreachable from everything else, so the information exists and is discarded. Returning None rather than raising is deliberate and should stay (the correlation half of the pipeline needs no database), but the *reason* should survive. Not fixed: it touches a function every endpoint calls, and deserves its own red/green cycle rather than being bundled into a deployment commit. |
 | Q-51 | The two bars files cover different universes: 3,201 vs 2,183 symbols | which symbols co-movement can ever see | `data/bars.parquet` carries 3,201 symbols (a liquidity screen, median $vol >= $10M or a candidate, refreshed every run) while `data/bars-10y.parquet` carries 2,183 (pinned when it was first built). So roughly a thousand symbols appear in the wide file — and in `/movers`, which swept 3,201 — that co-movement can never return as a follower, because they have no long history stored. Whether the long file's universe should be refreshed, and what that costs against D-95's replication being measured on the fixed 2,183, is undecided. Raised by `plan-ingest`, which declined to guess rather than rationalising it. Related to the universe question already open under `PLAN-2026-09-09-daily-ingest.md` PHASE-7. |
@@ -3874,7 +4060,7 @@ fixtures. |
 | Q-06 | How do we avoid firing on shocks that are *already* priced into the lagger? | `signal_analyst.py` | Needs the lagger's own concurrent move as a feature, not just the leader's |
 | Q-07 | What exactly is the outcome label for a fire — sign of forward return, excess over benchmark, or factor-neutral residual? | D-20, evaluation | **Re-scoped.** The harness *shape* was answered by D-20 (replay, split corroborated vs contradicted, score on calibration), so this is no longer "whole project" blocking. What remains is the definition of "right", which decides what the whole evaluation measures — and per spike 03 §4 an un-neutralised label would let factor beta masquerade as signal. |
 | ~~Q-08~~ | Checkpointer choice, and whether durable graph state is needed | `graph/builder.py` | Answered by PHASE-3 / D-45: **SqliteSaver**. `InMemorySaver` would deliver neither motivation (it dies with the process, so the crash case is unrecoverable and there is nothing to replay tomorrow); Postgres has not earned a server process at this scale. |
-| Q-09 | Can ArangoDB **pre-filter** a vector search by `symbol IN (...)` + recency, or only post-filter? | D-13, `adapters/vector.py` | Sources contradict (issue #21690 vs v3.12.6 optimizer rule vs 3.13 docs) and `docs.arango.ai` 403s to fetches. Stand up a local instance and try the real query. **De-escalated by D-15** — with hours of budget, a large LIMIT plus post-filtering is acceptable, so this no longer gates D-13 on latency, only on correctness. |
+| Q-09 | ~~Can ArangoDB **pre-filter** a vector search by `symbol IN (...)` + recency, or only post-filter?~~ **ANSWERED 2026-09-10: it pre-filters.** | D-13, `adapters/vector.py` | Sources contradict (issue #21690 vs v3.12.6 optimizer rule vs 3.13 docs) and `docs.arango.ai` 403s to fetches. Stand up a local instance and try the real query. **De-escalated by D-15** — with hours of budget, a large LIMIT plus post-filtering is acceptable, so this no longer gates D-13 on latency, only on correctness. **Settled 2026-09-10 by reading the plan rather than the docs**, which is what should have happened when the sources first contradicted each other: `db.aql.explain()` on `adapters/vector.py`'s `_SEARCH_AQL` shows **no `FilterNode` at all** — the optimiser folds `LENGTH(INTERSECTION(a.symbols, @symbols)) > 0 AND a.date < @as_of` into `EnumerateNearVectorNode` as a `filter` attribute, so the predicate is applied *inside* the ANN scan. Found by accident while chasing what looked like a silently dropped point-in-time guard (D-124). This matters more than latency: a post-filter would have starved thin symbols worse as the corpus grew, so D-124's widening would have degraded exactly the symbols it was meant to help. Measured at 74ms against 80,589 documents. |
 | ~~Q-10~~ | Does an exploitable lead-lag exist at *minute* scale, or only daily-to-monthly as the literature documents? | `shock_detector.py`, D-05, Q-03 | The design assumes `lag_minutes`; the evidence base (Cohen & Frazzini, "A frog in every pan", Network Momentum) is daily-to-monthly. Answered by D-15: no evidence for minute-scale supply-chain leads; retargeted to days. |
 | ~~Q-11~~ | Which mode is the product? | — | Answered by D-18: a corroboration/odds layer over an exogenous signal — closest to spike 02's red-team framing, with lagger-entry as the mechanism. |
 | Q-13 | Does `LagEdge` need an `as_of` field? | `domain/models.py` | Largely resolved by D-16 — Alpaca-derived edges are point-in-time by construction. Still add `as_of` as the observation date so the backtest can slice the graph at t. Now a small design task, not a bias risk. |

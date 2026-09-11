@@ -30,7 +30,22 @@ metadata:
   name: lagmatrix-ingest
   namespace: lagmatrix
 spec:
+  # 09:00 UTC, Tue-Sat: the US session closes 20:00-21:00 UTC, so this leaves
+  # margin for Alpaca's EOD bars to finalise and lands 04:00 ET, well before the
+  # next open. Tue-Sat covers every Mon-Fri session exactly once.
+  #
+  # `timeZone` IS LOAD-BEARING. An unset timeZone is interpreted in the
+  # controller-manager's local zone, and this node is America/Chicago -- so
+  # "0 9" fired at 14:00 UTC, verified by status.lastScheduleTime
+  # 2026-09-10T14:00:00Z. That is 10:00 ET, THIRTY MINUTES AFTER THE US OPEN, so
+  # the job ran mid-session and fetch_bars.py (`end = min(..., now)`, a
+  # timestamp) would write a PARTIAL current-day bar into bars.parquet. That
+  # partial bar then satisfies node_bars' own skip predicate and freezes it,
+  # while load_news ranks liquidity off it. fetch_daily_bars.py is unaffected:
+  # it bounds on midnight UTC. Unset, it would also have shifted an hour when
+  # DST ended on 1 November.
   schedule: "0 9 * * 2-6"
+  timeZone: "UTC"
   # A re-run must never race the previous one against the same parquet files.
   # D-97 makes concurrent upserts safe but not free, and Forbid is simpler than
   # reasoning about interleaved ones.
@@ -68,7 +83,7 @@ spec:
             # drift. It mounts the volume at /seed precisely so /app/data stays
             # unshadowed here and the baked-in file can be read.
             - name: seed-reference-data
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:faa1076
               imagePullPolicy: IfNotPresent
               command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
               securityContext:
@@ -83,7 +98,7 @@ spec:
               # Always, what runs tonight is whatever was pushed last, and
               # rolling back means retagging rather than naming a known-good
               # build. This tag is the commit the image was built from.
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:faa1076
               imagePullPolicy: IfNotPresent
               # Overrides the image's CMD (which serves the web UI). main()
               # no longer resolves as_of up front -- node_comovement resolves it
@@ -125,8 +140,29 @@ spec:
               # COMOVE_CLOSES that was never built -- that would have been tight
               # enough to OOM on the comovement node alone.
               resources:
+                # The request stays 512Mi deliberately. The kubelet ranks
+                # eviction by usage-above-request, so a Burstable pod asking
+                # 512Mi and using ~1.3Gi is the first thing evicted when the
+                # *node* runs short -- and this node runs real-money trading
+                # with ~2.2Gi available. That is the outcome we want: the
+                # ingest dies, copytrade does not.
+                #
+                # The limit is 3Gi because the *cgroup* killing a job that
+                # would have finished is a different failure, and `backoffLimit: 0`
+                # means an OOMKill loses the whole run with no retry. Measured
+                # 2026-09-10: fetch_daily_bars.py peaks at 965 MiB for the full
+                # path -- fetch, merge_bars' three copies over 4.7M rows, and
+                # to_parquet(zstd, level=6) -- and it runs as a subprocess of
+                # daily_ingest.py, charged to this same cgroup while the parent
+                # holds pandas, pyarrow and langgraph.
+                #
+                # That write had never once executed in-cluster: `if len(new)`
+                # guarded it out on every run, so every previous memory figure
+                # structurally excluded it. Two of my own attempts to measure it
+                # also returned +0 new rows and would have been reported as
+                # measurements of a path that never ran.
                 requests: {cpu: 250m, memory: 512Mi}
-                limits:   {cpu: "1", memory: 2Gi}
+                limits:   {cpu: "1", memory: 3Gi}
               volumeMounts:
                 - {name: data, mountPath: /app/data}
                 - {name: tmp, mountPath: /tmp}

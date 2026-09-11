@@ -126,6 +126,33 @@ def upsert_comovement(
         )
 
 
+_EDGE_ENDPOINTS_AQL = """
+FOR e IN @@collection
+  RETURN [e._from, e._to]
+"""
+
+
+def embedding_universe(db: StandardDatabase, alert_symbols: list[str]) -> list[str]:
+    """The symbols the embedding corpus should cover: both endpoints of every
+    `supplies_to` and `moves_with` edge, unioned with `alert_symbols` (never
+    replacing it, so a symbol present only in the alert set still comes
+    back). Either collection can be absent (fresh database) or empty; both
+    degrade to the alert set alone rather than raising. Returned as a
+    sorted, de-duplicated list of plain symbols (`equity/AAPL`'s `_key`).
+    """
+    symbols = set(alert_symbols)
+    for collection in ("supplies_to", "moves_with"):
+        if not db.has_collection(collection):
+            continue
+        cursor = db.aql.execute(
+            _EDGE_ENDPOINTS_AQL, bind_vars={"@collection": collection}
+        )
+        for frm, to in cursor:
+            symbols.add(frm.split("/", 1)[1])
+            symbols.add(to.split("/", 1)[1])
+    return sorted(symbols)
+
+
 def movers_with(
     db: StandardDatabase, symbol: str, as_of: date, min_abs_corr: float = 0.5
 ) -> list[ComovementEdge]:

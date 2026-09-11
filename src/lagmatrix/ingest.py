@@ -31,6 +31,24 @@ def daily_watermark(df: pd.DataFrame) -> date | None:
     return df["timestamp"].max().date()
 
 
+def plan_embeddings(
+    candidate_ids: list, existing_keys: set[str]
+) -> tuple[int, int, list[str]]:
+    """The key-set anti-join at the centre of Q-56 (`docs/spikes/overall.md`):
+    `candidate_ids` (postgres `id`s -- `int`) against `existing_keys`
+    (ArangoDB `_key`s -- always `str`). Coercing to `str` here, not leaving it
+    to the caller, is what stops a type mismatch from finding zero overlap
+    and re-embedding the whole corpus every night.
+
+    Returns `(n_candidates, n_already_embedded, to_embed)`. `to_embed` is
+    plain lexicographic `sorted()` (matching `load_vectors.py`'s own id
+    convention), not a numeric sort of the underlying ints."""
+    ids = {str(c) for c in candidate_ids}
+    n_already_embedded = len(ids & existing_keys)
+    to_embed = sorted(ids - existing_keys)
+    return len(candidate_ids), n_already_embedded, to_embed
+
+
 def split_affected_symbols(actions_data: dict) -> set[str]:
     """Symbols touched by a split in an already-fetched corporate actions
     response (splits only -- `cash_dividends` and other action types

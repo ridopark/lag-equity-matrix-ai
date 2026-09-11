@@ -112,7 +112,7 @@ spec:
             #
             # Costs 0.5s on the normal path (measured), 30s to fail.
             - name: await-netpol
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:c4279ed
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
               imagePullPolicy: IfNotPresent
               command: ["python", "-c"]
               args:
@@ -151,7 +151,7 @@ spec:
             # drift. It mounts the volume at /seed precisely so /app/data stays
             # unshadowed here and the baked-in file can be read.
             - name: seed-reference-data
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:c4279ed
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
               imagePullPolicy: IfNotPresent
               command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
               securityContext:
@@ -166,7 +166,7 @@ spec:
               # Always, what runs tonight is whatever was pushed last, and
               # rolling back means retagging rather than naming a known-good
               # build. This tag is the commit the image was built from.
-              image: ghcr.io/ridopark/lag-equity-matrix-ai:c4279ed
+              image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
               imagePullPolicy: IfNotPresent
               # Overrides the image's CMD (which serves the web UI). main()
               # no longer resolves as_of up front -- node_comovement resolves it

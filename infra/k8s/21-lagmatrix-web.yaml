@@ -55,7 +55,7 @@ spec:
         # so the committed data/excluded-etfs.csv would be invisible —
         # neighbourhood() reads it. Same fix as the ingest CronJob.
         - name: seed-reference-data
-          image: ghcr.io/ridopark/lag-equity-matrix-ai:c4279ed
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
           securityContext:
@@ -66,7 +66,7 @@ spec:
             - {name: data, mountPath: /seed}
       containers:
         - name: web
-          image: ghcr.io/ridopark/lag-equity-matrix-ai:c4279ed
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
           imagePullPolicy: IfNotPresent
           # --host 0.0.0.0 is required: serve.py defaults to 127.0.0.1, which
           # would leave the Service unable to reach the pod at all.

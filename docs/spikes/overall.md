@@ -3951,6 +3951,41 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `postmortem` predicted the job would see "35 + a day or two of alert-universe
   news", not 35, because `node_vectors` runs after `node_news`. It saw **84**.
   Logging 35 as the expected value would have sent someone hunting a bug.
+
+  **Did it help retrieval? Measured 2026-09-11 — yes, and by less than the
+  coverage numbers imply.** Coverage is not retrieval, and the three-symbol
+  "it returns hits" demo above proves nothing on its own: it shows the query
+  runs, not that the answer improved.
+  Counterfactual, since the before-state could not be re-run once the vectors
+  were written: the pre-backfill corpus is exactly what the **old fires-only
+  candidate query** selects, so it was reconstructed from postgres (48,306 keys
+  against the true 48,241 — last night's run added a few, which makes every
+  figure below *conservative*). Each symbol's own article pool was then ranked
+  by brute-force cosine rather than through the ANN, so the two conditions
+  differ only in which documents exist — no index difference, no approximation.
+  150 graph-reached, previously-thin symbols, 5 query topics x 2 `as_of` dates:
+
+  | | `as_of` 2025-09-01 | `as_of` 2026-06-01 |
+  |---|---|---|
+  | returned **nothing** | 105 -> **66** | 75 -> **36** |
+  | had >= 5 candidates | 1 -> **19** | 15 -> **44** |
+  | mean best-match cosine | 0.13-0.20 -> 0.16-0.26 | 0.14-0.22 -> 0.18-0.28 |
+
+  Symbols retrieving *nothing* roughly halved at both dates, consistently across
+  query topics rather than on the single probe run first.
+  **Three caveats, recorded so the numbers are not over-read.** (1) "Never worse"
+  is structural, not a quality result: the after-set is a superset, so a best
+  match can only rise — it is not evidence. (2) **Absolute quality stays modest.**
+  A mean best-match cosine of 0.28 on MiniLM is a weak semantic match, and
+  `regulatory investigation lawsuit settlement` barely moved (0.134 -> 0.161),
+  which reads as noise in both conditions: the corpus now *has* articles for
+  these symbols, it does not have articles on that topic for them. (3) **36 of
+  150 still return nothing** at the recent date, 66 at the older one.
+  So D-124 did the thing it was built for — it halved the "GraphRAG returns
+  nothing, which looks like an absence of news rather than an absence of corpus"
+  failure — and it did not turn thin symbols into well-covered ones. Whether
+  0.28 is good enough to change a downstream decision is a separate question and
+  is **not** claimed here.
 - **Status:** Accepted
 
 ### D-125 — The ingest's memory limit is 3Gi, from the write that had never run

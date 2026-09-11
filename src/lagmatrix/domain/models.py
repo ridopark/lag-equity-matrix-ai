@@ -116,3 +116,23 @@ class Assessment(BaseModel):
     # (>0, with `supporting` and `contradicting` both empty) -- the two
     # were byte-identical before this field existed.
     neighbours: int
+
+
+class QuantPerspective(BaseModel):
+    """Deterministic read of a candidate's correlation neighbourhood (PHASE-1) --
+    Fisher CI width, a duplicate-series flag and within-window split-half sign
+    stability, all computed over `relation == "correlation"` edges only. Not
+    read by `assess()`'s verdict/`effective_evidence`/`odds_adjustment` logic;
+    exists for the (future) quant analyst node to reason over.
+    """
+
+    n_edges: int
+    median_ci_width: float | None
+    duplicate_count: int
+    # % of correlation edges whose sign held between the first and second
+    # halves of the same trailing window that produced `lag_edges` -- not
+    # D-93's years-long discovery/validation split. None when there are no
+    # correlation edges to split.
+    split_half_sign_agree_pct: float | None
+    candidate_is_etf: bool
+    note: str

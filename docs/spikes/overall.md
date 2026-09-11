@@ -3951,6 +3951,41 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `postmortem` predicted the job would see "35 + a day or two of alert-universe
   news", not 35, because `node_vectors` runs after `node_news`. It saw **84**.
   Logging 35 as the expected value would have sent someone hunting a bug.
+
+  **Did it help retrieval? Measured 2026-09-11 — yes, and by less than the
+  coverage numbers imply.** Coverage is not retrieval, and the three-symbol
+  "it returns hits" demo above proves nothing on its own: it shows the query
+  runs, not that the answer improved.
+  Counterfactual, since the before-state could not be re-run once the vectors
+  were written: the pre-backfill corpus is exactly what the **old fires-only
+  candidate query** selects, so it was reconstructed from postgres (48,306 keys
+  against the true 48,241 — last night's run added a few, which makes every
+  figure below *conservative*). Each symbol's own article pool was then ranked
+  by brute-force cosine rather than through the ANN, so the two conditions
+  differ only in which documents exist — no index difference, no approximation.
+  150 graph-reached, previously-thin symbols, 5 query topics x 2 `as_of` dates:
+
+  | | `as_of` 2025-09-01 | `as_of` 2026-06-01 |
+  |---|---|---|
+  | returned **nothing** | 105 -> **66** | 75 -> **36** |
+  | had >= 5 candidates | 1 -> **19** | 15 -> **44** |
+  | mean best-match cosine | 0.13-0.20 -> 0.16-0.26 | 0.14-0.22 -> 0.18-0.28 |
+
+  Symbols retrieving *nothing* roughly halved at both dates, consistently across
+  query topics rather than on the single probe run first.
+  **Three caveats, recorded so the numbers are not over-read.** (1) "Never worse"
+  is structural, not a quality result: the after-set is a superset, so a best
+  match can only rise — it is not evidence. (2) **Absolute quality stays modest.**
+  A mean best-match cosine of 0.28 on MiniLM is a weak semantic match, and
+  `regulatory investigation lawsuit settlement` barely moved (0.134 -> 0.161),
+  which reads as noise in both conditions: the corpus now *has* articles for
+  these symbols, it does not have articles on that topic for them. (3) **36 of
+  150 still return nothing** at the recent date, 66 at the older one.
+  So D-124 did the thing it was built for — it halved the "GraphRAG returns
+  nothing, which looks like an absence of news rather than an absence of corpus"
+  failure — and it did not turn thin symbols into well-covered ones. Whether
+  0.28 is good enough to change a downstream decision is a separate question and
+  is **not** claimed here.
 - **Status:** Accepted
 
 ### D-125 — The ingest's memory limit is 3Gi, from the write that had never run
@@ -3999,6 +4034,28 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `today - 1` ahead of the file. The write risk is therefore covered by the
   965 MiB measurement and the 3Gi headroom — not by tonight's green result, and
   a green result should not be read as covering it.
+
+  **Ran 2026-09-11T09:00Z, and the write executed.** `wrote
+  data/bars-10y.parquet: 4,738,804 rows (+2,183 new rows, 2,183 fetched)` — the
+  first in-cluster execution of the zstd path, in a job that succeeded in 3m43s
+  (against 1m46s for the attended run that skipped it). Everything downstream
+  ran: 24,145 edges, 18 new embeddings, 80,691 indexed.
+
+  **Peak was 919 MiB of the 3072 MiB limit**, from Prometheus
+  (`container_memory_working_set_bytes`, which is the metric the cgroup OOM
+  killer acts on, so it is the right one for this question).
+
+  **So the raise was not needed, and that should be said plainly rather than
+  left to look vindicated.** 919 MiB fits inside the original 2Gi with room to
+  spare, and the write added only ~20 MiB over the attended run's 899 MiB —
+  nowhere near the 400–500 MB `postmortem` estimated on top, nor my own 965 MiB
+  for the subprocess in isolation. The parent's and child's peaks evidently do
+  not coincide the way both of us assumed, and max-RSS (what I measured locally)
+  is not working-set (what the cgroup enforces).
+  The decision stands anyway: limits are not reserved, so 3Gi costs nothing, and
+  2.2x headroom over a corpus that grows daily is thin. But it was insurance
+  bought on an estimate that the measurement has now superseded, and D-125's
+  reasoning was better than its arithmetic.
 - **Status:** Accepted
 
 ## Open Questions

@@ -45,18 +45,18 @@ observable as, and it fails exactly when the two paths drift -- which is
 the failure this test exists to catch -- regardless of how green
 factors the code.
 
-A second gap surfaced while writing TASK-3.13: `cap_for_llm(candidates,
-max_n)` is specified to sort by a `sigma` attribute, but the only type the
-plan actually calls it with (TASK-4.3: `state["candidates"]`, i.e.
-`list[Candidate]`) has no such field, and `Candidate` is a plain pydantic
-model that rejects assignment of one (`ValueError: "Candidate" object has
-no field "sigma"` -- checked directly against this repo's `Candidate`
-before writing this). So the sigma-ordering branch is, as of this phase,
-unreachable from its one real call site; it can only be exercised here
-against a duck-typed stand-in that is not `Candidate`. The tests below do
-that and say so, but this looks like dead code in the making unless a
-later phase attaches `sigma` to something `cap_for_llm` actually receives
--- flagging rather than resolving it silently.
+A second gap surfaced while writing TASK-3.13, and is now **closed** --
+kept here because the reasoning is why `cap_for_llm` is worth testing at
+all. `cap_for_llm` sorts by a shock magnitude, but `Candidate` originally
+had no such field, so the ordering branch was unreachable from its one
+real call site (`state["candidates"]`) and could only be exercised against
+a duck-typed stand-in. That was not merely dead code: `MarketScan` sorts
+its leaders by shock magnitude and then returns them sorted by *symbol*,
+so the fallback would have capped on the alphabet -- paying to analyse the
+alphabetically-first 20 of ~121 candidates every day and skipping the
+largest movers. **D-130** added `Candidate.origin_sigma`, and the ordering
+test below now uses real `Candidate` instances precisely so it proves
+reachability from the real call site rather than from a stand-in.
 """
 
 from __future__ import annotations

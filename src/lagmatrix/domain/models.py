@@ -1,6 +1,7 @@
 """Core entities of the leader/lagger pipeline."""
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -160,3 +161,29 @@ class DayTradePerspective(BaseModel):
     # Each entry: {"kind": ..., "reason": ...}.
     not_measurable: list[dict[str, str]]
     note: str
+
+
+class QuantAnalystNote(BaseModel):
+    """The quant analyst node's (PHASE-4) read of a `QuantPerspective` --
+    classificatory only, never a calibrated probability (D-34: no `float`
+    field on this model, structurally, so there is nowhere for one to hide).
+    """
+
+    status: Literal["ok", "not_run", "error"]
+    replication_expectation: Literal["high", "low", "insufficient_data"] | None
+    flagged_concerns: list[str]
+    reasoning: str
+    model: str
+
+
+class DayTradeAnalystNote(BaseModel):
+    """The day-trade analyst node's (PHASE-5) read of a `DayTradePerspective`
+    -- classificatory only, never a calibrated probability (D-34: no `float`
+    field on this model, structurally).
+    """
+
+    status: Literal["ok", "not_run", "error"]
+    liquidity_tier: Literal["ample", "marginal", "thin", "insufficient_data"] | None
+    gap_dominant: bool | None
+    reasoning: str
+    model: str

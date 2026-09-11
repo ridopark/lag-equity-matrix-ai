@@ -19,7 +19,17 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from lagmatrix.adapters.candidates import ExternalSignals
 from lagmatrix.adapters.market import MarketFeed
-from lagmatrix.domain.models import Assessment, Bar, Candidate, Evidence, LagEdge, NewsChunk, Shock
+from lagmatrix.domain.models import (
+    Assessment,
+    Bar,
+    Candidate,
+    DayTradeAnalystNote,
+    Evidence,
+    LagEdge,
+    NewsChunk,
+    QuantAnalystNote,
+    Shock,
+)
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
 
@@ -31,7 +41,17 @@ CHECKPOINT_DB_PATH = "data/checkpoints.sqlite"
 # as domain models instead of dicts, without the "unregistered type" warning.
 _ALLOWED_MODELS = [
     ("lagmatrix.domain.models", cls.__name__)
-    for cls in (Bar, Shock, LagEdge, NewsChunk, Candidate, Evidence, Assessment)
+    for cls in (
+        Bar,
+        Shock,
+        LagEdge,
+        NewsChunk,
+        Candidate,
+        Evidence,
+        Assessment,
+        QuantAnalystNote,
+        DayTradeAnalystNote,
+    )
 ]
 
 

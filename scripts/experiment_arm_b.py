@@ -91,6 +91,9 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=5, help="pairs to sample (PAID)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--timeout", type=float, default=3600.0,
+                    help="batch poll deadline; 8 requests took 114s, so the "
+                         "600s client default is too short for a large batch")
     args = ap.parse_args()
 
     bars = pd.read_parquet("data/bars-10y.parquet")
@@ -149,6 +152,7 @@ async def main() -> None:
     client = build_analyst_client(settings, mode="batch")
     if client is None:
         sys.exit("no API key configured -- set LAGMATRIX_ANTHROPIC_API_KEY")
+    client._timeout = args.timeout  # noqa: SLF001 -- one-shot experiment script
     print(f"model: {settings.model}\nsubmitting {len(briefs)} batch requests…")
 
     t0 = time.time()

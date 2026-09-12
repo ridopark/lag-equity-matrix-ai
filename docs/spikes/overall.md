@@ -4440,6 +4440,51 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
 - **Status:** Accepted, with the correction above superseding the original
   table. The script now applies D-100's mask.
 
+### D-133 — The LLM analyst loses to sorting by a number we already compute
+
+- **When:** 2026-09-12T07:50:00-05:00
+- **Decision:** PHASE-10 arm B is **run and answered**. Haiku's
+  `replication_expectation` does not add signal over the deterministic
+  evidence it is handed. Arm C (Opus vs Haiku) is **not run** — there is
+  nothing for a better model to improve on here.
+- **Why:** Arm B cost $1.70, not the plan's $51, after two consulting agents
+  found the original design unmeasurable. Three corrections were needed before
+  it could answer anything:
+  **(1)** The pre-registered bar compared the model to a rule that is 20pp
+  *worse than a constant "no"*, so any model answering `"low"` often enough
+  would clear it. **(2)** My proposed replacement — beat the best constant —
+  was worse: the Bayes-optimal ceiling on the brief's own information is
+  **+0.35pp**, against a 1.4pp bar. Unclearable by a perfect oracle. I
+  replaced a test that always passes with one that always fails.
+  **(3)** Accuracy is the wrong metric at a 35% base rate: accuracy-minus-
+  constant swings 60pp across retention thresholds and is monotone in the base
+  rate, while AUC stays flat at 0.52-0.56. Switched to AUC, n=1,000 (92-99.6%
+  power), bootstrapped 2xSE bar per band.
+- **Outcome:** 1,000 pairs, 251s, **zero errors, one abstention**.
+
+  | band | AUC rule (sign bit) | AUC Haiku | gap | 2xSE | verdict |
+  |---|---|---|---|---|---|
+  | 0.3-0.4 | 0.5489 | 0.5682 | +0.0193 | 0.0381 | null |
+  | 0.4-0.5 | 0.5074 | 0.5588 | +0.0514 | 0.0354 | adds |
+
+  Read alone that is 1-of-2 and mildly encouraging. **The control kills it.**
+  On the identical pairs (rule AUCs match the run exactly, confirming the same
+  sample), ranking by `min(|h1|, |h2|)` — a number already computed, already in
+  `QuantPerspective` since D-132's fix, and printed in the model's own brief —
+  scores **0.7238** and **0.7004**.
+  So the model is handed the evidence and ranks it **~0.15 AUC worse than
+  `sorted()`**. Its one "win" is against the sign bit, which is the weak form
+  of the same statistic; against the strong form it loses in both bands.
+  **This is a null for the LLM layer as a predictor**, and a clear one.
+  It does not condemn the analyst nodes as *explanation* — a note saying why a
+  pairing looks weak may still be worth reading — but nothing here supports
+  using `replication_expectation` to rank or filter, and `assess()` was
+  deliberately never wired to read it (PHASE-6 TASK-6.8), so no shipped
+  decision depends on it today.
+  Arm C would have cost $42.50 to ask whether Opus improves on a layer that
+  loses to a sort. Not run.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

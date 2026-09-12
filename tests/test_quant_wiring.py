@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import date
 
 from lagmatrix.domain.models import Candidate
+from lagmatrix.graph.nodes.quant_perspective import PMI_STRONG_THRESHOLD
 from lagmatrix.graph.state import candidate_key
 
 
@@ -134,3 +135,82 @@ def test_two_candidates_do_not_cross_attribute_quant_fields(run_graph, fake_anal
     assert a2.quant == solo_a2.quant
     assert a1.quant_analyst == solo_a1.quant_analyst
     assert a2.quant_analyst == solo_a2.quant_analyst
+
+
+class _FakeTopology:
+    """RED for PHASE-5 (PLAN-2026-09-12-relatedness-and-sectors): fake
+    `ArangoTopology`, mirroring `test_nodes.py`'s `FakeArangoTopology`
+    pattern. `laggers_of` returns nothing so this double stays focused on
+    the relatedness fields under test here rather than also perturbing
+    `retrieve_neighbourhood`'s edge set -- `laggers_of` is still called
+    unconditionally whenever `arango_topology` is not `None` (D-79), so it
+    must exist even though this file has nothing to assert about it.
+    """
+
+    def __init__(self, sic: dict[str, str] | None = None, pmi: dict[str, float] | None = None):
+        self._sic = sic or {}
+        self._pmi = pmi or {}
+
+    def sic_of(self, symbols: list[str]) -> dict[str, str]:
+        return {s: self._sic[s] for s in symbols if s in self._sic}
+
+    def comention_pmi(self, symbol: str) -> dict[str, float]:
+        return dict(self._pmi)
+
+    def laggers_of(self, leader, max_hops, as_of):
+        return []
+
+
+def test_no_arango_topology_leaves_relatedness_fields_none(run_graph):
+    """TASK-5.8: `run_graph` defaults to `arango_topology=None` -- the same
+    "`None` disables the feature" contract PHASE-5's unit tests already pin
+    at `compute_quant_perspective`'s level, checked here end to end through
+    the compiled graph rather than the bare function.
+
+    Falsifiable by: any of the three relatedness fields on
+    `assessments[0].quant` coming back as `0`/`0.0` instead of `None`.
+    """
+    out = run_graph([_candidate("CAND")])
+    quant = out["assessments"][0].quant
+
+    assert quant.sector_match_pct is None
+    assert quant.comention_weak_count is None
+    assert quant.comention_strong_count is None
+
+
+def test_injected_topology_surfaces_actual_relatedness_values(run_graph):
+    """TASK-5.8 -- the Q-61-shaped wiring guard: a forgotten
+    `arango_topology=` at the `quant_perspective()` call site would leave
+    the three fields silently `None` while every other test in this file
+    still passes, so this asserts the *specific* expected values reached
+    through the real graph, not merely "not None".
+
+    `signal_universe` drops every symbol except LEAD1/LEAD2 from CAND's
+    correlation pool (`conftest.closes` correlates CAND tightly with only
+    that bloc), so CAND's correlation edges are known exactly -- the same
+    two-leader setup `test_sector_match_pct_counts_same_2digit_sic_prefix`
+    uses at the unit level, reached this time end to end.
+
+    Falsifiable by: the injected topology's `sic`/`pmi` values never
+    reaching `Assessment.quant` (proves TASK-5.7 was skipped, or the
+    context wiring drops `arango_topology` before it reaches
+    `compute_quant_perspective`).
+    """
+    fake = _FakeTopology(
+        sic={"CAND": "7372", "LEAD1": "7371", "LEAD2": "3674"},
+        pmi={
+            "LEAD1": PMI_STRONG_THRESHOLD + 0.5,
+            "LEAD2": PMI_STRONG_THRESHOLD - 0.5,
+        },
+    )
+
+    out = run_graph(
+        [_candidate("CAND")],
+        signal_universe={"LEAD3", "INDEP", "LEAD4", "LEAD5", "CAND2", "CANDD"},
+        arango_topology=fake,
+    )
+    quant = out["assessments"][0].quant
+
+    assert quant.sector_match_pct == 50.0
+    assert quant.comention_strong_count == 1
+    assert quant.comention_weak_count == 1

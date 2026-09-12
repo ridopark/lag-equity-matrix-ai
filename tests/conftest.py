@@ -344,14 +344,16 @@ def invoke_graph(graph, *args, **kwargs):
 
 @pytest.fixture
 def run_graph(closes):
-    def _run(candidates, *, signal_universe=frozenset(), with_news=False, llm=None, bars=None):
+    def _run(candidates, *, signal_universe=frozenset(), with_news=False, llm=None, bars=None,
+              arango_topology=None):
         g = build_graph(with_news=with_news)
         return asyncio.run(g.ainvoke(
             {"candidates": candidates},
             context=LagMatrixContext(closes=closes,
                                       signal_universe=set(signal_universe),
                                       llm=llm,
-                                      bars=bars),
+                                      bars=bars,
+                                      arango_topology=arango_topology),
         ))
     return _run
 

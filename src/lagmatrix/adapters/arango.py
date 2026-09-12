@@ -38,6 +38,19 @@ FOR v, e, p IN 1..@max_hops INBOUND @start supplies_to
   RETURN {symbol, lag_days: depth, pct_revenue: best.edges[-1].pct_revenue}
 """
 
+_SIC_OF_AQL = """
+FOR v IN equity
+  FILTER v._key IN @symbols
+  FILTER v.sic != null
+  RETURN {symbol: v._key, sic: v.sic}
+"""
+
+_COMENTION_PMI_AQL = """
+FOR e IN co_mentioned
+  FILTER e._from == @symbol OR e._to == @symbol
+  RETURN {other: e._from == @symbol ? e._to : e._from, pmi: e.pmi}
+"""
+
 
 class ArangoTopology:
     """Thin wrapper over python-arango for leader -> lagger traversal."""
@@ -68,6 +81,31 @@ class ArangoTopology:
 
     def upsert_edge(self, edge: LagEdge) -> None:
         raise NotImplementedError
+
+    def sic_of(self, symbols: list[str]) -> dict[str, str]:
+        """SIC codes for `symbols` that resolve to an `equity` vertex with a
+        `sic` field. Symbols that are missing entirely, or exist without a
+        `sic`, are simply absent from the result -- never mapped to `None`.
+        """
+        cursor = self.db.aql.execute(
+            _SIC_OF_AQL,
+            bind_vars={"symbols": symbols},
+        )
+        return {row["symbol"]: row["sic"] for row in cursor}
+
+    def comention_pmi(self, symbol: str) -> dict[str, float]:
+        """`co_mentioned` edges incident to `symbol` in either direction,
+        keyed by the other symbol and valued by the edge's `pmi`. Empty dict,
+        not an error, if `symbol` has no edges or `co_mentioned` doesn't
+        exist yet (mirrors `movers_with`'s `moves_with` guard).
+        """
+        if not self.db.has_collection("co_mentioned"):
+            return {}
+        cursor = self.db.aql.execute(
+            _COMENTION_PMI_AQL,
+            bind_vars={"symbol": f"equity/{symbol}"},
+        )
+        return {row["other"].split("/", 1)[1]: row["pmi"] for row in cursor}
 
 
 # Point-in-time (D-16, D-82): "most recent snapshot at or before as_of", not

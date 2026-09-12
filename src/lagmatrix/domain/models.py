@@ -117,6 +117,20 @@ class QuantPerspective(BaseModel):
     split_half_min_abs: float | None = None
     candidate_is_etf: bool
     note: str
+    # % of correlation edges whose leader shares the candidate's own 2-digit
+    # SIC major-group prefix (not the full 4-digit code). None when
+    # `arango_topology` is not configured, or when the candidate's own SIC
+    # did not resolve -- there is no candidate-side sector to compare against.
+    sector_match_pct: float | None = None
+    # Among correlation edges, the count whose leader's co-mention PMI is
+    # below/at-or-above `PMI_STRONG_THRESHOLD`. D-136: the two carry OPPOSITE
+    # signs (an edge existing at all predicts failure; a higher PMI among
+    # edged pairs predicts retention), so they are kept as two separate
+    # counts, never averaged into one (D-135's mistake). A leader with no
+    # co-mention edge at all counts toward neither. Both None when
+    # `arango_topology` is not configured.
+    comention_weak_count: int | None = None
+    comention_strong_count: int | None = None
 
 
 class DayTradePerspective(BaseModel):

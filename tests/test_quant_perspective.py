@@ -27,9 +27,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lagmatrix.domain.models import Candidate, LagEdge
+from lagmatrix.domain.models import Candidate, LagEdge, QuantPerspective
 from lagmatrix.graph.nodes import quant_perspective as qp_module
-from lagmatrix.graph.nodes.quant_perspective import compute_quant_perspective
+from lagmatrix.graph.nodes.quant_perspective import PMI_STRONG_THRESHOLD, compute_quant_perspective
 
 
 def _candidate(symbol: str = "CAND", as_of: date = date(2026, 6, 1)) -> Candidate:
@@ -343,3 +343,167 @@ def test_candidate_in_excluded_etf_set_is_flagged_etf(closes):
 
     assert etf_result.candidate_is_etf is True
     assert ordinary_result.candidate_is_etf is False
+
+
+class _FakeTopology:
+    """RED for PHASE-5 (PLAN-2026-09-12-relatedness-and-sectors): stand-in
+    for `ArangoTopology.sic_of`/`.comention_pmi` (PHASE-4) -- no I/O, returns
+    whatever a test constructs, matching how `llm`/`bars` are faked elsewhere
+    in this suite rather than reaching a live database.
+    """
+
+    def __init__(self, sic: dict[str, str] | None = None, pmi: dict[str, float] | None = None):
+        self._sic = sic or {}
+        self._pmi = pmi or {}
+
+    def sic_of(self, symbols: list[str]) -> dict[str, str]:
+        return {s: self._sic[s] for s in symbols if s in self._sic}
+
+    def comention_pmi(self, symbol: str) -> dict[str, float]:
+        return dict(self._pmi)
+
+
+def test_arango_topology_none_disables_all_three_relatedness_fields(closes):
+    """TASK-5.1: `arango_topology=None` must disable `sector_match_pct`,
+    `comention_weak_count` and `comention_strong_count` together, the same
+    "`None` disables the feature" contract every other optional
+    context-derived value in this repo honours -- even with correlation
+    edges present, so there is data the feature *could* have used.
+
+    Falsifiable by: any of the three defaulting to `0`/`0.0` instead of
+    `None` when the feature is off, which would be indistinguishable from
+    "measured, found nothing."
+    """
+    candidate = _candidate()
+    edges = [_corr_edge("LEAD1", "CAND", 0.5), _corr_edge("LEAD2", "CAND", 0.4)]
+
+    result = compute_quant_perspective(
+        candidate, edges, closes, trail=60, excluded_etfs=frozenset(), arango_topology=None
+    )
+
+    assert result.sector_match_pct is None
+    assert result.comention_weak_count is None
+    assert result.comention_strong_count is None
+
+
+def test_sector_match_pct_counts_same_2digit_sic_prefix(closes):
+    """TASK-5.2: `sector_match_pct` is the percentage of a candidate's
+    correlation-edge leaders sharing the candidate's own 2-digit SIC major
+    group -- CAND ("7372") matches LEAD1 ("7371", same "73" prefix) but not
+    LEAD2 ("3674", different major group), so exactly 1 of 2 leaders match.
+
+    Falsifiable by: comparing the full 4-digit SIC instead of the 2-digit
+    major-group prefix -- `"7372" != "7371"` and `"7372" != "3674"` on the
+    full code, which would give `0.0` instead of the `50.0` asserted here.
+    """
+    candidate = _candidate()
+    edges = [_corr_edge("LEAD1", "CAND", 0.5), _corr_edge("LEAD2", "CAND", 0.4)]
+    fake = _FakeTopology(sic={"CAND": "7372", "LEAD1": "7371", "LEAD2": "3674"})
+
+    result = compute_quant_perspective(
+        candidate, edges, closes, trail=60, excluded_etfs=frozenset(), arango_topology=fake
+    )
+
+    assert result.sector_match_pct == 50.0
+
+
+def test_sector_match_pct_none_when_candidates_own_sic_unresolved(closes):
+    """TASK-5.3: when the candidate's own SIC did not resolve (the ~0.1%
+    unmatched case), `sector_match_pct` must be `None` -- there is no
+    candidate-side sector to compare a leader against. Co-mention counts
+    come from an independent data source and must still compute as
+    ordinary ints, not be dragged down to `None` by the missing sector
+    lookup.
+
+    Falsifiable by: the whole relatedness read degrading to `None` together
+    -- proves sector and co-mention are wrongly coupled through one shared
+    "missing" branch instead of two independent ones.
+    """
+    candidate = _candidate()
+    edges = [_corr_edge("LEAD1", "CAND", 0.5)]
+    fake = _FakeTopology(
+        sic={"LEAD1": "7371"},  # CAND itself is deliberately absent/unresolved
+        pmi={"LEAD1": PMI_STRONG_THRESHOLD - 0.1},
+    )
+
+    result = compute_quant_perspective(
+        candidate, edges, closes, trail=60, excluded_etfs=frozenset(), arango_topology=fake
+    )
+
+    assert result.sector_match_pct is None
+    assert result.comention_weak_count == 1
+    assert result.comention_strong_count == 0
+
+
+def test_comention_three_state_encoding_never_collapses_to_one_number(closes):
+    """TASK-5.4 -- the test this whole phase exists to make pass. D-136
+    found co-mention PMI carries two OPPOSITE-signed effects (having an edge
+    predicts failure; higher PMI among edged pairs predicts retention), and
+    D-135 already made the mistake of averaging them into one column, which
+    destroyed the signal (0.4803). "No co-mention edge at all" must be a
+    DISTINCT THIRD STATE, not folded into "weak" as a PMI of zero would be.
+
+    LEAD1's PMI is above `PMI_STRONG_THRESHOLD` (imported, never a
+    hardcoded literal, so this test stays valid regardless of PHASE-2's
+    exact measured number), LEAD2's is below it, and LEAD3 has a
+    correlation edge but no entry at all in `comention_pmi`'s returned dict
+    -- no co-mention edge exists for that pair.
+
+    Falsifiable by: a future edit replacing the two counts with one
+    signed/averaged number (the exact D-135 mistake this feature exists to
+    not repeat), or treating a missing PMI entry as weak -- either would
+    make `comention_weak_count + comention_strong_count == 3` (matching
+    `n_edges`) instead of the `2` asserted below.
+    """
+    candidate = _candidate()
+    edges = [
+        _corr_edge("LEAD1", "CAND", 0.5),
+        _corr_edge("LEAD2", "CAND", 0.4),
+        _corr_edge("LEAD3", "CAND", 0.3),
+    ]
+    fake = _FakeTopology(
+        pmi={
+            "LEAD1": PMI_STRONG_THRESHOLD + 0.5,
+            "LEAD2": PMI_STRONG_THRESHOLD - 0.5,
+            # LEAD3 deliberately absent: no co-mention edge for that pair.
+        }
+    )
+
+    result = compute_quant_perspective(
+        candidate, edges, closes, trail=60, excluded_etfs=frozenset(), arango_topology=fake
+    )
+
+    assert result.n_edges == 3
+    assert result.comention_strong_count == 1
+    assert result.comention_weak_count == 1
+    assert result.comention_weak_count + result.comention_strong_count == 2
+
+
+def test_quant_perspective_model_round_trips_new_fields():
+    """TASK-5.5 (Q-61 guard): construct `QuantPerspective` directly with the
+    three new fields and assert the actual returned *values*, not
+    `hasattr`/`is not None`. `extra='ignore'` (Q-61) would let a
+    misspelled/missing field name construct successfully and silently drop
+    the kwarg -- only reading the value back off the result catches that.
+
+    Falsifiable by: any field name in the model not matching the
+    constructor kwarg exactly -- construction would still succeed (Q-61),
+    but the attribute access below would raise `AttributeError` instead of
+    returning the value asserted.
+    """
+    result = QuantPerspective(
+        n_edges=1,
+        median_ci_width=0.1,
+        duplicate_count=0,
+        split_half_sign_agree_pct=100.0,
+        split_half_min_abs=0.2,
+        candidate_is_etf=False,
+        note="x",
+        sector_match_pct=50.0,
+        comention_weak_count=1,
+        comention_strong_count=2,
+    )
+
+    assert result.sector_match_pct == 50.0
+    assert result.comention_weak_count == 1
+    assert result.comention_strong_count == 2

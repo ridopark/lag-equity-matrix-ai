@@ -17,7 +17,7 @@ from lagmatrix.adapters.llm import cap_for_llm
 from lagmatrix.comovement import confidence_interval, duplicate_flag
 from lagmatrix.domain.models import Candidate, LagEdge, QuantAnalystNote, QuantPerspective
 from lagmatrix.graph.context import LagMatrixContext
-from lagmatrix.graph.state import LagMatrixState, candidate_key
+from lagmatrix.graph.state import LagMatrixState, candidate_key, edges_for
 
 
 def compute_quant_perspective(
@@ -67,6 +67,28 @@ def compute_quant_perspective(
             else "no correlation edges in this candidate's neighbourhood"
         ),
     )
+
+
+def quant_perspective(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> dict:
+    """PHASE-6 `Send` target: the deterministic quant read for this branch's
+    own candidate(s), feeding `quant_analyst`'s gather via `quant_by_key`."""
+    closes = runtime.context.closes
+    trail = runtime.context.trail
+    excluded_etfs = runtime.context.excluded_symbols
+
+    candidates = [state["candidate"]] if "candidate" in state else state.get("candidates", [])
+
+    quant_by_key = {
+        candidate_key(c): compute_quant_perspective(
+            c, edges_for(state, c), closes, trail, excluded_etfs
+        )
+        for c in candidates
+    }
+
+    out: dict = {"quant_by_key": quant_by_key}
+    if "candidate" in state:
+        out["candidate"] = state["candidate"]
+    return out
 
 
 QUANT_SYSTEM_PROMPT = """\

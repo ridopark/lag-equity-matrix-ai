@@ -71,6 +71,25 @@ def compute_day_trade_perspective(
     )
 
 
+def day_trade_perspective(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> dict:
+    """PHASE-6 `Send` target: the deterministic day-trade read for this
+    branch's own candidate(s), feeding `day_trade_analyst`'s gather via
+    `day_trade_by_key`."""
+    bars = runtime.context.bars
+    trail = runtime.context.trail
+
+    candidates = [state["candidate"]] if "candidate" in state else state.get("candidates", [])
+
+    day_trade_by_key = {
+        candidate_key(c): compute_day_trade_perspective(c, bars, trail) for c in candidates
+    }
+
+    out: dict = {"day_trade_by_key": day_trade_by_key}
+    if "candidate" in state:
+        out["candidate"] = state["candidate"]
+    return out
+
+
 DAY_TRADE_SYSTEM_PROMPT = """\
 You are the day-trade analyst for a stock-lag pipeline. You are given a
 deterministic read of one candidate's own trailing liquidity and gap

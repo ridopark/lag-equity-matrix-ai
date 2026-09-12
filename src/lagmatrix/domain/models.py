@@ -91,37 +91,6 @@ class Evidence(BaseModel):
     detail: str
 
 
-class Assessment(BaseModel):
-    """The pipeline's output: does the neighbourhood back this candidate?
-
-    Deliberately not a buy/sell call — LagMatrix conditions an existing signal
-    rather than originating one (D-18).
-    """
-
-    candidate: Candidate
-    verdict: str  # "corroborated" | "contradicted" | "neutral"
-    odds_adjustment: float  # log-odds delta applied to the upstream signal's prior
-    effective_evidence: float  # independence-weighted, NOT a count of neighbours
-    supporting: list[Evidence]
-    contradicting: list[Evidence]
-    rationale: str
-    ts: datetime
-    # a plain sentence naming the candidate's own thesis-signed move and the
-    # leader that surfaced it; carries no vote (D-87 removed the earlier
-    # classification fields as unfounded and non-predictive). None when the
-    # candidate's own move is unknown — recorded in `errors` rather than
-    # guessed (D-86).
-    description: str | None = None
-    # how many price-correlated neighbours fuse_evidence found for this
-    # candidate (D-91) -- a fact about what the pipeline looked at, not a
-    # claim about the market. Carries no weight and is never summed into
-    # `effective_evidence`; it exists only so a reader can tell "no
-    # neighbourhood to examine" (0) from "examined, and none of them moved"
-    # (>0, with `supporting` and `contradicting` both empty) -- the two
-    # were byte-identical before this field existed.
-    neighbours: int
-
-
 class QuantPerspective(BaseModel):
     """Deterministic read of a candidate's correlation neighbourhood (PHASE-1) --
     Fisher CI width, a duplicate-series flag and within-window split-half sign
@@ -187,3 +156,45 @@ class DayTradeAnalystNote(BaseModel):
     gap_dominant: bool | None = None
     reasoning: str = ""
     model: str = ""
+
+
+class Assessment(BaseModel):
+    """The pipeline's output: does the neighbourhood back this candidate?
+
+    Deliberately not a buy/sell call — LagMatrix conditions an existing signal
+    rather than originating one (D-18).
+    """
+
+    candidate: Candidate
+    verdict: str  # "corroborated" | "contradicted" | "neutral"
+    odds_adjustment: float  # log-odds delta applied to the upstream signal's prior
+    effective_evidence: float  # independence-weighted, NOT a count of neighbours
+    supporting: list[Evidence]
+    contradicting: list[Evidence]
+    rationale: str
+    ts: datetime
+    # a plain sentence naming the candidate's own thesis-signed move and the
+    # leader that surfaced it; carries no vote (D-87 removed the earlier
+    # classification fields as unfounded and non-predictive). None when the
+    # candidate's own move is unknown — recorded in `errors` rather than
+    # guessed (D-86).
+    description: str | None = None
+    # how many price-correlated neighbours fuse_evidence found for this
+    # candidate (D-91) -- a fact about what the pipeline looked at, not a
+    # claim about the market. Carries no weight and is never summed into
+    # `effective_evidence`; it exists only so a reader can tell "no
+    # neighbourhood to examine" (0) from "examined, and none of them moved"
+    # (>0, with `supporting` and `contradicting` both empty) -- the two
+    # were byte-identical before this field existed.
+    neighbours: int
+    # quant_perspective/quant_analyst and day_trade_perspective/
+    # day_trade_analyst (PHASE-6) -- not read by the verdict/
+    # effective_evidence/odds_adjustment logic above; None only when the
+    # candidate reached `assess()` without going through the graph's
+    # `quant_perspective`/`day_trade_perspective` branches at all (e.g. a
+    # test that calls `assess()` directly on hand-built state).
+    quant: QuantPerspective | None = None
+    quant_analyst: QuantAnalystNote | None = None
+    day_trade: DayTradePerspective | None = None
+    day_trade_analyst: DayTradeAnalystNote | None = None
+

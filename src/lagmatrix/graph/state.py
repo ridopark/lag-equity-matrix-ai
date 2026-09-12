@@ -5,7 +5,18 @@ from __future__ import annotations
 from operator import add
 from typing import Annotated, TypedDict
 
-from lagmatrix.domain.models import Assessment, Candidate, Evidence, LagEdge, NewsChunk, Shock
+from lagmatrix.domain.models import (
+    Assessment,
+    Candidate,
+    DayTradeAnalystNote,
+    DayTradePerspective,
+    Evidence,
+    LagEdge,
+    NewsChunk,
+    QuantAnalystNote,
+    QuantPerspective,
+    Shock,
+)
 
 
 def candidate_key(c: Candidate) -> str:
@@ -76,6 +87,14 @@ class LagMatrixState(TypedDict, total=False):
     effective_evidence_by_key: dict[str, float]
     description_by_key: dict[str, str]
     neighbours_by_key: dict[str, int]
+
+    # quant_perspective / quant_analyst (PHASE-6)
+    quant_by_key: Annotated[dict[str, QuantPerspective], _merge]
+    quant_analyst_by_key: Annotated[dict[str, QuantAnalystNote], _merge]
+
+    # day_trade_perspective / day_trade_analyst (PHASE-6)
+    day_trade_by_key: Annotated[dict[str, DayTradePerspective], _merge]
+    day_trade_analyst_by_key: Annotated[dict[str, DayTradeAnalystNote], _merge]
 
     # assessor
     assessments: list[Assessment]

@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import invoke_graph
 from lagmatrix.domain.models import Candidate
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
@@ -38,7 +39,7 @@ def _candidate(sym, d=date(2026, 6, 1), direction="up") -> Candidate:
 def _invoke(closes, candidates):
     g = build_graph(with_news=False)
     ctx = LagMatrixContext(closes=closes, signal_universe=set(), topk=TOPK)
-    return g.invoke({"candidates": candidates}, context=ctx)
+    return invoke_graph(g, {"candidates": candidates}, context=ctx)
 
 
 def _two_bloc_closes() -> pd.DataFrame:

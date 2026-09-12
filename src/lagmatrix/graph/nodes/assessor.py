@@ -21,6 +21,10 @@ def assess(state: LagMatrixState) -> dict:
     effective_by_key = state.get("effective_evidence_by_key", {})
     description_by_key = state.get("description_by_key", {})
     neighbours_by_key = state.get("neighbours_by_key", {})
+    quant_by_key = state.get("quant_by_key", {})
+    quant_analyst_by_key = state.get("quant_analyst_by_key", {})
+    day_trade_by_key = state.get("day_trade_by_key", {})
+    day_trade_analyst_by_key = state.get("day_trade_analyst_by_key", {})
     out: list[Assessment] = []
 
     for c in state.get("candidates", []):
@@ -61,6 +65,10 @@ def assess(state: LagMatrixState) -> dict:
                 ts=datetime.now(UTC),
                 description=description_by_key.get(key),
                 neighbours=neighbours_by_key.get(key, 0),
+                quant=quant_by_key.get(key),
+                quant_analyst=quant_analyst_by_key.get(key),
+                day_trade=day_trade_by_key.get(key),
+                day_trade_analyst=day_trade_analyst_by_key.get(key),
             )
         )
     return {"assessments": out}

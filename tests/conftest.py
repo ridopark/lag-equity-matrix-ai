@@ -18,6 +18,7 @@ code under test, which is worse than slow: it teaches you to distrust red.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pathlib
 import socket
@@ -291,15 +292,37 @@ def bars_ohlcv() -> pd.DataFrame:
     return pd.concat([ordinary, extreme], ignore_index=True)
 
 
+def invoke_graph(graph, *args, **kwargs):
+    """Drive a compiled graph the way production does.
+
+    Every production caller is async -- `runner.py:132` awaits `ainvoke`,
+    `serve.py` and `capture_showcase.py` use `astream`, `daily_ingest.py`
+    wraps `ainvoke` in `asyncio.run`. Sync `.invoke()` cannot run this graph
+    at all once any node is `async def`: langgraph raises `TypeError: No
+    synchronous function provided`. `capture_trace.py`'s docstring already
+    recorded this when PHASE-5 made `retrieve_news` async; the tests below
+    were simply never converted, because `retrieve_news` is gated behind
+    `with_news=True` and they build with it off.
+
+    The two analyst nodes are not gated, so the conversion is now forced --
+    and wanted: the sync and async executors schedule differently (only the
+    async one sets `__cancel_on_exit__`), so a test on the sync path was
+    pinning behaviour production never exercises.
+    """
+    return asyncio.run(graph.ainvoke(*args, **kwargs))
+
+
 @pytest.fixture
 def run_graph(closes):
-    def _run(candidates, *, signal_universe=frozenset(), with_news=False):
+    def _run(candidates, *, signal_universe=frozenset(), with_news=False, llm=None, bars=None):
         g = build_graph(with_news=with_news)
-        return g.invoke(
+        return asyncio.run(g.ainvoke(
             {"candidates": candidates},
             context=LagMatrixContext(closes=closes,
-                                      signal_universe=set(signal_universe)),
-        )
+                                      signal_universe=set(signal_universe),
+                                      llm=llm,
+                                      bars=bars),
+        ))
     return _run
 
 

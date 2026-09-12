@@ -30,3 +30,4 @@ class LagMatrixContext:
     vector_index: object | None = None  # set in PHASE-7; None disables news
     llm: AnalystClient | None = None  # set in PHASE-6; None disables analyst nodes
     max_llm_candidates: int | None = None  # set in PHASE-6; None disables the batch cap
+    bars: pd.DataFrame | None = None  # set in PHASE-7; None degrades day_trade to "no bars data"

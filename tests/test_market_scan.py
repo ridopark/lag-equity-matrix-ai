@@ -55,7 +55,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import arango_db_or_skip
+from conftest import arango_db_or_skip, invoke_graph
 from lagmatrix.adapters.arango import ArangoTopology
 from lagmatrix.adapters.candidates import MarketScan
 from lagmatrix.domain.models import Candidate, LagEdge
@@ -630,7 +630,7 @@ def test_unioning_the_originating_leader_into_signal_universe_closes_the_reentry
     g = build_graph(with_news=False)
 
     # Without the fix, given this fixture: the hole is real.
-    hole = g.invoke(
+    hole = invoke_graph(g, 
         {"candidates": [candidate]},
         context=LagMatrixContext(closes=closes, signal_universe=set()),
     )
@@ -639,7 +639,7 @@ def test_unioning_the_originating_leader_into_signal_universe_closes_the_reentry
     assert len(hole["assessments"]) == 1
 
     # With the fix: Y joins signal_universe alongside X itself (PHASE-5).
-    fixed = g.invoke(
+    fixed = invoke_graph(g, 
         {"candidates": [candidate]},
         context=LagMatrixContext(closes=closes, signal_universe={"Y"}),
     )

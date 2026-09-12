@@ -4394,7 +4394,51 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   D-95's published 1,236,372, a difference of precisely the **6 same-company
   pairs** D-95 records dropping.
   Cost: **$0**. The paid arms remain unspent.
-- **Status:** Accepted
+
+  ---
+
+  **CORRECTED 2026-09-12T12:20, on three counts. Two consulting agents audited
+  this and found the script violated a recorded decision.**
+
+  **1. The script ignored D-100.** It did a raw `pct_change()` with no
+  `_IMPLAUSIBLE_RETURN_CUTOFF`, so all 11 corrupt returns were live -- 4 in
+  discovery, 7 in validation (verified: the cutoff is 10.0 and the counts are
+  exact). `standardise` subtracts the cross-sectional mean, so a single corrupt
+  return becomes a common shock to all 1,573 symbols on that date. LINE's
+  2024-07-25 contributes **+0.1094** to mean pairwise validation correlation on
+  its own, against a true mean of 0.1516. `experiment_lag_matrix.py` does not
+  mask either, and this script inherited the omission.
+  **The band populations above were ~83% artefact.** Masked, 0.3-0.4 falls from
+  114,936 pairs to **19,805** and 0.4-0.5 from 39,959 to **6,803**. The plan's
+  own cited sizes (115,155 / 39,990) are the inflated ones.
+
+  **2. The "difference of exactly 6" claim was wrong** -- a coincidence of two
+  errors, not a reproduction. This script applies **no screen**, so 1,236,378 is
+  the raw triangle; D-95's 1,236,372 is after a `|corr| >= 0.95` screen **and**
+  D-100's mask. Measured directly: the screen drops 7 pairs unmasked and 6 when
+  masked (masking LINE's +447.9 return breaks LINE/NATL below 0.95 -- the very
+  pair D-95 flagged). Comparing an unscreened-unmasked count against a
+  screened-masked one nets to 6 by chance. Tidy arithmetic is not verification.
+
+  **3. The verdict survives and strengthens; the marginal band was an artefact
+  of the same defect.** With D-100 applied:
+
+  | band | pairs | agree | disagree | val \|c\| agree | val \|c\| dis | gap |
+  |---|---|---|---|---|---|---|
+  | 0.3-0.4 | 19,805 | 18,989 | 816 | 0.2492 | 0.0915 | **+0.1576** |
+  | 0.4-0.5 | 6,803 | 6,755 | 48 | 0.3989 | 0.0924 | **+0.3065** |
+
+  Five times the original gaps, both far past the 0.03 bar. The "+0.0003 clears
+  it" knife-edge I reported was a property of the corrupted population: on the
+  *unmasked* data a control matching on discovery `|corr|` pulls 0.3-0.4 down to
+  +0.0241, **below** the bar. On masked data the matched gap is **+0.1389**. A
+  permutation control is clean (+0.0001 +/- 0.0007), so this is not a labelling
+  artefact either way.
+  **The remaining caveat is the disagree group's size**, which the mask makes
+  small: 816 pairs in 0.3-0.4 and only **48** in 0.4-0.5. The +0.3065 gap rests
+  on 48 pairs.
+- **Status:** Accepted, with the correction above superseding the original
+  table. The script now applies D-100's mask.
 
 ## Open Questions
 

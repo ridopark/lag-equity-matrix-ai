@@ -33,12 +33,15 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from experiment_lag_matrix import (  # noqa: E402
     COVERAGE,
     split_at_boundary,
     standardise,
 )
+
+from lagmatrix.comovement import _IMPLAUSIBLE_RETURN_CUTOFF  # noqa: E402
 
 BANDS = [(0.2, 0.3), (0.3, 0.4), (0.4, 0.5), (0.5, 0.6), (0.6, 1.01)]
 POWERED = [(0.3, 0.4), (0.4, 0.5)]     # the two the decision rule reads
@@ -54,6 +57,14 @@ def main() -> None:
     bars = pd.read_parquet("data/bars-10y.parquet")
     closes = bars.pivot_table(index="timestamp", columns="symbol", values="close")
     rets = closes.pct_change().iloc[1:]
+    # D-100. Without this the corrupt returns are live -- 11 of them, 4 in
+    # discovery and 7 in validation -- and `standardise` subtracts the
+    # cross-sectional mean, so ONE bad return becomes a common shock across all
+    # 1,573 symbols on that date. LINE's 2024-07-25 alone contributes +0.1094
+    # to mean pairwise validation correlation, against a true mean of 0.1516.
+    # The first version of this script omitted the mask and its bands were
+    # ~83% artefact; see D-132's correction.
+    rets = rets.where(rets.abs() <= _IMPLAUSIBLE_RETURN_CUTOFF)
     disc_raw, val_raw = split_at_boundary(rets)
 
     zd, cols_d = standardise(disc_raw)
@@ -81,7 +92,8 @@ def main() -> None:
     v = np.abs(cv[iu, ju])
     agrees = np.sign(c1[iu, ju]) == np.sign(c2[iu, ju])
     ad = np.abs(d)
-    print(f"unordered pairs: {len(d):,}\n")
+    print(f"unordered pairs: {len(d):,} (raw triangle; D-95's published "
+          f"1,236,372 is after a |corr|>=0.95 screen this script does not apply)\n")
 
     print(f"{'band':>12}{'pairs':>10}{'agree':>9}{'disagree':>10}"
           f"{'val|c| agree':>14}{'val|c| dis':>12}{'gap':>9}")

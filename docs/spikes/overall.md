@@ -4599,6 +4599,74 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the explanation around them is illustration, not mechanism.
 - **Status:** Accepted
 
+### D-135 — Richer evidence raised the deterministic ceiling and made Haiku worse
+
+- **When:** 2026-09-12T11:59:21-05:00
+- **Decision:** The four enrichments the owner asked for were built and measured.
+  Two carry real information, two do not, and handing all of them to Haiku moved
+  it **backwards**. The deterministic sort is now 0.7043-0.7301; Haiku on the
+  same enriched evidence is 0.6216, down from 0.6484 on the thinner brief.
+- **Why:** D-134 left the gap to deterministic unestablished
+  (CI [-0.0029, +0.0911], straddling zero) and the open question was whether the
+  model was information-starved. It was not. The information was genuinely there
+  — the same features lifted the deterministic sort by +0.04 — and the model
+  failed to use it. That distinguishes "the brief is too thin" from "the model
+  cannot weigh this evidence", and it is the second.
+- **Outcome:** observed. Held-out AUC, 3,402 pairs in band 0.4-0.5, train/test
+  disjoint, curves fitted on train only:
+
+  | feature | held-out AUC |
+  |---|---|
+  | discovery \|corr\| | 0.6256 |
+  | weaker of 2 halves (D-134's best) | 0.6654 |
+  | **median of 4 quarter-windows** | **0.6958** |
+  | concentration (-top-10-day share) | 0.5982 |
+  | liquidity (min of pair) | 0.4286 |
+  | co-mention PMI | 0.4803 |
+  | supply edge | 0.4844 |
+  | **all combined, logistic fit on train** | **0.7301** |
+
+  Then, on 399 scored held-out pairs:
+
+  | arm | AUC |
+  |---|---|
+  | deterministic median-quarter | 0.7043 |
+  | Haiku, D-134 brief (3 numbers) | 0.6484 |
+  | Haiku, enriched brief (7 fields) | 0.6216 |
+
+  Gain over D-134's Haiku: 95% CI [-0.0879, +0.0204] — **not established**.
+  Deficit vs deterministic: 95% CI [+0.0383, +0.1455] — **established**, where
+  D-134's straddled zero. More evidence widened the gap instead of closing it.
+- **Per enrichment, as asked:**
+  - *Finer stability* — **works, and is the single biggest win.** Four quarters
+    beat two halves 0.6958 vs 0.6654. Eight and twelve windows are worse
+    (0.6450, 0.6542): the segments get too short to estimate. Four is the peak,
+    not a monotone trend, so this is a tuned choice and not a free lunch.
+  - *Concentration* — **marginal.** 0.5982 alone, and its weight in the combined
+    fit is -0.084, near nothing. Median pair draws 18.1% of its co-movement from
+    its ten largest days (range 8.0%-77.5%), so the spread exists; it just does
+    not predict replication.
+  - *Relatedness* — **dead on coverage, not on merit.** Only 2.0% of band pairs
+    have a co-mention edge and **0.1% (7 of 6,803) have a supply edge**. "We
+    have a supply graph and we're not passing it" is true, and passing it
+    reaches 7 pairs. Where an edge does exist, retention is *lower* (37.4% vs
+    53.8%), so the sign is against the hypothesis as well. Carried in the brief
+    as asked, reported as unmeasurable at this n rather than silently dropped.
+  - *Liquidity* — **works, backwards.** The hypothesis was that thin stocks give
+    noisier correlations. Measured, thin pairs replicate *more*, monotonically:
+    Q1 (thinnest) 65.9% retained, Q2 50.5%, Q3 50.8%, Q4 (thickest) 46.7%. A
+    19pp spread. **Do not trade on this without ruling out stale prices:** a
+    thinly traded name that does not print carries its last price forward, which
+    manufactures autocorrelation that persists into *both* windows for the same
+    mechanical reason. That would make it a real predictor of "the number
+    replicates" and a useless predictor of "the money is there". Untested.
+- **Also settled:** `discovery sessions: 1509` is the same constant on every
+  pair and carries zero information; the Fisher CI width is a deterministic
+  function of the correlation already shown. D-134's five-number brief had three
+  real numbers. Both are dropped from the enriched brief.
+- **Status:** Accepted. Supersedes the "give it more information" hypothesis.
+  The lever for Haiku is not evidence volume.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

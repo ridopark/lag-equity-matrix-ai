@@ -265,7 +265,7 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     <label for="xdate">date</label>
     <input id="xdate" type="date">
     <label for="xcorr">min correlation</label>
-    <input id="xcorr" type="number" min="0.1" max="0.95" step="0.05" value="0.5"
+    <input id="xcorr" type="number" min="0.1" max="0.95" step="0.05" value="0.4"
       style="width:5rem">
     <button class="go" id="xgo">Scan</button>
     <span class="status" id="xstatus"></span>
@@ -1088,13 +1088,12 @@ function pickLeader(sym) {
     b.setAttribute("aria-current", String(b.dataset.sym === sym)));
   $("#xfollowers").innerHTML = `<p class="emptyp">measuring ${esc(sym)}…</p>`;
   const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
-                                 top_n: "18"});
+                                 top_n: "18", min_abs_corr: $("#xcorr").value || "0.4"});
   fetch("/followers?" + q).then(r => r.json()).then(d => {
     if (d.error) {
       $("#xfollowers").innerHTML = `<p class="emptyp">${esc(d.error)}</p>`;
       return;
     }
-    d.min_abs_corr = parseFloat($("#xcorr").value) || d.min_abs_corr;
     drawFollowers(d);
     $("#xrun").hidden = !d.followers.length;
     loadNet(sym);
@@ -1272,7 +1271,7 @@ function loadNet(sym) {
   NET = null; NETSEL = null;
   $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = true;
   const q = new URLSearchParams({symbol: sym, as_of: $("#xdate").value,
-                                 min_abs_corr: $("#xcorr").value || "0.5"});
+                                 min_abs_corr: $("#xcorr").value || "0.4"});
   fetch("/network?" + q).then(r => r.json()).then(d => {
     if (d.error || !d.nodes || d.nodes.length < 2) return;
     NET = d;

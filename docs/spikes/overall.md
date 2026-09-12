@@ -4110,11 +4110,141 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   bound stands and I could not narrow it.
 - **Status:** Accepted
 
+### D-127 — The unauthenticated redis is an accepted risk, not an open task
+
+- **When:** 2026-09-11T05:30:00-05:00
+- **Decision:** Q-60 is closed as **accepted and declined**. The trading
+  system's redis keeps no password. No change is made to `copytrade`.
+- **Why:** The owner's call, made with the measurements in front of them, and
+  the premise is largely correct: redis is `ClusterIP` with no `nodePort`, no
+  LoadBalancer and no host-level `:6379` listener, so nothing reaches it from
+  outside the cluster. Every traefik ingress is `.local` or `nip.io` bound to
+  the LAN. Against that, a password on a live real-money service costs a
+  restart with real blast radius, to defend a service nothing off-LAN can
+  address.
+  The alternative that lost was setting `requirepass`. The argument for it was
+  never an internet port-scan — it was that the realistic path is a workload in
+  this cluster misbehaving rather than an intruder arriving: `open-webui`, two
+  Discord mirrors processing external messages, and **this project's own ingest,
+  which pulls arbitrary news text off the internet and embeds it**. Any of those,
+  or any future workload in a namespace with no egress policy, reaches those 15
+  keys with no credential. That argument was made once, weighed, and rejected.
+  Not re-litigated here.
+- **Outcome:** Recorded so it reads as a decision rather than a forgotten
+  to-do. **One fact is kept because it is the thing that would change the
+  answer:** `cloudflared` runs with `TUNNEL_TOKEN` and **no config file and no
+  configmap** — a remotely-managed tunnel whose routing table lives in the
+  Cloudflare dashboard, not in this cluster and not in any repo. "Nothing
+  external can reach the cluster" therefore cannot be verified from inside it,
+  and can change without any commit or manifest changing. That is not an
+  argument against this decision; it is the condition under which the decision
+  should be revisited.
+  **Revisit if:** the tunnel begins routing to `copytrade` or `apps`, a
+  workload running untrusted code is added to a namespace with no egress
+  policy, or redis starts holding anything whose corruption would cost money
+  rather than a cache miss.
+- **Status:** Accepted
+
+### D-128 — "No company moved with it" no longer covers for a missing session
+
+- **When:** 2026-09-11T15:10:00-05:00
+- **Decision:** `followers()` and `network()` call `session_available()` before
+  `comovement_edges()` and return `{"error": reason}` when the requested session
+  cannot be answered, instead of an empty-but-successful payload.
+- **Why:** Reported by the user: picking some recent dates showed *"No company
+  has moved with X reliably enough to clear |r| >= 0.5 ... some names really do
+  move on their own."* That sentence is a claim about the market, and it was
+  being rendered in three cases where the truth is "there is no data for that
+  date". `comovement_edges` returns `[]` when `as_of` is absent from the frame
+  or when fewer than `trail` sessions precede it — a deliberate contract — and
+  both endpoints turned that silence into a finding.
+  Measured on the live service, all three return 0 followers with `error=None`
+  for DELL, which genuinely has 4 followers on a real session:
+  **2026-09-12** (a Saturday, selectable from the date box), **2026-09-11**
+  (newer than the file), and **2016-09-20** (inside the first 250 sessions).
+  The second is the everyday case and the reason the report said *recent* dates:
+  **`bars-10y.parquet` can never contain today.** Alpaca publishes no daily bar
+  for the current session even after the close — measured in D-125, where two
+  separate attempts to exercise the bars write both returned `+0 new rows`. So
+  the newest session is always yesterday, and picking today always looked like
+  nothing moved with anything.
+  `session_available()` already existed for exactly this, returns `(ok, reason)`,
+  and was used by `daily_ingest.py:195` but by neither endpoint. The alternative
+  that lost was a new error path in `serve.py`: it would have duplicated the
+  message and let the two drift, which is why a test pins that the string comes
+  from the helper rather than a local copy.
+- **Outcome:** Two lines per endpoint. **No UI change was needed** —
+  `serve_index.html:1093` already checked `d.error` first and returned before
+  touching `d.followers`, so the seam existed and simply was not used by these
+  two callers.
+  Red wrote 5 tests and I verified the failure myself before green ran: 4 failed,
+  1 passed. The pass is the positive control, which exists because an
+  implementation that returned an error unconditionally would otherwise satisfy
+  every other test. Suite 317 -> **322 passed, 1 skipped**; ruff clean.
+  Verified against real data rather than the fixture alone: 2026-09-08 and
+  2026-09-09 still return 4 followers, while the three bad dates now report
+  `2026-09-12 not found in data (last session available: 2026-09-09)` and
+  `only 10 sessions precede 2016-09-20, need 250`.
+  **The user's original question was answered separately and the answer was "it
+  was real".** On 2026-09-08 the data was complete — 250 sessions, 2,183 symbols
+  — and RARE (best 0.339 with DNLI), TARS (0.386, IONS), TDS (0.373, DUKU),
+  LULU (0.436, ABNB) and OXM (0.382, OPEN) genuinely had no peer clearing 0.5.
+  LULU is the near miss: 13 names appear at 0.4. So the message was true that
+  day and could not have told them so.
+- **Status:** Accepted
+
+### D-129 — The correlation threshold defaults to 0.4, and the control now works
+
+- **When:** 2026-09-11T17:05:00-05:00
+- **Decision:** `min_abs_corr` defaults to **0.4** rather than 0.5, and
+  `/followers` honours the query parameter it had been ignoring.
+- **Why:** The owner asked for 0.4 after D-128's investigation showed LULU's
+  best match (ABNB, 0.436) sitting just under the old cutoff — a real
+  co-movement the page could not show. Answering that request surfaced a
+  second, worse defect: **`/followers` never parsed `min_abs_corr` at all.**
+  Measured on the live pod, every value returned the same result, including a
+  deliberately absurd one:
+
+  ```
+  /followers?symbol=LULU&as_of=2026-09-08                  -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.4 -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.3 -> min_abs_corr=0.5
+  /followers?symbol=LULU&as_of=2026-09-08&min_abs_corr=0.9 -> min_abs_corr=0.5
+  ```
+
+  The UI compounded it. `serve_index.html:1097` overwrote the server's echoed
+  value with the input box's value *after* the fetch, so the page labelled every
+  result with a threshold that had never been applied. The displayed threshold
+  and the applied threshold were independent quantities that happened to agree
+  only at 0.5. **Changing the default alone would have left the control inert**,
+  which is why this is one decision and not two.
+  `/network` had parsed it correctly all along, so the asymmetry was between two
+  sibling endpoints — the same shape as D-104 and D-108.
+- **Outcome:** Defaults changed in four places that can drift independently
+  (both signatures, both handler fallbacks), `/followers` now uses
+  `parse_bounded(..., 0.1, 1.0)` and 400s on an out-of-range value like
+  `/network` already did, the page sends the box's value, and the post-fetch
+  overwrite is deleted so the label reflects what was actually filtered.
+  `CoMovementFollowers(..., min_abs_corr=0.6)` at `serve.py:206` is a different
+  feature and was deliberately left alone.
+  Red wrote 7 tests, 6 failing, verified before green ran. **Red's first draft of
+  the pass-through test used `0.5` as its explicit value and passed against the
+  broken handler**, because 0.5 was the hardcoded fallback — it caught this
+  itself and switched to `0.3`, outside both the old and new defaults, so no
+  coincidence with either can satisfy it. That is the whole reason the test is
+  worth having.
+  Suite 322 -> **329 passed, 1 skipped**; ruff clean.
+  Verified on real data: **LULU 0 -> 13 followers, top ABNB at +0.436**; DELL
+  4 -> 11, top HPE at +0.648. RARE, TARS, TDS and OXM stay at 0, consistent with
+  their measured bests of 0.339-0.386 — the threshold moved, the measurements
+  did not.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
-| Q-60 | The trading system's redis requires no password, and any pod in the cluster can reach it | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Not fixed — this is the user's trading infrastructure and not mine to change.** |
+| Q-60 | ~~The trading system's redis requires no password, and any pod in the cluster can reach it~~ **CLOSED by D-127 — accepted risk, declined** | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Closed 2026-09-11 by D-127: accepted and declined.** Weighed against the verified exposure boundary (ClusterIP, no nodePort, no host listener, LAN-only ingresses) and the cost of restarting a live real-money service. D-127 records the condition that would change the answer — `cloudflared` is a remotely-managed tunnel whose routing is configured outside this cluster, so the "nothing gets in" premise is not verifiable from within it. |
 | Q-58 | ~~NetworkPolicy is unenforced for the first ~1–3 seconds of a pod's life~~ **ANSWERED by D-126** — the window is real and cannot be closed without changing CNI; the ingest now refuses to start until enforcement is observable | D-121's isolation claim, for Jobs specifically | Measured by `postmortem` 2026-09-10 with a looping probe and a control pod (no `app` label, so only `default-deny-egress` selects it): `t+0.1s alpaca=OPEN arango=OPEN pg-copytrade=OPEN`, `t+3.1s` all three `ConnectionRefusedError`. kube-router programs the pod's `KUBE-POD-FW-*` chain on the pod-add event; until it does, the pod has no chain and the namespace default-deny does not reach it. The ingest-labelled pod shows the same window on its denied target. **Irrelevant for a Deployment; the ingest is a Job — the workload class where a fast-failing container is most likely to open a socket inside the window.** We are not exposed today only because the pod spends those seconds importing pandas and langgraph before it opens anything: that is timing, not a boundary. Worth recording that `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. **Fixed by D-126** with an `await-netpol` init container rather than a `sleep`, after reproducing the window here. Worth keeping: `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. My own first re-measurement then printed computed timestamps as if they were observations. The window survived two bad measurements by two different parties before either of us measured it properly. |
 | Q-59 | ~~The deployed image is seven commits stale, and nothing was ever going to build a newer one~~ **ANSWERED 2026-09-10 by the cutover to `faa1076`** | every claim in D-119, D-120, D-122 and D-123 about what *runs* | The CronJob and `lagmatrix-web` both run `ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5`, which is the commit **before** D-119. Raised by `postmortem` as "nothing newer was ever built"; the root cause is mine to state: `.github/workflows/build-images.yml` triggers only on `push: branches: [main]`, and all seven commits are on `graphrag-showcase-and-scan` (PR #2, unmerged). **No build failed — none was ever triggered.** `imagePullPolicy: IfNotPresent` plus two hand-imported tags in `k3s ctr images ls` confirms 66b11a5 arrived by hand, not by the pipeline. `postmortem`'s "nothing newer was deployed" was too broad and it withdrew it: the **yaml-carried** work *is* live (three netpols present, arango limit 2560Mi, `0 9 * * 2-6 tz=UTC`, and now D-125's 3Gi), because `kubectl apply` needs no image. Only three of the seven commits carry runtime code: 90a1c17 (`load_vectors.py`, `ingest.py`), a5241ac (`serve.py`, `daily_ingest.py`), ee31cf9 (`daily_ingest.py` — verified comment-only, zero runtime risk). Consequence while it stands: D-119's distinct failure messages and D-122's fixed-floor candidates do not exist in the pod, so an ArangoDB failure tomorrow still reads "ArangoDB not reachable" — the exact message D-119 exists to delete. **Closed 2026-09-10T18:07:** built `faa1076` from HEAD, verified the image *contains* the four fixes before shipping rather than trusting the build, imported it to the node and cut both the CronJob and `lagmatrix-web` over. Attended run succeeded at 899 MiB of a 3072 MiB limit. **The structural cause is not closed and became Q-57's recurrence:** `main` is now behind the code that is actually running, so a rebuild from `main` still yields an image without D-122/D-124. Merging the branch is what fixes that, not the cutover. |
 | Q-53 | ~~The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway~~ **ANSWERED by D-121** | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |

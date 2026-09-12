@@ -388,7 +388,7 @@ def movers(as_of: str, top_n: int = 25) -> dict:
 
 
 def followers(symbol: str, as_of: str, trail: int = 250,
-              min_abs_corr: float = 0.5, top_n: int = 25) -> dict:
+              min_abs_corr: float = 0.4, top_n: int = 25) -> dict:
     """Step 2 of the UI: given a leader, the names that move with it.
 
     Edges come from `lagmatrix.comovement` — measured pairwise correlation of
@@ -408,7 +408,7 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     """
     if not ALLOW_REAL:
         raise PermissionError("followers needs real market data; start with --allow-real")
-    from lagmatrix.comovement import comovement_edges
+    from lagmatrix.comovement import comovement_edges, session_available
 
     # Co-movement needs history, and the two price files serve different jobs:
     # `bars.parquet` sweeps wider (3,204 symbols) but reaches back only 159
@@ -424,6 +424,9 @@ def followers(symbol: str, as_of: str, trail: int = 250,
     sym = symbol.upper()
     if sym not in closes.columns:
         return {"error": f"{sym} not in the price file"}
+    ok, reason = session_available(closes, d, trail)
+    if not ok:
+        return {"error": reason}
 
     edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
                              exclude=excluded)
@@ -459,7 +462,7 @@ def followers(symbol: str, as_of: str, trail: int = 250,
 
 
 def network(symbol: str, as_of: str, trail: int = 250,
-            min_abs_corr: float = 0.5, top_n: int = 40) -> dict:
+            min_abs_corr: float = 0.4, top_n: int = 40) -> dict:
     """The leader's neighbourhood as a graph, including edges *among* followers.
 
     The flat follower list hides the thing that matters most about a
@@ -477,7 +480,7 @@ def network(symbol: str, as_of: str, trail: int = 250,
     """
     if not ALLOW_REAL:
         raise PermissionError("network needs real market data; start with --allow-real")
-    from lagmatrix.comovement import comovement_edges
+    from lagmatrix.comovement import comovement_edges, session_available
 
     closes = COMOVE_CLOSES()
     excluded = frozenset(
@@ -488,6 +491,9 @@ def network(symbol: str, as_of: str, trail: int = 250,
     sym = symbol.upper()
     if closes is None or sym not in closes.columns:
         return {"error": f"{sym} not in the price file"}
+    ok, reason = session_available(closes, d, trail)
+    if not ok:
+        return {"error": reason}
 
     edges = comovement_edges(closes, d, trail=trail, min_abs_corr=min_abs_corr,
                              exclude=excluded)
@@ -629,8 +635,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, str(e))
                 return
             try:
+                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.4"])[0], float, 0.1, 1.0)
+            except ValueError as e:
+                self.send_error(400, str(e))
+                return
+            try:
                 self._json(followers(s, (q.get("as_of") or [default_as_of()])[0],
-                                     top_n=top_n))
+                                     top_n=top_n, min_abs_corr=min_abs_corr))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"})
             return
@@ -641,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, "symbol must be alphanumeric")
                 return
             try:
-                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.5"])[0], float, 0.1, 1.0)
+                min_abs_corr = parse_bounded((q.get("min_abs_corr") or ["0.4"])[0], float, 0.1, 1.0)
             except ValueError as e:
                 self.send_error(400, str(e))
                 return

@@ -398,30 +398,3 @@ def fake_analyst_client():
     for whichever note schema (`QuantAnalystNote`/`DayTradeAnalystNote`) it
     is testing against."""
     return FakeAnalystClient
-
-
-# The as-of session resolution in `leader_state.py:32` and `context_fusion.py:61`
-# (`sessions[sessions > str(c.as_of)][0]`) lands on a DIFFERENT session depending
-# on the index's time-of-day: on a midnight index it picks the session AFTER
-# as_of (so the window includes the as-of day), on production's 04:00 index it
-# picks the as-of session itself (so the window excludes it). These four tests
-# assert a verdict that depends on the as-of day's own move, so they diverge.
-# Marked strict so that resolving the semantics (Q-66) fails here and forces
-# this list to be removed, rather than leaving a stale xfail behind.
-_AS_OF_DIVERGENT = {
-    "test_contradicted_verdict_interrupts",
-    "test_resume_after_approval_completes_the_run",
-    "test_no_contradicted_verdict_does_not_interrupt",
-    "test_default_path_never_interrupts",
-}
-
-
-def pytest_collection_modifyitems(items):
-    for item in items:
-        params = getattr(getattr(item, "callspec", None), "params", {})
-        if params.get("closes") == "prod-0400" and item.originalname in _AS_OF_DIVERGENT:
-            item.add_marker(pytest.mark.xfail(
-                strict=True,
-                reason="Q-66: as-of session resolution shifts by one session on a "
-                       "04:00-indexed frame, changing the verdict",
-            ))

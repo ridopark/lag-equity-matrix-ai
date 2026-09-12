@@ -50,6 +50,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from conftest import SESSION_OFFSETS
 from lagmatrix.adapters.candidates import CoMovementFollowers
 from lagmatrix.domain.models import Candidate
 
@@ -356,3 +357,91 @@ def test_candidates_are_plain_candidates_with_no_forward_looking_field():
             "origin_leader",
             "origin_sigma",
         }
+
+
+# --- Q-66: `_leader_shock_z`'s `ti` resolution must not depend on the
+# index's time of day, and must include the as-of session itself ----------
+#
+# `_leader_shock_z` reuses `MarketScan.shocked_leaders`'s own `ti` idiom
+# (`sessions.get_loc(sessions[sessions > str(as_of)][0])`), so it inherits
+# the same bug: `str(as_of)` compares against midnight, so a midnight index
+# includes the as-of session in the `recent` window and a 04:00 index (like
+# both production price files) excludes it. Per
+# `docs/plans/PLAN-2026-09-08-market-scan.md:183-192`, inclusion is the
+# deliberate, correct contract. Tested through `candidates(as_of)`, the
+# public seam -- `_leader_shock_z` is a private implementation detail of it.
+
+
+def _single_day_jump_leader_fixture(rng_seed: int = 0) -> tuple[pd.DataFrame, date]:
+    """`LEAD` is quiet noise on every session except one unmistakable move
+    (log-return 0.20, vs ~0.001 baseline noise) confined to the as-of
+    session alone. `AAA` tracks `LEAD` closely (`0.9 * LEAD` plus small
+    independent noise) on every session -- including the as-of session,
+    but `comovement_edges` only ever measures the `trail` sessions strictly
+    before `as_of` (D-16), so AAA's measured correlation with LEAD is
+    unaffected by the as-of day's jump either way; only whether `LEAD`
+    itself is judged "shocked" depends on it.
+
+    A `buffer` of 10 quiet sessions sits between the `TRAIL`-session
+    baseline and `as_of`, same reason as `_single_day_jump_fixture` in
+    `test_market_scan.py`: shifting `ti` by one session must land on an
+    ordinary quiet session (a suppressed z), not trip the `ti < move_win +
+    trail` guard (an early return) -- the former is the sharper, more
+    representative failure.
+    """
+    buffer = 10
+    n = TRAIL + buffer + MOVE_WIN + 5
+    idx = pd.bdate_range("2026-01-01", periods=n, tz="UTC")
+    rng = np.random.default_rng(rng_seed)
+    r_lead = rng.normal(0, 0.001, n)
+    as_of_pos = TRAIL + buffer + MOVE_WIN - 1
+    r_lead[as_of_pos] += 0.20
+    r_aaa = 0.9 * r_lead + rng.normal(0, 0.0002, n)
+    closes = pd.DataFrame(
+        {"LEAD": 100 * np.exp(np.cumsum(r_lead)), "AAA": 100 * np.exp(np.cumsum(r_aaa))},
+        index=idx,
+    )
+    as_of = idx[as_of_pos].date()
+    return closes, as_of
+
+
+def _candidate_symbols(base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta) -> set[str]:
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    source = CoMovementFollowers(shifted, "LEAD", trail=TRAIL, min_abs_corr=0.3)
+    return {c.symbol for c in source.candidates(as_of)}
+
+
+def test_candidates_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- `candidates` must
+    agree.
+
+    Falsifies if: the returned symbol set differs between the
+    midnight-indexed and 04:00-indexed runs. Measured today: `{"AAA"}`
+    (midnight) vs `set()` (04:00, LEAD's own shock z is -0.89 there and
+    never clears `sigma=2.0`, so `_leader_shock_z` returns `None` and
+    `candidates` short-circuits to `[]` before ever calling
+    `comovement_edges`).
+    """
+    base_closes, as_of = _single_day_jump_leader_fixture()
+    midnight = _candidate_symbols(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _candidate_symbols(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == prod_0400
+
+
+def test_candidates_detects_a_leader_shock_confined_to_the_as_of_session():
+    """LEAD's only move is on the as-of session, so `candidates` finding
+    its follower `AAA` at all is only possible when that session's return
+    is folded into `_leader_shock_z`'s window -- on both index shapes,
+    since the as-of session is deliberately included by contract, not an
+    artefact of one index shape.
+
+    Falsifies if: `AAA` is missing from `candidates(as_of)` on either
+    offset. Measured: LEAD z=130.9 (midnight, clears `sigma=2.0`, AAA
+    present) vs z=-0.89 (04:00, does not clear threshold -- `candidates`
+    returns `[]`, AAA absent).
+    """
+    base_closes, as_of = _single_day_jump_leader_fixture()
+    for offset in SESSION_OFFSETS.values():
+        symbols = _candidate_symbols(base_closes, as_of, offset)
+        assert "AAA" in symbols, f"offset={offset}: AAA missing from candidates"

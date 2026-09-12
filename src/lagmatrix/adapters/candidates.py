@@ -11,6 +11,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
 
+import numpy as np
+
 from lagmatrix import shocks
 from lagmatrix.comovement import comovement_edges
 from lagmatrix.domain.models import Candidate
@@ -95,10 +97,12 @@ class MarketScan:
         (see the plan's "Dates: exactly what flows where" section).
         """
         sessions = self.closes.index
-        later = sessions[sessions > str(as_of)]
-        if len(later) == 0:
+        # ti - 1 is as_of's own session (the last known one) -- see the plan's
+        # "Dates: exactly what flows where". searchsorted on `.date` resolves
+        # this the same way regardless of the index's time-of-day (Q-66).
+        ti = int(np.searchsorted(sessions.date, as_of, side="right"))
+        if ti == len(sessions):
             return {}
-        ti = sessions.get_loc(later[0])
         if ti < self.move_win + self.trail:
             return {}
         returns = self.closes.pct_change()
@@ -171,10 +175,12 @@ class CoMovementFollowers:
         `None` if the leader never cleared threshold on `as_of`.
         """
         sessions = self.closes.index
-        later = sessions[sessions > str(as_of)]
-        if len(later) == 0:
+        # ti - 1 is as_of's own session (the last known one) -- see the plan's
+        # "Dates: exactly what flows where". searchsorted on `.date` resolves
+        # this the same way regardless of the index's time-of-day (Q-66).
+        ti = int(np.searchsorted(sessions.date, as_of, side="right"))
+        if ti == len(sessions):
             return None
-        ti = sessions.get_loc(later[0])
         if ti < self._MOVE_WIN + self.trail:
             return None
         returns = self.closes.pct_change()

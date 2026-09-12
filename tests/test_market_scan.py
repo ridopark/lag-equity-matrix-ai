@@ -55,7 +55,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import arango_db_or_skip, invoke_graph
+from conftest import SESSION_OFFSETS, arango_db_or_skip, invoke_graph
 from lagmatrix.adapters.arango import ArangoTopology
 from lagmatrix.adapters.candidates import MarketScan
 from lagmatrix.domain.models import Candidate, LagEdge
@@ -198,6 +198,82 @@ def test_shocked_leaders_baseline_excludes_the_recent_window():
         baseline_arg = call.args[3]
     expected_baseline = closes.pct_change().iloc[0:TRAIL]
     pd.testing.assert_frame_equal(baseline_arg, expected_baseline)
+
+
+# --- Q-66: `ti` resolution must not depend on the index's time of day, and
+# must include the as-of session itself -----------------------------------
+#
+# `shocked_leaders` resolves `ti` with the same idiom as `graph_retriever.py`
+# and `leader_state.py`: `sessions.get_loc(sessions[sessions > str(as_of)][0])`.
+# `str(as_of)` is a bare date, compared against midnight, so on a midnight
+# index the as-of session ends up included in `recent` (`ti - 1`), and on
+# production's 04:00 index it ends up excluded. Per
+# `docs/plans/PLAN-2026-09-08-market-scan.md:183-192`, inclusion is the
+# deliberate, correct contract, so both index shapes must agree, and both
+# must include it -- exactly like the corroboration-mode nodes in
+# `test_nodes.py`, just via this class's own `shocked_leaders` seam instead.
+
+
+def _single_day_jump_fixture(rng_seed: int = 0) -> tuple[pd.DataFrame, date]:
+    """`LEADONE` is quiet noise on every session, except for one unmistakable
+    move (log-return 0.20, vs ~0.001 baseline noise) confined to a single
+    session -- the as-of session -- rather than spread across the full
+    `MOVE_WIN` window like `_shock_fixture` above. A 10-session buffer sits
+    between the `TRAIL`-session baseline and `as_of` so that shifting `ti` by
+    one session (the bug) lands on an ordinary quiet session instead of
+    tripping the `ti < move_win + trail` guard -- the effect under test is a
+    suppressed z-score, not an early return, which is the sharper, more
+    representative failure mode.
+    """
+    buffer = 10
+    n = TRAIL + buffer + MOVE_WIN + 5
+    idx = pd.bdate_range("2026-01-01", periods=n, tz="UTC")
+    rng = np.random.default_rng(rng_seed)
+    r = rng.normal(0, 0.001, n)
+    as_of_pos = TRAIL + buffer + MOVE_WIN - 1
+    r[as_of_pos] += 0.20
+    closes = pd.DataFrame({"LEADONE": 100 * np.exp(np.cumsum(r))}, index=idx)
+    as_of = idx[as_of_pos].date()
+    return closes, as_of
+
+
+def _shocked_leaders_z(base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta) -> dict:
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    scan = MarketScan(shifted, topology=None, trail=TRAIL, move_win=MOVE_WIN, sigma=SIGMA)
+    return scan.shocked_leaders(as_of)
+
+
+def test_shocked_leaders_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- `shocked_leaders`
+    must agree.
+
+    Falsifies if: LEADONE's reported z differs between the midnight-indexed
+    and 04:00-indexed runs. Measured today: z=130.9 (midnight) vs `{}` (LEADONE
+    absent entirely on 04:00, since its actual z there is -0.89 and does not
+    clear `sigma=2.0`) -- not a rounding difference, a missed detection.
+    """
+    base_closes, as_of = _single_day_jump_fixture()
+    midnight = _shocked_leaders_z(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _shocked_leaders_z(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == pytest.approx(prod_0400)
+
+
+def test_shocked_leaders_detects_a_move_confined_to_the_as_of_session():
+    """LEADONE's only move is on the as-of session, so `shocked_leaders`
+    reporting it at all is only possible when that session's return is
+    folded into the `recent` window -- on both index shapes, since the
+    as-of session is deliberately included by contract, not an artefact of
+    one index shape.
+
+    Falsifies if: LEADONE is missing from `shocked_leaders(as_of)` on either
+    offset. Measured: z=130.9 (midnight, clears `sigma=2.0`, passes) vs
+    z=-0.89 (04:00, does not clear threshold -- LEADONE dropped, fails).
+    """
+    base_closes, as_of = _single_day_jump_fixture()
+    for offset in SESSION_OFFSETS.values():
+        result = _shocked_leaders_z(base_closes, as_of, offset)
+        assert "LEADONE" in result, f"offset={offset}: LEADONE missing from shocked_leaders"
 
 
 class FakeArangoTopology:

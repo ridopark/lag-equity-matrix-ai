@@ -11,8 +11,10 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 from langgraph.runtime import Runtime
 
+from conftest import SESSION_OFFSETS
 from lagmatrix.domain.models import Candidate, LagEdge, Shock
 from lagmatrix.graph.context import LagMatrixContext
 from lagmatrix.graph.nodes.assessor import assess
@@ -992,3 +994,288 @@ def test_neighbours_count_never_affects_effective_evidence(closes):
     assert out_one["neighbours_by_key"][key] == 1
     assert out_three["effective_evidence_by_key"][key] == 1.0
     assert out_one["effective_evidence_by_key"][key] == 1.0
+
+
+# --- Q-66: as-of session resolution must not depend on the index's time of
+# day, and must include the as-of session itself -------------------------
+#
+# `graph_retriever.py:35`, `leader_state.py:32` and `context_fusion.py:61`
+# all resolve `ti` with `sessions.get_loc(sessions[sessions > str(c.as_of)][0])`.
+# `str(c.as_of)` is a bare date, compared against midnight, so the session
+# picked depends on the index's own time-of-day: on a midnight index the
+# as-of session is not `>` midnight and `ti` lands one session later (the
+# as-of session ends up *included*, `ti - 1`); on production's 04:00 index
+# the as-of session *is* `>` midnight and `ti` lands on the as-of session
+# itself (the as-of session ends up *excluded*). Per
+# `docs/plans/PLAN-2026-09-08-market-scan.md:183-192` ("Dates: exactly what
+# flows where"), inclusion is the correct, deliberate contract -- `as_of` is
+# defined as "the last complete, known session" -- so both index shapes must
+# agree, and both must include it.
+
+
+def _spike_leader_closes() -> tuple[pd.DataFrame, date]:
+    """CAND, SPIKE and TRUE, built so whether the as-of session's own
+    co-movement counts is the only thing standing between two different
+    answers.
+
+    SPIKE is independent noise on every session strictly before `as_of` --
+    its correlation with CAND from that history alone is near zero -- but on
+    the as-of session it makes an enormous move that exactly matches CAND's
+    own (also enormous, one-off) as-of move. Include that one session in the
+    correlation window and SPIKE's measured correlation jumps to ~0.99;
+    exclude it and SPIKE reverts to ~0 (session index confirmed empirically:
+    0.987 included vs -0.116 excluded).
+
+    TRUE structurally tracks CAND at rho~0.3 on *every* session, including
+    as-of, so it never goes to zero either way -- a second, competing leader
+    whose top-1 ranking against SPIKE flips depending on whether the as-of
+    day is counted (0.927 vs 0.987 included: SPIKE wins; 0.229 vs -0.116
+    excluded: TRUE wins).
+    """
+    rng = np.random.default_rng(0)
+    n_before, n_after = 60, 5
+    cand_before = rng.normal(0, 0.005, n_before)
+    spike_before = rng.normal(0, 0.005, n_before)
+    true_before = 0.3 * cand_before + rng.normal(0, 0.005, n_before)
+    cand_asof = 0.30
+    spike_asof = 0.30
+    true_asof = 0.3 * cand_asof + rng.normal(0, 0.005)
+    cand_after = rng.normal(0, 0.005, n_after)
+    spike_after = rng.normal(0, 0.005, n_after)
+    true_after = rng.normal(0, 0.005, n_after)
+
+    cand = np.concatenate([[0.0], cand_before, [cand_asof], cand_after])
+    spike = np.concatenate([[0.0], spike_before, [spike_asof], spike_after])
+    true = np.concatenate([[0.0], true_before, [true_asof], true_after])
+
+    idx = pd.bdate_range("2026-01-01", periods=len(cand), tz="UTC")
+    as_of = idx[1 + n_before].date()
+    closes = pd.DataFrame(
+        {
+            "CAND": 100 * np.exp(np.cumsum(cand)),
+            "SPIKE": 100 * np.exp(np.cumsum(spike)),
+            "TRUE": 100 * np.exp(np.cumsum(true)),
+        },
+        index=idx,
+    )
+    return closes, as_of
+
+
+def _retrieve_correlations(base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta):
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    cand = Candidate(symbol="CAND", direction="up", as_of=as_of, origin="external")
+    rt = Runtime(
+        context=LagMatrixContext(closes=shifted, signal_universe=set(), trail=60, topk=2)
+    )
+    out = retrieve_neighbourhood({"candidates": [cand]}, rt)
+    return {e.leader: e.correlation for e in out["lag_edges"]}
+
+
+def test_retrieve_neighbourhood_correlation_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- the per-leader
+    correlation `retrieve_neighbourhood` reports must agree.
+
+    Falsifies if: SPIKE's or TRUE's `correlation` differs between the
+    midnight-indexed and 04:00-indexed runs. Measured today: SPIKE
+    0.987 (midnight) vs -0.116 (04:00); TRUE 0.927 (midnight) vs 0.229
+    (04:00) -- both very much disagree.
+    """
+    base_closes, as_of = _spike_leader_closes()
+    midnight = _retrieve_correlations(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _retrieve_correlations(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == pytest.approx(prod_0400)
+
+
+def test_retrieve_neighbourhood_includes_the_as_of_sessions_own_comovement():
+    """The as-of session's own price co-movement must count -- SPIKE's
+    correlation with CAND comes *entirely* from the as-of session (it is
+    pure independent noise on every earlier session), so SPIKE surfacing as
+    a strong (`|corr| > 0.8`) leader is only possible when that session is
+    folded into the correlation window, on both index shapes.
+
+    Falsifies if: SPIKE is missing from `lag_edges`, or its correlation
+    magnitude is <= 0.8 -- both true today under the 04:00 index, where
+    `ti` lands one session early and drops the as-of session entirely.
+    Measured: SPIKE correlation 0.987 (midnight, passes) vs -0.116 (04:00,
+    fails).
+    """
+    base_closes, as_of = _spike_leader_closes()
+    for offset in SESSION_OFFSETS.values():
+        corr = _retrieve_correlations(base_closes, as_of, offset)
+        assert "SPIKE" in corr, f"offset={offset}: SPIKE missing from lag_edges"
+        assert abs(corr["SPIKE"]) > 0.8, f"offset={offset}: SPIKE correlation {corr['SPIKE']}"
+
+
+def _quiet_then_shock_leader_closes() -> tuple[pd.DataFrame, date]:
+    """LEAD is quiet on every session strictly before `as_of` and makes one
+    unmistakable move (log-return 0.30, vs ~0.005 baseline noise) *on* the
+    as-of session and nowhere else. CAND is quiet throughout (its own
+    self-shock is `leader_state`'s unconditional `sym == c.symbol` entry,
+    not under test here).
+
+    `trail=60` sessions of quiet history precede the as-of session, matching
+    `LagMatrixContext`'s own default trail, so the fixture does not depend on
+    a non-default configuration to exhibit the bug.
+    """
+    rng = np.random.default_rng(0)
+    n_before, n_after = 60, 5
+    quiet = rng.normal(0, 0.005, n_before)
+    jump = 0.30
+    after = rng.normal(0, 0.005, n_after)
+    lead = np.concatenate([[0.0], quiet, [jump], after])
+    cand = np.concatenate(
+        [[0.0], rng.normal(0, 0.005, n_before), [0.0005], rng.normal(0, 0.005, n_after)]
+    )
+    idx = pd.bdate_range("2026-01-01", periods=len(lead), tz="UTC")
+    as_of = idx[1 + n_before].date()
+    closes = pd.DataFrame(
+        {"LEAD": 100 * np.exp(np.cumsum(lead)), "CAND": 100 * np.exp(np.cumsum(cand))},
+        index=idx,
+    )
+    return closes, as_of
+
+
+def _leader_state_sigmas(base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta) -> dict:
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    cand = Candidate(symbol="CAND", direction="up", as_of=as_of, origin="external")
+    key = candidate_key(cand)
+    edge = LagEdge(
+        leader="LEAD", lagger="CAND", correlation=0.5, lag_days=0, beta=1.0,
+        relation="correlation",
+    )
+    rt = Runtime(
+        context=LagMatrixContext(
+            closes=shifted, signal_universe=set(), trail=60, move_win=3, sigma=2.0
+        )
+    )
+    out = leader_state({"candidates": [cand], "lag_edges_by_key": {key: [edge]}}, rt)
+    return {s.symbol: s.sigma for s in out["leader_shocks"][key]}
+
+
+def test_leader_state_shock_detection_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- LEAD's reported sigma
+    must agree.
+
+    Falsifies if: LEAD's sigma differs between the midnight-indexed and
+    04:00-indexed runs (or LEAD is present in one and absent in the other).
+    Measured today: LEAD sigma 4.34 (midnight) vs -0.73 (04:00, and it does
+    not clear `sigma=2.0` there so it is filtered out of the shock list
+    entirely) -- not a rounding difference, a missed detection.
+    """
+    base_closes, as_of = _quiet_then_shock_leader_closes()
+    midnight = _leader_state_sigmas(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _leader_state_sigmas(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == pytest.approx(prod_0400)
+
+
+def test_leader_state_detects_a_shock_confined_to_the_as_of_session():
+    """LEAD's only move is on the as-of session itself, so `leader_state`
+    reporting it as shocked (`|sigma| >= sigma=2.0`) is only possible when
+    that session's return is folded into the `recent` window -- on both
+    index shapes, since the as-of session is deliberately included by
+    contract (`PLAN-2026-09-08-market-scan.md:183-192`), not an artefact of
+    one index shape.
+
+    Falsifies if: LEAD is missing from `leader_shocks` on either offset.
+    Measured: sigma 4.34 (midnight, |sigma| >= 2.0, passes) vs -0.73 (04:00,
+    |sigma| < 2.0, LEAD dropped by the `abs(z) >= sigma` filter -- fails).
+    """
+    base_closes, as_of = _quiet_then_shock_leader_closes()
+    for offset in SESSION_OFFSETS.values():
+        sigmas = _leader_state_sigmas(base_closes, as_of, offset)
+        assert "LEAD" in sigmas, f"offset={offset}: LEAD missing from leader_shocks"
+        assert abs(sigmas["LEAD"]) >= 2.0, f"offset={offset}: LEAD sigma {sigmas['LEAD']}"
+
+
+def _co_moving_pair_closes() -> tuple[pd.DataFrame, date]:
+    """LEAD1 and LEAD2 are independent noise on every session strictly
+    before `as_of`, but move together, hugely, on the as-of session alone
+    (both +0.30 log return, vs ~0.005 baseline noise). Their measured
+    correlation is near zero without that one session and ~0.99 with it --
+    the same discriminator as `_spike_leader_closes`, applied to a leader
+    pair instead of a leader/candidate pair, since `fuse_evidence`'s
+    clustering correlates *movers* with each other, not with the candidate.
+    """
+    rng = np.random.default_rng(0)
+    n_before, n_after = 60, 5
+    lead1_before = rng.normal(0, 0.005, n_before)
+    lead2_before = rng.normal(0, 0.005, n_before)
+    jump = 0.30
+    lead1_after = rng.normal(0, 0.005, n_after)
+    lead2_after = rng.normal(0, 0.005, n_after)
+    lead1 = np.concatenate([[0.0], lead1_before, [jump], lead1_after])
+    lead2 = np.concatenate([[0.0], lead2_before, [jump], lead2_after])
+    idx = pd.bdate_range("2026-01-01", periods=len(lead1), tz="UTC")
+    as_of = idx[1 + n_before].date()
+    closes = pd.DataFrame(
+        {"LEAD1": 100 * np.exp(np.cumsum(lead1)), "LEAD2": 100 * np.exp(np.cumsum(lead2))},
+        index=idx,
+    )
+    return closes, as_of
+
+
+def _fusion_effective_evidence(
+    base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta
+) -> float:
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    cand = Candidate(symbol="CAND2", direction="up", as_of=as_of, origin="external")
+    key = candidate_key(cand)
+    edges = [
+        LagEdge(leader="LEAD1", lagger="CAND2", correlation=0.5, lag_days=0, beta=1.0,
+                relation="correlation"),
+        LagEdge(leader="LEAD2", lagger="CAND2", correlation=0.5, lag_days=0, beta=1.0,
+                relation="correlation"),
+    ]
+    leader_shocks = {
+        key: [
+            Shock(symbol="LEAD1", pct_change=0.30, sigma=5.0, lookback_days=60, date=as_of),
+            Shock(symbol="LEAD2", pct_change=0.30, sigma=5.0, lookback_days=60, date=as_of),
+        ]
+    }
+    rt = Runtime(
+        context=LagMatrixContext(closes=shifted, signal_universe=set(), trail=60, cluster_rho=0.7)
+    )
+    out = fuse_evidence(
+        {"candidates": [cand], "lag_edges_by_key": {key: edges}, "leader_shocks": leader_shocks},
+        rt,
+    )
+    return out["effective_evidence_by_key"][key]
+
+
+def test_fuse_evidence_clustering_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- the clustering weight
+    `fuse_evidence` computes for two co-moving leaders must agree.
+
+    Falsifies if: `effective_evidence_by_key` differs between the
+    midnight-indexed and 04:00-indexed runs. Measured today: 1.0 (midnight
+    -- LEAD1/LEAD2 correctly clustered into one bloc of 2, weight 0.5 each)
+    vs 2.0 (04:00 -- the correlation window misses the as-of session where
+    they actually moved together, so each is wrongly treated as its own
+    independent bloc of 1, doubling the effective evidence).
+    """
+    base_closes, as_of = _co_moving_pair_closes()
+    midnight = _fusion_effective_evidence(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _fusion_effective_evidence(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == pytest.approx(prod_0400)
+
+
+def test_fuse_evidence_clusters_movers_that_only_co_moved_on_the_as_of_session():
+    """LEAD1 and LEAD2's only shared move is on the as-of session, so
+    `fuse_evidence` correctly clustering them (`effective_evidence == 1.0`,
+    one bloc of 2 rather than two blocs of 1) is only possible when that
+    session's correlation is folded into the clustering window -- on both
+    index shapes, per the same as-of-inclusion contract as the other two
+    tests above.
+
+    Falsifies if: `effective_evidence_by_key` is not `1.0` on either offset
+    (it is `2.0` today under 04:00 -- the pair is wrongly treated as two
+    independent observations instead of one bloc, doubling the evidence
+    Q-12 says a raw count already overstates).
+    """
+    base_closes, as_of = _co_moving_pair_closes()
+    for offset in SESSION_OFFSETS.values():
+        effective = _fusion_effective_evidence(base_closes, as_of, offset)
+        assert effective == pytest.approx(1.0), f"offset={offset}: effective_evidence {effective}"

@@ -4358,6 +4358,44 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   logged is invalidated. 381 passed, 1 skipped; golden file byte-identical.
 - **Status:** Accepted
 
+### D-132 — Split-half sign agreement predicts replication, narrowly in one band
+
+- **When:** 2026-09-12T07:05:00-05:00
+- **Decision:** PHASE-10 Pre-registration A is **run and passed**. Arms B and C
+  (the LLM comparisons) are therefore live questions rather than moot.
+- **Why:** Arm A is free — pure pandas over `bars-10y.parquet`, no API calls —
+  and it gates the paid arms. If the deterministic signal added nothing, asking
+  whether an LLM beats it would be a much weaker question. The owner asked for
+  the cheapest path; running A first costs nothing and can settle it.
+  The rule was fixed before the script was written: within each of D-95's
+  bands, compare mean validation `|corr|` between pairs whose **discovery**-
+  window split-half sign agrees and those whose disagrees; it adds signal only
+  if both best-powered bands show the "agrees" group ahead by **>= 0.03**
+  absolute correlation (D-93's own bar).
+- **Outcome:**
+
+  | band | pairs | agree | disagree | val \|c\| agree | val \|c\| dis | gap |
+  |---|---|---|---|---|---|---|
+  | 0.2-0.3 | 258,333 | 154,507 | 103,826 | 0.1954 | 0.1750 | +0.0204 |
+  | **0.3-0.4** | 114,936 | 90,746 | 24,190 | 0.2684 | 0.2381 | **+0.0303** |
+  | **0.4-0.5** | 39,959 | 37,804 | 2,155 | 0.3566 | 0.2925 | **+0.0642** |
+  | 0.5-0.6 | 12,283 | 12,213 | 70 | 0.4680 | 0.2998 | +0.1682 |
+
+  **VERDICT: ADDS SIGNAL**, 2/2 powered bands.
+
+  **Stated plainly because it matters: the 0.3-0.4 band clears by 0.0003.** The
+  margin was 0.030 and the gap is 0.0303 — one percent of the margin. Had the
+  bar been 0.031 this would read NULL. It is reported as a pass because the
+  rule was pre-committed and was met, which is the entire point of
+  pre-registration; it is not reported as decisive. The 0.4-0.5 band is
+  comfortable, and the untested 0.5-0.6 band's +0.1682 puts the trend
+  consistently in one direction, which is the stronger part of the evidence.
+  The universe reproduces D-95 exactly: **1,236,378** unordered pairs against
+  D-95's published 1,236,372, a difference of precisely the **6 same-company
+  pairs** D-95 records dropping.
+  Cost: **$0**. The paid arms remain unspent.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from langgraph.runtime import Runtime
 
+from lagmatrix.adapters.llm import cap_for_llm
 from lagmatrix.comovement import confidence_interval, duplicate_flag
-from lagmatrix.domain.models import Candidate, LagEdge, QuantPerspective
+from lagmatrix.domain.models import Candidate, LagEdge, QuantAnalystNote, QuantPerspective
+from lagmatrix.graph.context import LagMatrixContext
+from lagmatrix.graph.state import LagMatrixState, candidate_key
 
 
 def compute_quant_perspective(
@@ -63,3 +67,68 @@ def compute_quant_perspective(
             else "no correlation edges in this candidate's neighbourhood"
         ),
     )
+
+
+QUANT_SYSTEM_PROMPT = """\
+You are the quant analyst for a stock-lag pipeline. You are given a
+deterministic read of one candidate's correlation neighbourhood: the number
+of correlation edges, their median confidence-interval width, a duplicate-
+series count, a within-window split-half sign-agreement percentage, and
+whether the candidate is itself an ETF. Classify how much you'd expect this
+candidate's correlation-based edges to replicate out of sample, and flag any
+concerns (e.g. too few edges, high duplicate count, an ETF confounding the
+read, or a narrow split-half agreement). Never report a calibrated
+probability -- only a status and a classification.
+"""
+
+
+def _brief(candidate: Candidate, qp: QuantPerspective) -> str:
+    return (
+        f"{candidate.symbol} as of {candidate.as_of.isoformat()} ({candidate.direction})\n"
+        f"n_edges={qp.n_edges}\n"
+        f"median_ci_width={qp.median_ci_width} (a lower bound, not the true "
+        f"interval: LagEdge carries no per-edge valid-session count, so this "
+        f"Fisher CI was computed from `trail`, an upper bound on valid "
+        f"sessions -- it is systematically narrower than / an underestimate "
+        f"of the true width)\n"
+        f"duplicate_count={qp.duplicate_count}\n"
+        f"split_half_sign_agree_pct={qp.split_half_sign_agree_pct}\n"
+        f"candidate_is_etf={qp.candidate_is_etf}\n"
+        f"note: {qp.note}"
+    )
+
+
+async def analyse_quant(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> dict:
+    quant_by_key = state.get("quant_by_key", {})
+    candidates = [c for c in state.get("candidates", []) if candidate_key(c) in quant_by_key]
+    llm = runtime.context.llm
+
+    if llm is None:
+        return {
+            "quant_analyst_by_key": {
+                candidate_key(c): QuantAnalystNote(
+                    status="not_run", reasoning="no LLM configured"
+                )
+                for c in candidates
+            }
+        }
+
+    max_n = runtime.context.max_llm_candidates
+    if max_n is None:
+        selected, capped = candidates, []
+    else:
+        selected, capped = cap_for_llm(candidates, max_n)
+
+    result: dict[str, QuantAnalystNote] = {
+        candidate_key(c): QuantAnalystNote(
+            status="not_run", reasoning=f"batch cap reached ({max_n})"
+        )
+        for c in capped
+    }
+
+    briefs = {candidate_key(c): _brief(c, quant_by_key[candidate_key(c)]) for c in selected}
+    if briefs:
+        notes = await llm.classify(briefs, QuantAnalystNote, system_prompt=QUANT_SYSTEM_PROMPT)
+        result.update(notes)
+
+    return {"quant_analyst_by_key": result}

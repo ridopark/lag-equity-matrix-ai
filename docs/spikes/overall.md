@@ -4483,6 +4483,53 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   decision depends on it today.
   Arm C would have cost $42.50 to ask whether Opus improves on a layer that
   loses to a sort. Not run.
+
+  ---
+
+  **Amended 2026-09-12T08:05 — what the notes actually say, and why the
+  "still useful as explanation" consolation is withdrawn.**
+
+  I wrote above that a null on prediction "does not condemn the analyst nodes
+  as *explanation*". That was a hypothesis offered without reading one. Six
+  notes, printed with the ground truth beside them:
+
+  | pair | weaker half | validation | retained | Haiku | |
+  |---|---|---|---|---|---|
+  | FFIN/HBAN | 0.395 | 0.482 | **True** | high | correct |
+  | HWC/USB | 0.190 | 0.560 | **True** | low | wrong |
+  | PEP/ROP | 0.065 | 0.428 | **True** | low | wrong |
+  | ROL/SBAC | 0.102 | 0.325 | False | low | correct |
+  | GILD/VZ | 0.098 | 0.390 | False | low | correct |
+  | MAN/RHI | 0.291 | 0.626 | **True** | low | wrong |
+
+  **Three of six.** And it answered `"high"` exactly once — for the only pair
+  whose weaker half (0.395) sits near 0.4. **The model is thresholding on a
+  single number at roughly the wrong cut-point and composing an essay around
+  the result.** That is precisely why the deterministic ranking beats it:
+  `min(|h1|,|h2|)` *orders* these correctly (~0.70 AUC), while the model
+  collapses the same number to a binary and discards the ordering that
+  carried the signal.
+
+  **The mechanism of failure matters more than the rate.** HWC/USB: weaker
+  half 0.190, and the note calls it *"disqualifying"*, *"a red flag for
+  non-stationarity"*, concluding *"out-of-sample replication is unlikely to
+  sustain |corr| >= 0.4"*. It went to **0.560** — it strengthened. PEP/ROP got
+  five confident bullets and a paragraph about *"regime-dependent artifacts"*
+  for a pair that retained comfortably.
+
+  The prose is genuinely good. It reasons from the Fisher CI width, weighs the
+  session count, names regime change and selection bias, hedges where hedging
+  is warranted; on ROL/SBAC it reconstructs the interval as [0.377, 0.451].
+  **And there is no tonal difference whatsoever between the notes that are
+  right and the notes that are wrong.** A reader cannot tell them apart.
+
+  So the consolation is withdrawn: this is worse than no explanation, because
+  it is *most persuasive exactly where it is most wrong*. Shipping it as
+  commentary would hand a reader confident, well-argued, technically fluent
+  prose that is a coin flip — which is the failure mode this entire decision
+  log exists to catch, in its most seductive form yet.
+  Caveat kept: six pairs, a different seed from the measured run. The AUC over
+  500 per band is the evidence; these six illustrate the mechanism.
 - **Status:** Accepted
 
 ## Open Questions

@@ -4290,6 +4290,59 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   340 passed, 1 skipped; ruff clean.
 - **Status:** Accepted
 
+### D-131 — The tests now run the executor production runs, and one of them was measuring a fiction
+
+- **When:** 2026-09-12T03:15:00-05:00
+- **Decision:** All seven test files that drove the graph with sync `.invoke()`
+  now drive it with `ainvoke`, via a shared `conftest.invoke_graph` helper.
+  `test_a_failed_run_resumes_only_the_failed_branch` is renamed and corrected
+  to `test_a_failed_run_resumes_and_re_runs_the_whole_superstep`.
+- **Why:** PHASE-6 wired two `async def` analyst nodes onto the unconditional
+  fan-out path, and a langgraph async node **cannot execute under sync
+  `.invoke()`** — `TypeError: No synchronous function provided`, from
+  `_internal/_runnable.py:378`. Measured twice independently. Node-level
+  `timeout=` was a red herring: removing it only changes which check trips
+  first (`_retry.py:573-583` rejects any timeout under the sync executor).
+  **Production has never used sync `.invoke()`.** `runner.py:132` awaits
+  `ainvoke`; `serve.py`, `capture_showcase.py` and `capture_trace.py` use
+  `astream`; `daily_ingest.py` wraps `ainvoke` in `asyncio.run`. And
+  `capture_trace.py`'s own docstring already recorded this constraint from an
+  earlier plan — *"PHASE-5 made `retrieve_news` async, and one async node makes
+  sync `.stream()`/`.invoke()` fail for the whole graph."* This repo hit the
+  wall before and resolved it the same way. These four files were stragglers,
+  spared only because `retrieve_news` is gated behind `with_news=True` and they
+  all build with it off.
+  The alternative that lost was an `asyncio.run` bridge in `builder.py`. It
+  **works** — measured on both paths, not assumed — so the case against it was
+  never correctness. It lost because the four files are this repo's
+  *scheduling* tests: `test_caching.py` pins D-46's no-dedup-within-a-superstep,
+  `test_fanout.py` is D-89's cross-attribution family. A bridge would leave the
+  two decisions this project paid most to learn verified against an executor it
+  never runs — `test_llm_adapter.py`'s `_Note` stand-in, one level up. It also
+  forecloses `timeout=` on the two network-calling nodes permanently.
+- **Outcome:** 9 of the 10 affected tests converted mechanically. All three
+  specific risks came back clean: `CachePolicy`'s cross-invocation hit and
+  within-superstep non-dedup both hold, `Send` fan-out shows no D-89
+  recurrence, and `interrupt()`/resume was never at risk (`test_review.py`
+  already used `ainvoke`).
+  **The tenth was measuring a property production has never had.** It asserted
+  that resume re-runs only the failed branch. Run on identical *pre-PHASE-6*
+  source with no async node wired at all: sync passes, async fails — so this
+  predates our changes. langgraph's async paths schedule with
+  `__cancel_on_exit__=True` (`pregel/_runner.py:471,528,925`) and treat a
+  cancelled sibling as an error rather than committing its writes; the sync
+  `tick` sets it **nowhere** (verified by grep: three occurrences async, zero
+  sync). The test was corrected to describe the real executor, not relaxed to
+  pass — the distinction matters and is written into its docstring.
+  **A cost consequence follows, and it is not in the plan's estimates:** a
+  failure anywhere in a superstep discards every sibling's writes, so a resume
+  re-runs all branches. With the analyst nodes wired, a retry re-pays for every
+  candidate's LLM calls, not just the failed one. Cents at Haiku-batch rates,
+  but a real multiplier on PHASE-7/PHASE-10's accounting.
+  No recorded decision cited the old efficiency property, so nothing previously
+  logged is invalidated. 381 passed, 1 skipped; golden file byte-identical.
+- **Status:** Accepted
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

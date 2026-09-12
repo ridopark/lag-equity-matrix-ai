@@ -107,6 +107,14 @@ class QuantPerspective(BaseModel):
     # D-93's years-long discovery/validation split. None when there are no
     # correlation edges to split.
     split_half_sign_agree_pct: float | None
+    # Median, over correlation edges, of min(|corr_first_half|,
+    # |corr_second_half|) -- the *weaker* half's magnitude, not the
+    # full-window correlation. `min` rather than mean: a pair strong in one
+    # half and weak in the other is weakly supported, and the minimum says
+    # so where a mean would let the strong half disguise it. None when
+    # there are no correlation edges to split (matching
+    # `split_half_sign_agree_pct`).
+    split_half_min_abs: float | None = None
     candidate_is_etf: bool
     note: str
 

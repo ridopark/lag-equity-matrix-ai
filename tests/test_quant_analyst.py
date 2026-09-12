@@ -329,3 +329,33 @@ async def test_brief_states_median_ci_width_is_a_lower_bound(fake_analyst_client
 
     brief = client.calls[0]["briefs"][key].lower()
     assert "lower bound" in brief or "underestimate" in brief or "narrower than" in brief
+
+
+async def test_brief_contains_split_half_min_abs_literally(fake_analyst_client):
+    """Team lead's correction to TASK-1.2/TASK-4.4: the split-half magnitude
+    carries 2.5-3.5x the incremental signal of the sign-agreement bit
+    (measured), so if PHASE-1 computes it the brief must actually hand it to
+    the model -- exactly the way `median_ci_width` and
+    `split_half_sign_agree_pct` already are. A `QuantPerspective` field the
+    brief never mentions is inert: the LLM can't reason over a number it was
+    never shown.
+
+    Falsifiable by: `_brief` omitting `qp.split_half_min_abs`, or rendering
+    it in a form that doesn't literally contain the value (e.g. only a
+    qualitative bucket like "well supported").
+    """
+    candidate = _candidate("AAA")
+    key = candidate_key(candidate)
+    qp = _qp(split_half_min_abs=0.318)
+    client = fake_analyst_client(
+        default=dict(
+            status="ok", replication_expectation="high", flagged_concerns=[],
+            reasoning="canned", model="fake-model",
+        )
+    )
+    state = {"candidates": [candidate], "quant_by_key": {key: qp}}
+
+    await analyse_quant(state, _runtime(client))
+
+    brief = client.calls[0]["briefs"][key]
+    assert str(qp.split_half_min_abs) in brief

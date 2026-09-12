@@ -33,6 +33,7 @@ def compute_quant_perspective(
     ci_widths: list[float] = []
     dup_count = 0
     agree_count = 0
+    split_half_min_abs: list[float] = []
 
     if correlation_edges:
         returns = closes.pct_change()
@@ -54,12 +55,14 @@ def compute_quant_perspective(
             corr_second = second_half[candidate.symbol].corr(second_half[edge.leader])
             if np.sign(corr_first) == np.sign(corr_second):
                 agree_count += 1
+            split_half_min_abs.append(min(abs(corr_first), abs(corr_second)))
 
     return QuantPerspective(
         n_edges=n_edges,
         median_ci_width=float(np.median(ci_widths)) if ci_widths else None,
         duplicate_count=dup_count,
         split_half_sign_agree_pct=(agree_count / n_edges * 100.0) if n_edges else None,
+        split_half_min_abs=float(np.median(split_half_min_abs)) if split_half_min_abs else None,
         candidate_is_etf=candidate.symbol in excluded_etfs,
         note=(
             f"{n_edges} correlation edge(s) over a {trail}-session trailing window"
@@ -95,8 +98,9 @@ QUANT_SYSTEM_PROMPT = """\
 You are the quant analyst for a stock-lag pipeline. You are given a
 deterministic read of one candidate's correlation neighbourhood: the number
 of correlation edges, their median confidence-interval width, a duplicate-
-series count, a within-window split-half sign-agreement percentage, and
-whether the candidate is itself an ETF. Classify how much you'd expect this
+series count, a within-window split-half sign-agreement percentage, the
+weaker half's split-half correlation magnitude, and whether the candidate is
+itself an ETF. Classify how much you'd expect this
 candidate's correlation-based edges to replicate out of sample, and flag any
 concerns (e.g. too few edges, high duplicate count, an ETF confounding the
 read, or a narrow split-half agreement). Never report a calibrated
@@ -115,6 +119,7 @@ def _brief(candidate: Candidate, qp: QuantPerspective) -> str:
         f"of the true width)\n"
         f"duplicate_count={qp.duplicate_count}\n"
         f"split_half_sign_agree_pct={qp.split_half_sign_agree_pct}\n"
+        f"split_half_min_abs={qp.split_half_min_abs}\n"
         f"candidate_is_etf={qp.candidate_is_etf}\n"
         f"note: {qp.note}"
     )

@@ -25,6 +25,7 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from lagmatrix.domain.models import Candidate, LagEdge
 from lagmatrix.graph.nodes import quant_perspective as qp_module
@@ -161,6 +162,160 @@ def test_split_half_sign_agreement_distinguishes_a_stable_pair_from_a_flipping_o
 
     assert stable_result.split_half_sign_agree_pct == 100.0
     assert flip_result.split_half_sign_agree_pct == 0.0
+
+
+def test_split_half_min_abs_reflects_the_weak_half_not_the_full_window_correlation():
+    """Team lead's correction to TASK-1.2: `split_half_sign_agree_pct` is a
+    sign bit and throws away the magnitude that carries most of the signal
+    (measured: magnitude carries 2.5-3.5x the incremental AUC of the sign
+    bit over the discovery correlation alone). `split_half_min_abs` must be
+    `min(|corr_first_half|, |corr_second_half|)` -- the *weaker* of the two
+    halves, not a re-statement of the full-window correlation the reader
+    already sees on the edge.
+
+    WEAK tracks CAND's return series tightly only in the second half of the
+    trailing window; in the first half it is mostly independent noise, built
+    as a deterministic mix (not a random draw of "maybe correlated") so the
+    weak-half correlation is verified directly below rather than assumed.
+    The full-window correlation is nonetheless substantial (~0.66) because
+    the strong second half dominates it -- exactly the case where reporting
+    the full-window number instead of the split-half minimum would hide
+    that half the window carries almost no relationship at all.
+
+    Falsifiable by: an implementation that sets `split_half_min_abs` to
+    `abs(edge.correlation)` (the full-window value) or to the mean/max of
+    the two halves instead of their min -- any of those would land near
+    0.66, not near the ~0.30 this test asserts.
+    """
+    rng = np.random.default_rng(11)
+    n = 61  # 60 trailing sessions + the as_of session itself, excluded (D-16)
+    idx = pd.bdate_range("2026-01-01", periods=n, tz="UTC")
+    base = rng.normal(0, 0.01, 60)
+    indep = rng.normal(0, 0.01, 30)
+    cand_ret = np.append(base, 0.0)  # as_of session's own return is unused
+    weak_ret = np.append(
+        np.concatenate([0.2 * base[:30] + 0.8 * indep, base[30:] + rng.normal(0, 0.0005, 30)]),
+        0.0,
+    )
+    closes = pd.DataFrame(
+        {
+            "CAND": 100 * np.exp(np.cumsum(cand_ret)),
+            "WEAK": 100 * np.exp(np.cumsum(weak_ret)),
+        },
+        index=idx,
+    )
+    as_of = idx[60].date()
+
+    # Sanity-check the fixture actually engineers what this test needs,
+    # computed directly rather than assumed.
+    returns = closes.pct_change()
+    window = returns.iloc[0:60]
+    first_half, second_half = window.iloc[:30], window.iloc[30:]
+    corr_first = first_half["CAND"].corr(first_half["WEAK"])
+    corr_second = second_half["CAND"].corr(second_half["WEAK"])
+    full_corr = window["CAND"].corr(window["WEAK"])
+    assert abs(corr_first) < 0.35, "the first half must be the weak one"
+    assert abs(corr_second) > 0.95, "the second half must be strong"
+    assert full_corr > 0.6, "the full-window correlation must look strong"
+
+    candidate = _candidate(as_of=as_of)
+    edge = _corr_edge("WEAK", "CAND", float(full_corr))
+
+    result = compute_quant_perspective(
+        candidate, [edge], closes, trail=60, excluded_etfs=frozenset()
+    )
+
+    assert result.split_half_min_abs == pytest.approx(min(abs(corr_first), abs(corr_second)))
+    assert result.split_half_min_abs < 0.4, (
+        "must reflect the weak half, not the ~0.66 full-window correlation"
+    )
+
+
+def test_split_half_min_abs_distinguishes_consistently_strong_pair_from_one_half_only_pair():
+    """A pair that correlates strongly in both halves and a pair that
+    correlates strongly in only one half can carry identical
+    `split_half_sign_agree_pct` (both signs agree, 100%) while their true
+    support is very different -- `split_half_min_abs` must tell them apart,
+    which is exactly the information the sign bit alone cannot express.
+
+    STRONG tracks CAND tightly across the whole window (both halves
+    strong). WEAK is the same fixture as the previous test: strong only in
+    the second half, weak in the first -- but both pairs' correlations are
+    positive in both halves, so sign agreement is 100% for both.
+
+    Falsifiable by: computing `split_half_min_abs` from
+    `split_half_sign_agree_pct` or any function of it alone -- STRONG and
+    WEAK would then be indistinguishable despite the assertions below
+    requiring they differ.
+    """
+    rng = np.random.default_rng(11)
+    n = 61
+    idx = pd.bdate_range("2026-01-01", periods=n, tz="UTC")
+    base = rng.normal(0, 0.01, 60)
+    indep = rng.normal(0, 0.01, 30)
+    cand_ret = np.append(base, 0.0)
+    weak_ret = np.append(
+        np.concatenate([0.2 * base[:30] + 0.8 * indep, base[30:] + rng.normal(0, 0.0005, 30)]),
+        0.0,
+    )
+    strong_ret = np.append(base + rng.normal(0, 0.0005, 60), 0.0)
+    closes = pd.DataFrame(
+        {
+            "CAND": 100 * np.exp(np.cumsum(cand_ret)),
+            "WEAK": 100 * np.exp(np.cumsum(weak_ret)),
+            "STRONG": 100 * np.exp(np.cumsum(strong_ret)),
+        },
+        index=idx,
+    )
+    as_of = idx[60].date()
+
+    returns = closes.pct_change()
+    window = returns.iloc[0:60]
+    first_half, second_half = window.iloc[:30], window.iloc[30:]
+
+    def sign_agree(col: str) -> bool:
+        a = first_half["CAND"].corr(first_half[col])
+        b = second_half["CAND"].corr(second_half[col])
+        return np.sign(a) == np.sign(b)
+
+    assert sign_agree("WEAK") and sign_agree("STRONG"), (
+        "both fixtures must agree in sign, so only the magnitude can distinguish them"
+    )
+
+    candidate = _candidate(as_of=as_of)
+    full_corr = window.corr()
+    weak_edge = _corr_edge("WEAK", "CAND", float(full_corr.loc["CAND", "WEAK"]))
+    strong_edge = _corr_edge("STRONG", "CAND", float(full_corr.loc["CAND", "STRONG"]))
+
+    weak_result = compute_quant_perspective(
+        candidate, [weak_edge], closes, trail=60, excluded_etfs=frozenset()
+    )
+    strong_result = compute_quant_perspective(
+        candidate, [strong_edge], closes, trail=60, excluded_etfs=frozenset()
+    )
+
+    assert weak_result.split_half_sign_agree_pct == strong_result.split_half_sign_agree_pct == 100.0
+    assert weak_result.split_half_min_abs < 0.4
+    assert strong_result.split_half_min_abs > 0.95
+    assert weak_result.split_half_min_abs != strong_result.split_half_min_abs
+
+
+def test_split_half_min_abs_is_none_with_no_correlation_edges(closes):
+    """Consistent with `median_ci_width` and `split_half_sign_agree_pct`:
+    with no correlation edges there are no halves to compare, so the field
+    must be `None`, not `0.0` or some other sentinel that a downstream
+    reader could mistake for "measured and found to be zero".
+
+    Falsifiable by: defaulting the field to `0.0` (or any other non-`None`
+    value) when `correlation_edges` is empty.
+    """
+    candidate = _candidate()
+
+    result = compute_quant_perspective(
+        candidate, [], closes, trail=60, excluded_etfs=frozenset()
+    )
+
+    assert result.split_half_min_abs is None
 
 
 def test_candidate_in_excluded_etf_set_is_flagged_etf(closes):

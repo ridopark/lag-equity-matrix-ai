@@ -62,6 +62,7 @@ reachability from the real call site rather than from a stand-in.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -369,7 +370,19 @@ class _FakeBatches:
         return SimpleNamespace(id=batch_id, processing_status=self._statuses[idx])
 
     def results(self, batch_id):
-        return self._results
+        # Echo back the custom_ids that were actually SENT, positionally, the
+        # way the real Batch API does. These fakes previously hardcoded the
+        # caller's dict keys as custom_ids, which quietly asserted that
+        # `custom_id == key` -- a shape the live API rejects, because
+        # `candidate_key()` produces `CAND|2026-06-01` and the pattern is
+        # ^[a-zA-Z0-9_-]{1,64}$. A fake that cannot express the constraint the
+        # real service enforces is how that bug survived to a live 400.
+        sent = [r["custom_id"] for r in self.create_calls[0]] if self.create_calls else []
+        for i, item in enumerate(self._results):
+            if i < len(sent):
+                item = dataclasses.replace(item, custom_id=sent[i])
+            yield item
+        return
 
 
 class _FakeAnthropic:
@@ -394,24 +407,36 @@ def _errored(custom_id: str) -> _BatchResultItem:
 
 
 async def test_batch_client_builds_one_request_per_key_with_custom_id():
-    """TASK-3.9: one batch request per key, each carrying that key as its
-    `custom_id` -- `BatchAnalystClient` has nothing else to key results back
-    to their candidate by.
+    """TASK-3.9: one batch request per key, each with a UNIQUE `custom_id`
+    that the Batch API will accept, and results mapped back to the caller's
+    own keys.
+
+    **Corrected 2026-09-12.** This previously asserted `custom_id` *is* the
+    key. The live API rejects that: `candidate_key()` produces
+    `CAND|2026-06-01`, and `custom_id` must match `^[a-zA-Z0-9_-]{1,64}$`, so
+    the whole submission came back 400. The test was pinning a shape the
+    service forbids -- corrected to describe the real contract, not relaxed.
 
     Falsifiable by: submitting fewer/more requests than keys, reusing one
-    `custom_id` for two keys, or a `custom_id` that isn't the key itself.
+    `custom_id` for two keys, emitting an id the API would reject, or
+    returning results under the sanitised ids instead of the caller's keys.
     """
+    import re
     briefs = {"AAA": "brief AAA", "BBB": "brief BBB"}
     results = [_succeeded("AAA", {"status": "ok"}), _succeeded("BBB", {"status": "ok"})]
     fake_client = _FakeAnthropic(statuses=["ended"], results=results)
     client = BatchAnalystClient(fake_client, model="claude-haiku-4-5-20251001", poll_interval=0)
 
-    await client.classify(briefs, _Note, system_prompt="sys")
+    out = await client.classify(briefs, _Note, system_prompt="sys")
 
     assert len(fake_client.messages.batches.create_calls) == 1
     requests = fake_client.messages.batches.create_calls[0]
     assert len(requests) == len(briefs)
-    assert {r["custom_id"] for r in requests} == set(briefs)
+    ids = [r["custom_id"] for r in requests]
+    assert len(set(ids)) == len(briefs), "each key needs its own custom_id"
+    pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+    assert all(pattern.match(i) for i in ids), f"the API would reject {ids}"
+    assert set(out) == set(briefs), "results must come back under the caller's keys"
 
 
 async def test_batch_client_polls_retrieve_until_ended():
@@ -516,11 +541,17 @@ async def test_direct_and_batch_assemble_identical_cache_boundary_for_the_same_i
     batch = BatchAnalystClient(fake_client, model="claude-haiku-4-5-20251001", poll_interval=0)
     await batch.classify(briefs, _Note, system_prompt=system_prompt)
 
-    requests_by_id = {r["custom_id"]: r for r in fake_client.messages.batches.create_calls[0]}
+    # Pair by position, not by `custom_id`. Batch custom_ids are sanitised
+    # (`c0`, `c1`, ...) because the API requires ^[a-zA-Z0-9_-]{1,64}$ and
+    # `candidate_key()` produces `CAND|2026-06-01`; they are emitted in
+    # `briefs` order, so request i belongs to key i. The drift this test
+    # exists to catch is in the assembled blocks, not in the id scheme.
+    requests = fake_client.messages.batches.create_calls[0]
+    requests_by_key = dict(zip(briefs, requests, strict=True))
 
     for key in briefs:
-        batch_system = requests_by_id[key]["params"]["system"]
-        batch_user = requests_by_id[key]["params"]["messages"][0]["content"]
+        batch_system = requests_by_key[key]["params"]["system"]
+        batch_user = requests_by_key[key]["params"]["messages"][0]["content"]
         assert batch_system == direct_system_by_key[key], (
             f"system/cached block drifted between direct and batch for {key!r}"
         )

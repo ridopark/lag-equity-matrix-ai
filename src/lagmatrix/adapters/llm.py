@@ -95,10 +95,12 @@ class BatchAnalystClient:
         self._poll_interval = poll_interval
         self._timeout = timeout
 
-    def _build_request(self, key: str, brief: str, schema: type[T], system_prompt: str) -> dict:
+    def _build_request(
+        self, custom_id: str, brief: str, schema: type[T], system_prompt: str
+    ) -> dict:
         system_blocks, user_blocks = _assemble_blocks(system_prompt, brief)
         return {
-            "custom_id": key,
+            "custom_id": custom_id,
             "params": {
                 "model": self._model,
                 "max_tokens": self._max_tokens,
@@ -112,9 +114,20 @@ class BatchAnalystClient:
     async def classify(
         self, briefs: dict[str, str], schema: type[T], *, system_prompt: str
     ) -> dict[str, T]:
+        # The Batch API requires `custom_id` to match ^[a-zA-Z0-9_-]{1,64}$.
+        # `candidate_key()` produces `CAND|2026-06-01`, whose `|` and `:` are
+        # both illegal, and the live endpoint rejects the WHOLE submission with
+        # a 400 -- so every batch call this system could have made would have
+        # failed. Found by a real API call; our fakes accept any string, which
+        # is why faking could never have caught it.
+        #
+        # Positional ids rather than a slugged key: slugging is lossy, and two
+        # distinct keys could collide into one id, which would silently return
+        # one candidate's note for another. The caller gets its own keys back.
+        ids = {f"c{i}": key for i, key in enumerate(briefs)}
         requests = [
-            self._build_request(key, brief, schema, system_prompt)
-            for key, brief in briefs.items()
+            self._build_request(custom_id, briefs[key], schema, system_prompt)
+            for custom_id, key in ids.items()
         ]
         batch = self._client.messages.batches.create(requests=requests)
 
@@ -145,7 +158,7 @@ class BatchAnalystClient:
                     )
             if "model" in schema.model_fields:
                 note.model = self._model
-            results[item.custom_id] = note
+            results[ids[item.custom_id]] = note
         return results
 
 

@@ -84,8 +84,14 @@ async def _run_stream(monkeypatch, source: str = "synthetic", limit: int | None 
 
 
 def _no_api_key(monkeypatch):
-    monkeypatch.delenv("LAGMATRIX_ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Empty, not deleted. `Settings` has `env_file=".env"`, so `delenv` removes
+    # the override and pydantic-settings reads the real key straight back out
+    # of the file -- the test then asserts "no key configured" on a machine
+    # that has one, and fails. An environment variable takes precedence over
+    # the env file, and an empty key is falsy, so `build_analyst_client`
+    # returns None. `conftest._isolate_anthropic_key` does the same by default.
+    monkeypatch.setenv("LAGMATRIX_ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
 
 
 def _spy_context(monkeypatch):

@@ -87,6 +87,13 @@ def _load_bars(start: date, end: date, path: str = BARS_PATH) -> pd.DataFrame | 
     return bars[(bars["timestamp"] >= start_ts) & (bars["timestamp"] <= end_ts)]
 
 
+# Distinguishes "the caller said nothing" from "the caller explicitly said no
+# LLM". `capture_baseline.py` needs the latter: it drives `run_sync`, and a
+# golden file whose content depends on whether a credential happens to exist on
+# the machine is not a golden file. It would also make capturing it cost money.
+_BUILD_FROM_SETTINGS = object()
+
+
 async def run(
     as_of: date | None = None,
     *,
@@ -97,6 +104,7 @@ async def run(
     thread_id: str | None = None,
     halt_on_contradicted: bool = False,
     signals: ExternalSignals | None = None,
+    llm: object = _BUILD_FROM_SETTINGS,
 ) -> tuple[list, str, dict | None]:
     """Assess the candidates for `as_of` (all of them when None).
 
@@ -137,7 +145,8 @@ async def run(
         excluded_symbols=_load_excluded_symbols(),
         halt_on_contradicted=halt_on_contradicted,
         bars=_load_bars(start, end),
-        llm=build_analyst_client(settings, mode="batch"),
+        llm=(build_analyst_client(settings, mode="batch")
+             if llm is _BUILD_FROM_SETTINGS else llm),
         max_llm_candidates=settings.max_llm_candidates,
     )
     config = {"configurable": {"thread_id": thread_id}}

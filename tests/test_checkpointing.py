@@ -123,12 +123,21 @@ def test_a_failed_run_resumes_and_re_runs_the_whole_superstep(closes, monkeypatc
     assert fail_symbol in calls, "the failing branch must actually have run"
     assert len(calls) == len(set(calls)), "no branch should be attempted twice"
     assert len(calls) <= 3
-    # The failing superstep's writes are discarded wholesale under the async
-    # executor, so no sibling's `leader_shocks` survives -- unlike the sync
-    # executor, which commits them. This asserts the real behaviour.
+    # What survives of the failing superstep is NOT portable. x86_64 discards
+    # every sibling's writes; aarch64 committed CAND's. Both are the same
+    # cancellation race as the `calls` count above -- `_should_stop_others`
+    # cancels siblings when one task fails, and whether a given sibling had
+    # already committed depends on scheduling, which differs by platform. An
+    # earlier version of this test asserted the dict was empty and passed on
+    # x86_64 while failing CI on aarch64.
+    #
+    # The invariant worth pinning is narrower and actually holds: the branch
+    # that RAISED produced no write, so its key is never present. Sibling
+    # writes may or may not survive, and the resume assertions below are what
+    # guarantee correctness either way.
     values = graph.get_state(config).values
-    assert values.get("leader_shocks", {}) == {}, (
-        "the async executor discards the whole failing superstep's writes"
+    assert candidate_key(candidates[1]) not in values.get("leader_shocks", {}), (
+        "the branch that raised cannot have committed a shock"
     )
 
     flag["fail"] = False

@@ -303,3 +303,40 @@ async def test_runner_passes_settings_max_llm_candidates_to_context(closes, monk
         f"expected Settings().max_llm_candidates (7 via env override) to reach "
         f"ctx.max_llm_candidates, got {captured.get('max_llm_candidates')!r}"
     )
+
+
+async def test_run_accepts_an_explicit_llm_override_so_the_baseline_stays_free(
+    closes, monkeypatch, tmp_path
+):
+    """`run(llm=None)` must suppress client construction entirely.
+
+    Why this exists: `capture_baseline.py` drives `run_sync`, and PHASE-7
+    taught `runner.py` to build a real Batch client from `Settings`. The plan
+    assumed the golden capture "never sets `llm=`, so it defaults to None" --
+    true when written, silently invalidated by PHASE-7. With a key present on
+    the machine, capturing the baseline began making **real, paid API calls**,
+    and the golden file stopped being deterministic: its content depended on
+    whether a credential happened to exist.
+
+    Falsifiable by: removing the override, so `build_analyst_client` is called
+    even when `llm=None` is passed explicitly.
+    """
+    calls: list = []
+    monkeypatch.setattr(
+        runner_mod, "build_analyst_client",
+        lambda *a, **k: calls.append(k.get("mode")) or object(),
+        raising=False,
+    )
+    monkeypatch.setenv("LAGMATRIX_ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+    monkeypatch.chdir(tmp_path)
+    _patch_checkpoint_db(monkeypatch, tmp_path)
+    captured = _spy_context(monkeypatch)
+    cand = _candidate("CAND")
+
+    await runner_mod.run(
+        cand.as_of, closes=closes, with_news=False,
+        signals=_StubSignals([cand]), llm=None,
+    )
+
+    assert calls == [], "run(llm=None) must not construct a client at all"
+    assert captured["llm"] is None

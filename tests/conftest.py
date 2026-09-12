@@ -172,6 +172,36 @@ def require_local_file(path: str, what: str) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_anthropic_key(monkeypatch):
+    """Hide any real Anthropic credential from every test by default.
+
+    `Settings` reads `LAGMATRIX_ANTHROPIC_API_KEY` from the environment *and*
+    from `.env`, so once a developer configures a key the suite starts behaving
+    differently on their machine than in CI: `build_analyst_client` returns a
+    real client, tests asserting "no key configured" fail, and -- the part that
+    matters -- anything driving the graph starts making **real, paid API
+    calls**. That is exactly D-114's `ALLOW_REAL` problem and Q-43's
+    silent-skip problem wearing a new hat: behaviour depending on ambient
+    state nobody declared.
+
+    Autouse rather than per-test, for D-114's stated reason: a test written
+    next month cannot reintroduce the coupling by forgetting. A test that
+    genuinely wants a key sets one itself with `monkeypatch.setenv`, which
+    still works because this runs first.
+
+    `_env_file` is cleared too -- pydantic-settings would otherwise read the
+    key straight back out of `.env` and defeat the `delenv`.
+    """
+    # Set empty rather than deleted: `delenv` alone is not enough, because
+    # `Settings` also reads `.env`, and pydantic-settings would load the key
+    # straight back out of it. An environment variable takes precedence over
+    # the env file, and `build_analyst_client` treats an empty key as absent.
+    monkeypatch.setenv("LAGMATRIX_ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_allow_real():
     """Restore `serve.ALLOW_REAL` after every test.
 

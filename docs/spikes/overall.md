@@ -4334,9 +4334,24 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   `tick` sets it **nowhere** (verified by grep: three occurrences async, zero
   sync). The test was corrected to describe the real executor, not relaxed to
   pass — the distinction matters and is written into its docstring.
+  **Corrected 2026-09-12 by CI, on the claim immediately above.** I wrote that
+  the async executor "discards the whole failing superstep's writes" and
+  asserted it as a test invariant. **That is over-strong.** aarch64 CI failed
+  where x86_64 passed: `leader_shocks` came back holding `CAND`'s write.
+  Sibling survival is the same cancellation race as the branch count --
+  `_should_stop_others` cancels siblings when one task fails, and whether a
+  given sibling had already committed depends on scheduling, which differs by
+  platform. The portable invariant is narrower: **the branch that raised
+  produced no write, so its own key is never present.** Everything else about
+  the failed superstep's residue is unspecified.
+  This is the second racy assertion in the same test in one day. The first
+  (`len(calls) == 3`) was caught locally by re-running under random ordering;
+  this one needed a different CPU architecture to surface, which is what the
+  two-arch CI of D-53 exists for and why it earns its cost.
+
   **A cost consequence follows, and it is not in the plan's estimates:** a
-  failure anywhere in a superstep discards every sibling's writes, so a resume
-  re-runs all branches. With the analyst nodes wired, a retry re-pays for every
+  failure in a superstep can discard sibling writes, so a resume re-runs those
+  branches. With the analyst nodes wired, a retry re-pays for every
   candidate's LLM calls, not just the failed one. Cents at Haiku-batch rates,
   but a real multiplier on PHASE-7/PHASE-10's accounting.
   No recorded decision cited the old efficiency property, so nothing previously

@@ -31,6 +31,7 @@ this one -- see AGENTS/CLAUDE.md's TDD-red contract.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -136,15 +137,29 @@ class _FakeBatches:
     def __init__(self, results: list[_BatchResultItem]):
         self._results = results
         self.batch_id = "batch_test_123"
+        self.create_calls: list[list[dict]] = []
 
     def create(self, *, requests):
+        self.create_calls.append(requests)
         return SimpleNamespace(id=self.batch_id, processing_status="ended")
 
     def retrieve(self, batch_id):
         return SimpleNamespace(id=batch_id, processing_status="ended")
 
     def results(self, batch_id):
-        return self._results
+        # Echo back the custom_ids that were actually SENT, positionally, the
+        # way the real Batch API does. These fakes previously hardcoded the
+        # caller's dict keys as custom_ids, which quietly asserted that
+        # `custom_id == key` -- a shape the live API rejects, because
+        # `candidate_key()` produces `CAND|2026-06-01` and the pattern is
+        # ^[a-zA-Z0-9_-]{1,64}$. A fake that cannot express the constraint the
+        # real service enforces is how that bug survived to a live 400.
+        sent = [r["custom_id"] for r in self.create_calls[0]] if self.create_calls else []
+        for i, item in enumerate(self._results):
+            if i < len(sent):
+                item = dataclasses.replace(item, custom_id=sent[i])
+            yield item
+        return
 
 
 class _FakeAnthropic:
@@ -373,3 +388,63 @@ async def test_error_note_reasoning_names_the_failure_rather_than_being_empty():
     )
     # Names the failure, not just its existence.
     assert "RuntimeError" in result["BAD"].reasoning
+
+
+async def test_batch_custom_ids_match_anthropics_required_pattern():
+    """Batch `custom_id` must match `^[a-zA-Z0-9_-]{1,64}$`.
+
+    Found by the real API, not by a fake. `candidate_key()` produces
+    `CAND|2026-06-01`; the `|` and `:` are illegal, and the live Batch
+    endpoint rejects the whole submission with HTTP 400:
+
+        requests.0.custom_id: String should match pattern '^[a-zA-Z0-9_-]{1,64}$'
+
+    So every batch call this system could ever have made would have failed.
+    No amount of faking would have caught it -- our own fakes accept any
+    string as a `custom_id`, which is precisely why TASK-7.5 exists.
+
+    Falsifiable by: passing `candidate_key`-shaped keys straight through as
+    `custom_id`, or by returning results keyed by the sanitised id rather than
+    mapping back to the caller's original key.
+    """
+    import re
+
+    captured: dict = {}
+
+    class _FakeBatches:
+        def create(self, *, requests):
+            captured["requests"] = requests
+            return SimpleNamespace(id="batch_1", processing_status="ended")
+
+        def retrieve(self, _id):
+            return SimpleNamespace(id="batch_1", processing_status="ended")
+
+        def results(self, _id):
+            note = {"status": "ok", "reasoning": "fine", "model": "x"}
+            for r in captured["requests"]:
+                yield SimpleNamespace(
+                    custom_id=r["custom_id"],
+                    result=SimpleNamespace(
+                        type="succeeded",
+                        message=SimpleNamespace(content=[
+                            SimpleNamespace(type="tool_use", name="note", input=note)
+                        ]),
+                    ),
+                )
+
+    client = BatchAnalystClient(
+        SimpleNamespace(messages=SimpleNamespace(batches=_FakeBatches())),
+        model=CONFIGURED_MODEL,
+        poll_interval=0,
+    )
+    briefs = {"CAND|2026-06-01": "brief a", "CAND2|2026-06-01": "brief b"}
+
+    out = await client.classify(briefs, QuantAnalystNote, system_prompt="sys")
+
+    pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+    for r in captured["requests"]:
+        assert pattern.match(r["custom_id"]), (
+            f"custom_id {r['custom_id']!r} would be rejected by the Batch API"
+        )
+    # And the caller still gets its own keys back, not the sanitised ones.
+    assert set(out) == set(briefs)

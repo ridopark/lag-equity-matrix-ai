@@ -59,8 +59,13 @@ def rows(bars_path: str = BARS_PATH, fires_path: str = FIRES_PATH) -> list[dict]
     # publisher prints per assessment; that noise makes the evidence output
     # unreadable, so swallow it here (the pipeline's own behaviour is unchanged)
     with contextlib.redirect_stdout(io.StringIO()):
+        # llm=None explicitly. The golden file must be deterministic and free.
+        # runner.py builds a real Batch client from Settings when a key exists
+        # (PHASE-7), so without this the captured baseline would depend on
+        # whether a credential happens to be present on the machine, and
+        # regenerating it would make paid API calls.
         assessments, _thread_id, _interrupt = run_sync(
-            closes=closes, with_news=False, limit=None, signals=signals
+            closes=closes, with_news=False, limit=None, signals=signals, llm=None
         )
 
     out = [

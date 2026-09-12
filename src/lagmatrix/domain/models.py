@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Bar(BaseModel):
@@ -170,10 +170,10 @@ class QuantAnalystNote(BaseModel):
     """
 
     status: Literal["ok", "not_run", "error"]
-    replication_expectation: Literal["high", "low", "insufficient_data"] | None
-    flagged_concerns: list[str]
-    reasoning: str
-    model: str
+    replication_expectation: Literal["high", "low", "insufficient_data"] | None = None
+    flagged_concerns: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+    model: str = ""
 
 
 class DayTradeAnalystNote(BaseModel):
@@ -183,7 +183,7 @@ class DayTradeAnalystNote(BaseModel):
     """
 
     status: Literal["ok", "not_run", "error"]
-    liquidity_tier: Literal["ample", "marginal", "thin", "insufficient_data"] | None
-    gap_dominant: bool | None
-    reasoning: str
-    model: str
+    liquidity_tier: Literal["ample", "marginal", "thin", "insufficient_data"] | None = None
+    gap_dominant: bool | None = None
+    reasoning: str = ""
+    model: str = ""

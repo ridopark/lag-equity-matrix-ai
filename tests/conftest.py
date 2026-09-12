@@ -301,3 +301,35 @@ def run_graph(closes):
                                       signal_universe=set(signal_universe)),
         )
     return _run
+
+
+class FakeAnalystClient:
+    """Stand-in for `AnalystClient` (adapters/llm.py's protocol), shared by the
+    quant and day-trade gather-node tests (PHASE-4/5) -- neither ever reaches
+    the network. Records every `classify()` call (`.calls`) and returns
+    `schema(**responses[key])` per key in `briefs`; a key missing from
+    `responses` falls back to `schema(**default)`, so a test only has to
+    spell out the fields that differ per candidate.
+    """
+
+    def __init__(self, responses: dict[str, dict] | None = None, default: dict | None = None):
+        self.calls: list[dict] = []
+        self._responses = responses or {}
+        self._default = default or {}
+
+    async def classify(self, briefs, schema, *, system_prompt):
+        self.calls.append(
+            {"briefs": dict(briefs), "schema": schema, "system_prompt": system_prompt}
+        )
+        return {
+            key: schema(**self._responses.get(key, self._default)) for key in briefs
+        }
+
+
+@pytest.fixture
+def fake_analyst_client():
+    """Factory fixture: hands back the `FakeAnalystClient` class itself so
+    each test constructs one with the canned `responses`/`default` it needs
+    for whichever note schema (`QuantAnalystNote`/`DayTradeAnalystNote`) it
+    is testing against."""
+    return FakeAnalystClient

@@ -62,9 +62,14 @@ class DirectAnalystClient:
                 HumanMessage(content=user_blocks),
             ]
             try:
-                return await structured.ainvoke(messages)
-            except Exception:
-                return schema(status="error")
+                note = await structured.ainvoke(messages)
+            except Exception as exc:
+                note = schema(status="error")
+                if "reasoning" in schema.model_fields:
+                    note.reasoning = f"{type(exc).__name__}: {exc}"
+            if "model" in schema.model_fields:
+                note.model = self._llm.model
+            return note
 
         results = await asyncio.gather(*(_one(brief) for brief in briefs.values()))
         return dict(zip(briefs.keys(), results, strict=True))
@@ -128,9 +133,19 @@ class BatchAnalystClient:
                 tool_use = next(
                     b for b in item.result.message.content if b.type == "tool_use"
                 )
-                results[item.custom_id] = schema(**tool_use.input)
+                note = schema(**tool_use.input)
             else:
-                results[item.custom_id] = schema(status="error")
+                note = schema(status="error")
+                if "reasoning" in schema.model_fields:
+                    error = getattr(item.result, "error", None)
+                    note.reasoning = (
+                        str(error)
+                        if error is not None
+                        else f"batch item errored (type={item.result.type!r})"
+                    )
+            if "model" in schema.model_fields:
+                note.model = self._model
+            results[item.custom_id] = note
         return results
 
 

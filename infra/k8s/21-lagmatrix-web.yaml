@@ -51,6 +51,63 @@ spec:
         # what is actually a PermissionError (D-117, Q-55).
         fsGroup: 10001
       initContainers:
+        # Q-58/D-126, now on the web pod too. kube-router programs a pod's
+        # KUBE-POD-FW-* chain from a pod-add informer event, so egress is
+        # unenforced for the first 1-3 seconds of a pod's life. The ingest is a
+        # Job and got this guard first, on the reasoning that a Deployment
+        # "starts once and lives" and is far less exposed.
+        #
+        # Two things overturn that for this pod. It uses `strategy: Recreate`,
+        # so it is fully torn down and recreated on EVERY deploy -- including
+        # the one shipping this -- hitting the window at a frequency closer to
+        # the Job's than to "once". And as of this change it holds a live
+        # database credential and genuine outbound internet access at the same
+        # time, a larger blast radius during that window than it has ever had.
+        # The guard travels with the pod's exposure, not its workload class.
+        #
+        # Probe targets are unchanged from the ingest's: the widened policy
+        # gives this pod the same allow/except shape, so arangodb:8529 is still
+        # a valid ALLOWED target and the LAN :6443 still a valid DENIED one.
+        - name: await-netpol
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:589bf03
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |
+              import socket, sys, time
+              DENIED = ("192.168.10.123", 6443)
+              ALLOWED = ("arangodb", 8529)
+              DEADLINE = 30.0
+              def open_(t):
+                  try:
+                      socket.create_connection(t, timeout=2).close()
+                      return True
+                  except OSError:
+                      return False
+              t0 = time.time()
+              while time.time() - t0 < DEADLINE:
+                  denied_blocked = not open_(DENIED)
+                  allowed_up = open_(ALLOWED)
+                  if denied_blocked and allowed_up:
+                      print("egress policy enforced after %.1fs" % (time.time() - t0), flush=True)
+                      sys.exit(0)
+                  time.sleep(0.25)
+              sys.exit("egress policy not enforced after %.0fs "
+                       "(denied_blocked=%s, allowed_up=%s); refusing to run"
+                       % (DEADLINE, denied_blocked, allowed_up))
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+
+        # The PVC mounts at /app/data and shadows whatever the image baked
+        # there -- so data/excluded-etfs.csv, which IS committed and IS in
+        # the image, was invisible and comovement died on it. This copies
+        # the image's copy onto the volume before the run, which keeps the
+        # repo as the source of truth rather than letting a seeded copy
+        # drift. It mounts the volume at /seed precisely so /app/data stays
+        # unshadowed here and the baked-in file can be read.
+
         # The PVC mounts at /app/data and shadows what the image baked there,
         # so the committed data/excluded-etfs.csv would be invisible —
         # neighbourhood() reads it. Same fix as the ingest CronJob.
@@ -74,6 +131,15 @@ spec:
           env:
             - {name: LAGMATRIX_ARANGO_URL, value: "http://arangodb:8529"}
             - {name: LAGMATRIX_ARANGO_USER, value: "lagmatrix_ro"}
+          # The web pod's first envFrom. `optional: true` is load-bearing:
+          # without it, referencing a secret that does not yet exist leaves
+          # this pod in CreateContainerConfigError and the demo stops serving
+          # entirely -- to add a credential nothing can use yet. With it, the
+          # page serves and reports `"llm": false` in its start event, exactly
+          # as it already reports `"graphrag": false` without ArangoDB.
+          # envFrom, not a volume mount, so D-117's fsGroup fix does not apply.
+          envFrom:
+            - secretRef: {name: anthropic-credentials, optional: true}
           ports:
             - {containerPort: 8000, name: http}
           securityContext:

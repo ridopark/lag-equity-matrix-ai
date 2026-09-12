@@ -53,6 +53,32 @@ spec:
             matchLabels: {app: arangodb}
       ports:
         - {protocol: TCP, port: 8529}
+    # Added for the live demo's Claude calls, at the owner's explicit
+    # decision. This is a DELIBERATE NARROWING OF D-121's default-deny and is
+    # recorded as such rather than slipped in: this pod, which serves HTTP to
+    # the cluster, now has general outbound 443.
+    #
+    # `api.anthropic.com` sits behind a CDN with rotating addresses, so an
+    # ipBlock allowlist of specific IPs is not maintainable. This is the same
+    # shape the ingest policy already uses -- consistency with the existing
+    # rule is worth more here than a cleverer one-off.
+    #
+    # The residual, stated plainly. Mitigations: the pod is ClusterIP-only
+    # with no Ingress, so nothing external reaches it inbound; it connects to
+    # ArangoDB as the read-only `lagmatrix_ro` role; and the `except` list
+    # still blocks the pod CIDR, the service CIDR and the LAN, so it cannot
+    # reach the trading namespace or anything on 192.168.10.0/24. What is NOT
+    # mitigated: it can now reach any host on the public internet on 443.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16      # pod CIDR
+              - 10.43.0.0/16      # service CIDR
+              - 192.168.10.0/24   # the LAN, including the trading host
+      ports:
+        - {protocol: TCP, port: 443}
+
 ---
 # The nightly ingest. Selectable only because 22-lagmatrix-ingest-cron.yaml
 # labels its pod template `app: lagmatrix-ingest`: CronJob pods otherwise carry

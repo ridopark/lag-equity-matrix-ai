@@ -4825,6 +4825,75 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   this one destroyed 818 edges with one, and cost minutes.
 - **Status:** Accepted. Q-65 closed.
 
+### D-139 — The relatedness fields reach the UI, and the node they come from was crashing on real data
+
+- **When:** 2026-09-12T14:12:00-05:00
+- **Decision:** `detail()` gains a `quant_perspective` branch so the node's read
+  is rendered in the live scan, and `compute_quant_perspective`'s session lookup
+  is changed from `get_loc` to `searchsorted`.
+- **Why:** asked to make something consume D-137's new fields. The search found
+  that **nothing had ever consumed any of `QuantPerspective`** —
+  `scripts/capture_trace.py::detail`, which `scripts/serve.py:42` imports and
+  renders at line 280, had branches for `graph_retriever`, `leader_state`,
+  `vector_retriever`, `context_fusion` and `assessor` but none for
+  `quant_perspective`, so it fell through to `return key, ""`. Fisher CI widths,
+  split-half stability and the new relatedness fields were all computed and
+  discarded at the display layer. There was **no test file for `detail` at all**.
+- **The larger find, and it is a test-suite defect, not a code one:**
+  `compute_quant_perspective:51` did
+  `sessions.get_loc(pd.Timestamp(candidate.as_of, tz=sessions.tz))` — an exact
+  **midnight** lookup. Both production files index sessions at **04:00 UTC**:
+
+  | file | normalized |
+  |---|---|
+  | `data/bars.parquet` | **No** — 04:00 |
+  | `data/bars-10y.parquet` | **No** — 04:00 |
+  | `tests/fixtures/synthetic-closes.parquet` | **Yes** — 00:00 |
+
+  So the function raised `KeyError` for any candidate with a correlation edge on
+  real data, while 432 tests passed. Reproduced directly: `as_of=2026-07-29`, a
+  real session at `2026-07-29 04:00:00+00:00`, raised
+  `KeyError: Timestamp('2026-07-29 00:00:00+0000')`. **The suite could not have
+  caught it: there is exactly one price fixture and it is normalized.** Same
+  class as Q-43 — green tests certifying a path production never takes.
+  `quant_perspective:51` was the only exact-timestamp lookup in the codebase;
+  every other node already used a time-of-day-tolerant idiom.
+- **Why not `leader_state`'s idiom:** `sessions[sessions > str(c.as_of)][0]`
+  (used by `leader_state:32` and `context_fusion:61`) resolves to the session
+  **after** as_of. Copying it would have silenced the KeyError while shifting the
+  window forward and pulling the as-of day's own return into the correlation —
+  lookahead, forbidden by D-16, and contrary to this function's own contract
+  ("the window ends strictly before the as-of session"). `searchsorted` lands on
+  the as-of session for both index shapes, so the measured window is unchanged.
+  `test_quant_perspective_window_is_identical_normalized_or_not` pins exactly
+  that by requiring equal statistics from a midnight-indexed and a 04:00-indexed
+  run — it fails for the lookahead "fix" as well as for the original bug.
+- **Outcome:** observed. 434 passed, 1 skipped, ruff clean. Verified end-to-end
+  against the real 04:00-indexed file with live Arango, which is the check the
+  suite structurally cannot perform:
+
+  | symbol | with Arango | without |
+  |---|---|---|
+  | AAPL | `20 edges, 0% sector match, 0 strong/1 weak co-mentions` | `20 edges, relatedness not measured` |
+  | QRVO | `20 edges, 90% sector match, 2 strong/0 weak co-mentions` | same |
+  | JPM | `20 edges, 75% sector match, 6 strong/0 weak co-mentions` | same |
+
+  The values are discriminating rather than decorative: QRVO (semiconductors)
+  and JPM (banks) co-move overwhelmingly with their own sector, while **AAPL
+  matches 0%** of its 20 neighbours. Read with care — SIC 3571 "Electronic
+  Computers" is a narrow major group (35), and Apple's neighbours sit in 36
+  (electronics), so 0% partly reflects a category boundary rather than pure
+  unrelatedness. That is a caveat on the feature, not a defect in the read.
+- **Deliberately NOT done: `assess()` still ignores these fields.** D-34 pins
+  `odds_adjustment=0.0` because no powered test supports a probability. D-137's
+  0.7455 AUC measures whether a **decade-long** correlation in the 0.4-0.5 band
+  **replicates in a later multi-year window**; `assess()` asks whether
+  neighbours moved on **one date** over a **60-session** window. Different
+  quantities. Wiring the coefficient into a verdict would be exactly the
+  overclaiming D-133/D-135 were written to catch. Surfacing the numbers to a
+  human is honest; scoring with them is not, yet.
+- **Status:** Accepted.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

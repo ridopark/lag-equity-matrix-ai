@@ -51,6 +51,16 @@ def detail(node: str, upd) -> tuple[str | None, str]:
     if node == "assessor":
         a = upd.get("assessments", [])
         return None, f"{len(a)} assessments"
+    if node == "quant_perspective":
+        q = next(iter(upd.get("quant_by_key", {}).values()), None)
+        if q is None:
+            return key, ""
+        if q.sector_match_pct is None:
+            return key, f"{q.n_edges} edges, relatedness not measured"
+        return key, (
+            f"{q.n_edges} edges, {q.sector_match_pct:g}% sector match, "
+            f"{q.comention_strong_count} strong/{q.comention_weak_count} weak co-mentions"
+        )
     return key, ""
 
 

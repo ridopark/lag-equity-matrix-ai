@@ -47,8 +47,12 @@ def compute_quant_perspective(
     if correlation_edges:
         returns = closes.pct_change()
         sessions = closes.index
-        # D-16: the window ends strictly before the as-of session.
-        ti = sessions.get_loc(pd.Timestamp(candidate.as_of, tz=sessions.tz))
+        # D-16: the window ends strictly before the as-of session. Production
+        # sessions are indexed at 04:00 UTC, not midnight, so an exact
+        # get_loc(midnight) lookup raises KeyError; searchsorted finds the
+        # as-of session (or the first one after it) regardless of the
+        # intraday offset the index uses.
+        ti = sessions.searchsorted(pd.Timestamp(candidate.as_of, tz=sessions.tz))
         window = returns.iloc[ti - trail : ti]
         half = trail // 2
         first_half, second_half = window.iloc[:half], window.iloc[half:]

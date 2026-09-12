@@ -507,3 +507,78 @@ def test_quant_perspective_model_round_trips_new_fields():
     assert result.sector_match_pct == 50.0
     assert result.comention_weak_count == 1
     assert result.comention_strong_count == 2
+
+
+def test_compute_quant_perspective_handles_a_non_normalized_session_index(closes):
+    """Both production price files (`data/bars.parquet`,
+    `data/bars-10y.parquet`) index sessions at 04:00 UTC, not midnight --
+    `compute_quant_perspective` must locate the as-of session by date
+    regardless of the intraday timestamp component, not require an exact
+    midnight match.
+
+    Falsifiable by: today's exact-timestamp lookup
+    (`sessions.get_loc(pd.Timestamp(candidate.as_of, tz=sessions.tz))`),
+    which raises `KeyError` against a 04:00-indexed frame -- observed below.
+    """
+    shifted = closes.copy()
+    shifted.index = closes.index + pd.Timedelta(hours=4)
+
+    trail = 60
+    ti = 80
+    as_of = shifted.index[ti].date()
+    candidate = _candidate(as_of=as_of)
+    edge = _corr_edge("LEAD1", "CAND", 0.5)
+
+    result = compute_quant_perspective(
+        candidate, [edge], shifted, trail=trail, excluded_etfs=frozenset()
+    )
+
+    assert result.n_edges == 1
+
+    returns = shifted.pct_change()
+    window = returns.iloc[ti - trail : ti]
+    half = trail // 2
+    first_half, second_half = window.iloc[:half], window.iloc[half:]
+    corr_first = first_half["CAND"].corr(first_half["LEAD1"])
+    corr_second = second_half["CAND"].corr(second_half["LEAD1"])
+    expected_agree = 100.0 if np.sign(corr_first) == np.sign(corr_second) else 0.0
+
+    assert result.split_half_sign_agree_pct == expected_agree
+    assert result.split_half_min_abs == pytest.approx(min(abs(corr_first), abs(corr_second)))
+
+
+def test_quant_perspective_window_is_identical_normalized_or_not(closes):
+    """The session lookup must resolve to the *same* trailing window whether
+    the price index is normalized to midnight or carries a 04:00 UTC
+    intraday component (the shape of the real `data/bars*.parquet` files) --
+    the fix must change only which timestamp is located, never which window
+    is measured.
+
+    Falsifiable by: a fix that resolves the as-of session to the row *after*
+    `candidate.as_of` (e.g. copying `leader_state.py`'s
+    `sessions[sessions > str(c.as_of)][0]` idiom) instead of an exact-date
+    match -- that would shift the window by one session and pull the as-of
+    day's own return into the correlation, a D-16 lookahead violation this
+    test would catch as a mismatch between the midnight- and 04:00-indexed
+    results.
+    """
+    trail = 60
+    ti = 80
+    as_of = closes.index[ti].date()
+    candidate = _candidate(as_of=as_of)
+    edge = _corr_edge("LEAD1", "CAND", 0.5)
+
+    midnight_result = compute_quant_perspective(
+        candidate, [edge], closes, trail=trail, excluded_etfs=frozenset()
+    )
+
+    shifted = closes.copy()
+    shifted.index = closes.index + pd.Timedelta(hours=4)
+    shifted_result = compute_quant_perspective(
+        candidate, [edge], shifted, trail=trail, excluded_etfs=frozenset()
+    )
+
+    assert midnight_result.n_edges == shifted_result.n_edges
+    assert midnight_result.median_ci_width == shifted_result.median_ci_width
+    assert midnight_result.split_half_sign_agree_pct == shifted_result.split_half_sign_agree_pct
+    assert midnight_result.split_half_min_abs == shifted_result.split_half_min_abs

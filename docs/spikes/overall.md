@@ -4530,6 +4530,73 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   log exists to catch, in its most seductive form yet.
   Caveat kept: six pairs, a different seed from the measured run. The AUC over
   500 per band is the evidence; these six illustrate the mechanism.
+
+  **VERDICT NARROWED 2026-09-12T08:40 by D-134.** Everything above is accurate
+  *about the brief we gave it* and is wrong as a general claim about the model.
+  The owner asked the obvious question I had not: if the failure was that Haiku
+  lacked the base rates I had, give it them and re-test. Doing so closes most
+  of the gap — see D-134. "Do not ship the analyst nodes" is superseded by
+  "do not ship them on an uncalibrated brief".
+- **Status:** Accepted, with the verdict narrowed by D-134
+
+### D-134 — The analyst's failure was informational, and the owner spotted it
+
+- **When:** 2026-09-12T08:40:00-05:00
+- **Decision:** D-133's "the LLM loses to sorting" is narrowed. Given the
+  population statistics it previously lacked, Haiku's ranking improves
+  significantly and is **no longer statistically distinguishable** from the
+  deterministic ranking. The analyst layer is not unshippable; an
+  *uncalibrated brief* is.
+- **Why:** D-133 concluded the model ranks worse than `sorted()`. I explained
+  the asymmetry as "access, not intelligence" — I had the held-out outcomes
+  and could compute base rates over 6,803 pairs; Haiku saw **n=1** with no
+  population context, and inferred "weaker half 0.19 < 0.4, so it will not
+  clear 0.4" — locally sound, empirically false, and uncorrectable from a
+  single observation. I stated I would likely have made the same call from the
+  same brief. **The owner drew the conclusion I had not: then give it the
+  context and try again.**
+  The alternative that lost was shipping nothing, on a verdict measured
+  against a brief that withheld the very information the task needs.
+- **Outcome:** Arm B2, 394 held-out pairs, band 0.4-0.5, ~$1.35.
+
+  **Leakage guard, which decides whether any of this means anything:** the
+  calibration curve is built from validation outcomes, so it is fitted on a
+  **train half (3,401 pairs)** and Haiku is scored on a **disjoint half**.
+  Train base rate 54%, held-out 53% — the curve generalises.
+
+  | | AUC |
+  |---|---|
+  | Haiku, D-133's brief (no context) | 0.5588 |
+  | Haiku, with population context | **0.6484** |
+  | deterministic `min(\|h1\|,\|h2\|)` | 0.6821 |
+
+  - gain from context: **+0.0896**, 95% CI **[+0.0228, +0.1316]** — excludes zero
+  - remaining deficit: +0.0336, 95% CI **[-0.0029, +0.0911]** — **includes zero**
+
+  Its `"high"` rate moved from ~1-in-6 to 66% against a 48.7% base rate: rate-
+  calibrated, now mildly over-calling.
+
+  **The same six pairs from D-133's amendment went 3/6 to 4/6**, and the
+  reasoning changed character. It now cites the empirical bucket — *"the
+  0.282-0.317 band, which shows 69% retention... substantially above the
+  overall 54% baseline"* — instead of inventing a threshold argument. Both
+  remaining errors are **honest**: PEP/ROP sits in the bottom decile where only
+  18% retain, so "low" was the correct call that lost; HWC/USB is in a 49%
+  bucket, a coin flip. That is categorically different from D-133, where it
+  confidently asserted what the data contradicted.
+
+  **Three caveats, all load-bearing.**
+  (1) **Not better — indistinguishable.** The point estimate still favours
+  sorting, which is free, deterministic and needs no credential. For ranking
+  alone, use the sort.
+  (2) **Run-to-run variance is comparable to the effect.** Two runs of the
+  identical setup gave 0.6197 and 0.6484. One run is not a measurement.
+  (3) **The causal narrative is still confabulated.** The same weak-first-half/
+  strong-second-half shape is narrated as *"a strengthening signal... genuine
+  correlation structure"* for MAN/RHI and *"an illusion of correlation"* for
+  PEP/ROP. The base rate does the work; the story is composed afterwards to
+  match. The **numbers it cites are now real and the conclusions calibrated**;
+  the explanation around them is illustration, not mechanism.
 - **Status:** Accepted
 
 ## Open Questions

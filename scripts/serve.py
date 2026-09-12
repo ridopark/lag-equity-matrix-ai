@@ -42,6 +42,8 @@ import capture_showcase as cap  # noqa: E402
 from capture_trace import detail  # noqa: E402
 
 from lagmatrix.adapters.candidates import ExternalSignals, MarketScan  # noqa: E402
+from lagmatrix.adapters.llm import build_analyst_client  # noqa: E402
+from lagmatrix.config import load_settings  # noqa: E402
 from lagmatrix.graph.builder import build_graph  # noqa: E402
 from lagmatrix.graph.context import LagMatrixContext  # noqa: E402
 
@@ -236,6 +238,8 @@ async def stream(source: str, limit: int | None, emit, *,
     db = arango_db()
     closes, all_c, origin_leaders = load(source, db, as_of)
     cands = all_c[:limit] if limit else all_c
+    settings = load_settings()
+    llm = build_analyst_client(settings, mode="direct")
     ctx = LagMatrixContext(
         closes=closes,
         # The scan's originating movers are excluded alongside the candidates
@@ -248,12 +252,15 @@ async def stream(source: str, limit: int | None, emit, *,
         max_lag_hops=2,
         news_limit=6,
         halt_on_contradicted=True,
+        llm=llm,
+        max_llm_candidates=settings.max_llm_candidates,
     )
 
     emit("start", {
         "source": source, "candidates": len(cands),
         "symbols": int(closes.shape[1]), "sessions": int(closes.shape[0]),
         "graphrag": db is not None,
+        "llm": llm is not None,
         # In scan mode two stages already ran before the graph was entered:
         # the market sweep and the traversal that turned movers into candidates.
         # The page draws them, otherwise the inversion is invisible and the

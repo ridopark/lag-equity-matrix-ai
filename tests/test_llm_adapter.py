@@ -84,6 +84,12 @@ class _Note(BaseModel):
     """
 
     status: str = "ok"
+    # An analytical field, so a test can distinguish two payloads without
+    # abusing `status`. `status` is infrastructure the client writes -- a
+    # stand-in whose only field is `status` forced production code to trust
+    # the payload for some schemas and not others, keyed on an unrelated
+    # field's presence. The fixture should follow the design, not shape it.
+    reasoning: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +231,17 @@ async def test_direct_client_classifies_every_key_once_concurrently():
 
     assert set(result) == set(briefs)
     assert len(fake_llm.ainvoke_calls) == len(briefs)
-    assert all(schema is _Note for schema in fake_llm.with_structured_output_calls)
+    # NOT `schema is _Note`. The client deliberately passes a STRIPPED
+    # schema with `status`/`model` removed, so the model cannot write
+    # the fields the client owns -- a live run had it answering
+    # `status="error"` to decline. Identity held here only while the
+    # stand-in was degenerate (its sole field was `status`, so stripping
+    # left nothing and the passthrough fallback fired). Assert the
+    # property that matters instead.
+    for sent in fake_llm.with_structured_output_calls:
+        props = sent.model_json_schema()["properties"]
+        assert "status" not in props, "the model must not be able to write status"
+        assert "reasoning" in props, "analytical fields must survive the strip"
     sequential_total = delay * len(briefs)
     assert elapsed < sequential_total * 0.6, (
         f"classify took {elapsed:.3f}s for {len(briefs)} keys at {delay}s each -- "
@@ -470,8 +486,8 @@ async def test_batch_client_parses_forced_tool_use_block_by_key():
     """
     briefs = {"AAA": "brief AAA", "BBB": "brief BBB"}
     results = [
-        _succeeded("AAA", {"status": "ok"}),
-        _succeeded("BBB", {"status": "error"}),
+        _succeeded("AAA", {"reasoning": "for AAA"}),
+        _succeeded("BBB", {"reasoning": "for BBB"}),
     ]
     fake_client = _FakeAnthropic(statuses=["ended"], results=results)
     client = BatchAnalystClient(fake_client, model="claude-haiku-4-5-20251001", poll_interval=0)
@@ -479,9 +495,9 @@ async def test_batch_client_parses_forced_tool_use_block_by_key():
     result = await client.classify(briefs, _Note, system_prompt="sys")
 
     assert isinstance(result["AAA"], _Note)
-    assert result["AAA"].status == "ok"
+    assert result["AAA"].reasoning == "for AAA"
     assert isinstance(result["BBB"], _Note)
-    assert result["BBB"].status == "error"
+    assert result["BBB"].reasoning == "for BBB"
 
 
 async def test_batch_client_errored_result_comes_back_status_error_never_omitted():

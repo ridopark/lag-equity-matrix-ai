@@ -12,11 +12,29 @@ from typing import Any, Literal, Protocol, TypeVar
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 
 from lagmatrix.config import Settings, load_settings
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _analyst_schema(schema: type[BaseModel]) -> type[BaseModel]:
+    """The schema handed to the model: `status` and `model` are
+    infrastructure fields the client alone stamps, never the model's own
+    judgement (found live -- a model declining to classify wrote
+    `status="error"` alongside its refusal prose, indistinguishable from an
+    actual infrastructure failure). Falls back to `schema` unchanged if
+    stripping those two leaves no analytical fields at all.
+    """
+    fields = {
+        name: (field.annotation, field)
+        for name, field in schema.model_fields.items()
+        if name not in ("status", "model")
+    }
+    if not fields:
+        return schema
+    return create_model(f"{schema.__name__}Analytical", **fields)
 
 
 class AnalystClient(Protocol):
@@ -53,7 +71,7 @@ class DirectAnalystClient:
     async def classify(
         self, briefs: dict[str, str], schema: type[T], *, system_prompt: str
     ) -> dict[str, T]:
-        structured = self._llm.with_structured_output(schema)
+        structured = self._llm.with_structured_output(_analyst_schema(schema))
 
         async def _one(brief: str) -> T:
             system_blocks, user_blocks = _assemble_blocks(system_prompt, brief)
@@ -62,11 +80,23 @@ class DirectAnalystClient:
                 HumanMessage(content=user_blocks),
             ]
             try:
-                note = await structured.ainvoke(messages)
+                payload = await structured.ainvoke(messages)
             except Exception as exc:
                 note = schema(status="error")
                 if "reasoning" in schema.model_fields:
                     note.reasoning = f"{type(exc).__name__}: {exc}"
+            else:
+                data = payload.model_dump() if isinstance(payload, BaseModel) else dict(payload)
+                # Gate on the field being acted upon, not a proxy for it. The
+                # model never sees `status` (it is stripped from the schema it
+                # is given), so anything resembling one in the payload is not
+                # the client's judgement and is dropped.
+                data.pop("model", None)
+                if "status" in schema.model_fields:
+                    data.pop("status", None)
+                    note = schema(status="ok", **data)
+                else:
+                    note = schema(**data)
             if "model" in schema.model_fields:
                 note.model = self._llm.model
             return note
@@ -125,8 +155,9 @@ class BatchAnalystClient:
         # distinct keys could collide into one id, which would silently return
         # one candidate's note for another. The caller gets its own keys back.
         ids = {f"c{i}": key for i, key in enumerate(briefs)}
+        analytical_schema = _analyst_schema(schema)
         requests = [
-            self._build_request(custom_id, briefs[key], schema, system_prompt)
+            self._build_request(custom_id, briefs[key], analytical_schema, system_prompt)
             for custom_id, key in ids.items()
         ]
         batch = self._client.messages.batches.create(requests=requests)
@@ -146,7 +177,18 @@ class BatchAnalystClient:
                 tool_use = next(
                     b for b in item.result.message.content if b.type == "tool_use"
                 )
-                note = schema(**tool_use.input)
+                data = dict(tool_use.input)
+                # Same reasoning as the direct client: gate on the field being
+                # acted upon. A live 6-pair run had the model answering
+                # `status="error"` with prose to decline; `status` is now
+                # stripped from the schema it sees, and anything resembling one
+                # in the payload is dropped rather than believed.
+                data.pop("model", None)
+                if "status" in schema.model_fields:
+                    data.pop("status", None)
+                    note = schema(status="ok", **data)
+                else:
+                    note = schema(**data)
             else:
                 note = schema(status="error")
                 if "reasoning" in schema.model_fields:

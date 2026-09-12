@@ -448,3 +448,245 @@ async def test_batch_custom_ids_match_anthropics_required_pattern():
         )
     # And the caller still gets its own keys back, not the sanitised ones.
     assert set(out) == set(briefs)
+
+
+# ---------------------------------------------------------------------------
+# 5 -- the model must not be able to write `status` or `model` (found live)
+#
+# `BatchAnalystClient._build_request` and `DirectAnalystClient` both hand the
+# model `schema.model_json_schema()` (or `schema` itself) as the tool/output
+# schema, so the model can write `status` and `model` alongside its actual
+# judgement. On a live 6-pair batch run, 2/6 came back `status="error"`
+# carrying model prose declining to classify ("Multiple severe red flags
+# preclude a 'high' or even 'insufficient_data' classification") --
+# indistinguishable from an actual infrastructure failure, and undoing the
+# reasoning behind 7beb8ec (error notes carry a reason naming what failed,
+# on the assumption that only the client writes that field). Same reasoning
+# applies to `model`: a client-stamped value is what makes it trustworthy at
+# all for comparing models against each other (PHASE-10).
+#
+# `status`/`model` are infrastructure states the client alone may set; the
+# model's own "I cannot tell" already has a first-class analytical value --
+# `replication_expectation="insufficient_data"` /
+# `liquidity_tier="insufficient_data"`.
+# ---------------------------------------------------------------------------
+
+
+class _FakeChatAnthropicCapturingSchema:
+    """Like `_FakeChatAnthropic`, but records the schema
+    `with_structured_output` was actually called with, so a test can inspect
+    what the model is told it may write. Deliberately agnostic about the
+    shape of that schema -- `with_structured_output`'s own docstring names
+    two valid forms (a Pydantic class, output validated; or a raw JSON
+    schema `dict`, output an unvalidated `dict`) and `DirectAnalystClient`
+    is free to send either.
+    """
+
+    def __init__(self, model: str, structured_llm):
+        self.model = model
+        self._structured_llm = structured_llm
+        self.with_structured_output_calls = []
+
+    def with_structured_output(self, schema):
+        self.with_structured_output_calls.append(schema)
+        return self._structured_llm
+
+
+def _schema_properties(sent_schema) -> dict:
+    """`sent_schema` is whatever a client actually handed to the model to
+    describe its output -- either a raw JSON schema `dict` or a Pydantic
+    class (see `_FakeChatAnthropicCapturingSchema`). Extract `properties`
+    either way, rather than assuming which form the fix takes.
+    """
+    if isinstance(sent_schema, dict):
+        return sent_schema.get("properties", {})
+    return sent_schema.model_json_schema()["properties"]
+
+
+async def test_batch_request_schema_excludes_status_and_model_fields():
+    """The tool `input_schema` `BatchAnalystClient` sends to the model must
+    not let the model write `status` or `model` -- both are infrastructure
+    states the client stamps itself, not analytical judgements.
+
+    Falsifiable by: today's `schema.model_json_schema()` passed straight
+    through as `input_schema` in `_build_request` -- `properties` would then
+    include both `"status"` and `"model"` alongside the analytical fields.
+    """
+    results = [
+        _succeeded(
+            "AAA",
+            {
+                "status": "ok",
+                "replication_expectation": "high",
+                "flagged_concerns": [],
+                "reasoning": "fine",
+                "model": CONFIGURED_MODEL,
+            },
+        )
+    ]
+    fake_client = _FakeAnthropic(results)
+    client = BatchAnalystClient(fake_client, model=CONFIGURED_MODEL, poll_interval=0)
+
+    await client.classify({"AAA": "brief"}, QuantAnalystNote, system_prompt="sys")
+
+    sent_requests = fake_client.messages.batches.create_calls[0]
+    input_schema = sent_requests[0]["params"]["tools"][0]["input_schema"]
+    properties = _schema_properties(input_schema)
+
+    assert "status" not in properties, "the model must not be able to write status"
+    assert "model" not in properties, "the model must not be able to claim its own identity"
+    for analytical_field in ("replication_expectation", "flagged_concerns", "reasoning"):
+        assert analytical_field in properties, f"{analytical_field} must still reach the model"
+
+
+async def test_direct_client_schema_excludes_status_and_model_fields():
+    """Same property on the direct path: whatever `DirectAnalystClient`
+    hands to `.with_structured_output(...)` must not let the model write
+    `status` or `model` either.
+
+    Falsifiable by: today's code, `self._llm.with_structured_output(schema)`,
+    passing the real `DayTradeAnalystNote` class straight through --
+    `properties` would then include both `"status"` and `"model"`.
+    """
+    ok_note = DayTradeAnalystNote(
+        status="ok",
+        liquidity_tier="ample",
+        gap_dominant=False,
+        reasoning="fine",
+        model=CONFIGURED_MODEL,
+    )
+    structured = _FakeStructuredLLMReturning(ok_note)
+    llm = _FakeChatAnthropicCapturingSchema(CONFIGURED_MODEL, structured)
+    client = DirectAnalystClient(llm)
+
+    await client.classify({"AAA": "brief"}, DayTradeAnalystNote, system_prompt="sys")
+
+    assert llm.with_structured_output_calls, "with_structured_output must be called"
+    sent_schema = llm.with_structured_output_calls[0]
+    properties = _schema_properties(sent_schema)
+
+    assert "status" not in properties, "the model must not be able to write status"
+    assert "model" not in properties, "the model must not be able to claim its own identity"
+    for analytical_field in ("liquidity_tier", "gap_dominant", "reasoning"):
+        assert analytical_field in properties, f"{analytical_field} must still reach the model"
+
+
+async def test_direct_client_stamps_status_ok_when_model_returns_only_analytical_fields():
+    """Once the model can no longer write `status`/`model` (previous test),
+    its structured-output payload carries only analytical fields --
+    `DirectAnalystClient` must still hand back a complete, valid note by
+    filling in what it removed: `status="ok"` on a successful parse, and
+    `model` stamped from its own configuration.
+
+    Falsifiable by: today's code returning `ainvoke(...)`'s result as-is with
+    no `status`/`model` fill-in -- constructing the final note would then be
+    missing `status` (`QuantAnalystNote.status` has no default), or, as
+    today's code actually does by treating the payload itself as the note,
+    raise trying to set `.model` on a plain analytical payload.
+    """
+    analytical_only = {
+        "replication_expectation": "high",
+        "flagged_concerns": [],
+        "reasoning": "fine",
+    }
+    structured = _FakeStructuredLLMReturning(analytical_only)
+    llm = _FakeChatAnthropicCapturingSchema(CONFIGURED_MODEL, structured)
+    client = DirectAnalystClient(llm)
+
+    result = await client.classify({"AAA": "brief"}, QuantAnalystNote, system_prompt="sys")
+
+    assert result["AAA"].status == "ok"
+    assert result["AAA"].model == CONFIGURED_MODEL
+    assert result["AAA"].replication_expectation == "high"
+
+
+async def test_batch_client_stamps_status_ok_when_model_returns_only_analytical_fields():
+    """Same property on the batch path, using `DayTradeAnalystNote` so both
+    note models are covered by this defect: a `tool_use.input` containing
+    only analytical fields (no `status`, no `model` -- what the model can
+    write once the schema fix lands) must still produce a valid
+    `status="ok"` note.
+
+    Falsifiable by: today's `schema(**tool_use.input)` with no `status`
+    supplied, which raises `pydantic.ValidationError` for the missing
+    required field before this assertion is ever reached.
+    """
+    results = [
+        _succeeded(
+            "AAA",
+            {
+                "liquidity_tier": "ample",
+                "gap_dominant": True,
+                "reasoning": "fine",
+            },
+        )
+    ]
+    fake_client = _FakeAnthropic(results)
+    client = BatchAnalystClient(fake_client, model=CONFIGURED_MODEL, poll_interval=0)
+
+    result = await client.classify({"AAA": "brief"}, DayTradeAnalystNote, system_prompt="sys")
+
+    assert result["AAA"].status == "ok"
+    assert result["AAA"].model == CONFIGURED_MODEL
+    assert result["AAA"].liquidity_tier == "ample"
+
+
+async def test_direct_client_ignores_a_model_supplied_status():
+    """If a `status` somehow still arrives in the structured-output payload
+    (the model disobeying, or a schema-stripping bug), `DirectAnalystClient`
+    must not trust it -- a successful parse is always `status="ok"` by the
+    client's own judgement, never the model's claim.
+
+    Falsifiable by: today's code returning `ainvoke(...)`'s result
+    unmodified, so `result["AAA"].status` reads `"error"` -- the model's
+    claim -- instead of `"ok"`.
+    """
+    declining_note = QuantAnalystNote(
+        status="error",
+        replication_expectation="high",
+        flagged_concerns=["severe red flags"],
+        reasoning="declining to classify",
+        model=CONFIGURED_MODEL,
+    )
+    structured = _FakeStructuredLLMReturning(declining_note)
+    llm = _FakeChatAnthropicCapturingSchema(CONFIGURED_MODEL, structured)
+    client = DirectAnalystClient(llm)
+
+    result = await client.classify({"AAA": "brief"}, QuantAnalystNote, system_prompt="sys")
+
+    assert result["AAA"].status == "ok", (
+        "a successful parse is 'ok' by the client's judgement, not the model's claim"
+    )
+
+
+async def test_batch_client_ignores_a_model_supplied_status():
+    """The batch-path analogue, and the one that directly reproduces the
+    live defect: a `succeeded` batch item whose `tool_use.input` carries
+    `status="error"` (the model declining to classify, exactly as measured
+    on a real 6-pair batch run, 2 of which came back this way) must still
+    produce `status="ok"` -- a successful parse is the client's own
+    judgement, never the model's.
+
+    Falsifiable by: today's `schema(**tool_use.input)`, which keeps whatever
+    `status` the model wrote -- `result["AAA"].status` would read `"error"`
+    instead of `"ok"`.
+    """
+    results = [
+        _succeeded(
+            "AAA",
+            {
+                "status": "error",
+                "liquidity_tier": "ample",
+                "gap_dominant": False,
+                "reasoning": "declining to classify",
+            },
+        )
+    ]
+    fake_client = _FakeAnthropic(results)
+    client = BatchAnalystClient(fake_client, model=CONFIGURED_MODEL, poll_interval=0)
+
+    result = await client.classify({"AAA": "brief"}, DayTradeAnalystNote, system_prompt="sys")
+
+    assert result["AAA"].status == "ok", (
+        "a successful parse is 'ok' by the client's judgement, not the model's claim"
+    )

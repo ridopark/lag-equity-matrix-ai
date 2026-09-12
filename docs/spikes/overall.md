@@ -4664,8 +4664,73 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   pair and carries zero information; the Fisher CI width is a deterministic
   function of the correlation already shown. D-134's five-number brief had three
   real numbers. Both are dropped from the enriched brief.
-- **Status:** Accepted. Supersedes the "give it more information" hypothesis.
-  The lever for Haiku is not evidence volume.
+  **RELATEDNESS VERDICT OVERTURNED 2026-09-12T12:22 by D-136.** The bullet above
+  is wrong on merit and right only on coverage. News co-mention is the strongest
+  single feature measured anywhere in this work; it was dismissed because it was
+  read at the wrong port and averaged over pairs it does not apply to. See D-136.
+- **Status:** Accepted on stability/concentration/liquidity and on the Haiku
+  conclusion. Relatedness bullet superseded by D-136.
+
+### D-136 — Relatedness is the strongest signal found, on 0.9% of pairs
+
+- **When:** 2026-09-12T12:22:41-05:00
+- **Decision:** D-135's "relatedness is dead" is **overturned on merit**. Among
+  pairs that carry a news co-mention edge, the edge's PMI ranks replication at
+  **AUC 0.7451** — better than the best broad feature (median-of-4-quarters,
+  0.6958) and better than anything else measured in D-133/D-134/D-135. It is a
+  **high-precision, low-recall** feature: it applies to 58 of 6,803 band pairs
+  (0.9%), and says nothing about the other 99.1%.
+- **Why:** D-135 tested relatedness by scoring a mostly-zero column across the
+  whole band, which averages a strong signal over 6,745 pairs it does not apply
+  to and reports 0.4803. The right question was conditional: *given* that an
+  edge exists, does it inform? It does, in two separate ways with opposite
+  signs, which is why the unconditional average cancelled to nothing:
+  - **Having** an edge predicts **failure**: 24.1% retained vs 53.7% without,
+    a **-29.6pp** delta, 95% CI [-40.2, -17.9] — excludes zero.
+  - **Among** edged pairs, **higher** PMI predicts **retention**: AUC 0.7451,
+    95% CI [0.6105, 0.8636] — excludes 0.5.
+
+  The mechanism is coherent and was not assumed in advance: incidental
+  co-mention marks a correlation that news flow manufactured and that decays,
+  while high PMI marks companies the press names together because they are
+  genuinely economically linked, and that linkage persists.
+- **Outcome:** observed, and **replicated on three bands not used to find it**:
+
+  | band | pairs | edged | edge delta | PMI AUC | 95% CI |
+  |---|---|---|---|---|---|
+  | 0.4-0.5 (discovery) | 6,803 | 58 | -29.6pp | 0.7451 | [0.611, 0.864] |
+  | 0.3-0.4 | 19,805 | 103 | -9.1pp | **0.7870** | [0.693, 0.867] |
+  | 0.5-0.6 | 3,367 | 44 | -25.6pp | 0.7051 | [0.543, 0.851] |
+  | 0.5-1.01 | 5,897 | 90 | -19.9pp | 0.6837 | [0.556, 0.800] |
+
+  Every CI excludes 0.5 and every edge delta is negative. The finding was found
+  on 0.4-0.5 and held on all three untouched bands, so it is not a cut fitted to
+  one sample.
+- **Root cause of the original miss — the graph covers a fifth of the universe:**
+  `equity` holds **514 vertices**; the correlation universe is **1,573 symbols**,
+  of which **914** appear in band pairs and only **183 (20.0%)** are in the
+  graph. Just **484 of 6,803 band pairs (7.1%)** have both legs present at all.
+  `supplies_to` holds 818 edges but only **130 distinct pairs** (the rest are
+  re-filings of the same pair on later dates), reaching **7** band pairs — that
+  bullet of D-135 stands: supply chain is dead on coverage, with n=7.
+- **`equity` carries no sector or index attribute.** Verified by attribute
+  census over all 514 vertices: the only fields are `_id`, `_key`, `_rev`,
+  `symbol`. The "same sector, same index" half of the enrichment request is
+  **not implementable against today's graph** — it is missing data, not a
+  negative result, and is the one enrichment that would have broad coverage.
+- **Process failure worth recording:** D-135 called Arango "down" and scoped its
+  relatedness verdict around that. Arango was **never down** — pod
+  `arangodb-778c76c4f-ttzlj`, 1/1 Running, 47h uptime, **0 restarts**. The probe
+  used port 8529; the kubectl port-forward is on **18529**. A connection error
+  was reported as an outage without checking the pod, and a real finding was
+  buried under it for an hour. The Postgres fallback pull was itself correct
+  (130 pairs, confirmed identical against Arango), which made the wrong
+  conclusion look well-sourced.
+- **Not yet done:** the PMI feature is not wired into the brief or the scan. It
+  needs a "no edge" / "weak edge" / "strong edge" encoding, since its two
+  effects have opposite signs and a single numeric column collapses them.
+- **Status:** Accepted. Overturns D-135's relatedness bullet; D-135's stability,
+  concentration, liquidity and Haiku conclusions are unaffected.
 
 ## Open Questions
 

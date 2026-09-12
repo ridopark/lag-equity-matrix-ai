@@ -111,7 +111,18 @@ def test_a_failed_run_resumes_and_re_runs_the_whole_superstep(closes, monkeypatc
     with pytest.raises(LeaderStateBoom):
         invoke_graph(graph, {"candidates": candidates}, context=ctx, config=config)
 
-    assert len(calls) == 3, "all three branches should have been attempted once each"
+    # NOT `len(calls) == 3`. That assertion is inherited from this test's
+    # sync-executor era and is a race under async: when CAND2 raises,
+    # `_should_stop_others` cancels its siblings, so whether CANDD ever starts
+    # depends on scheduling. Measured at roughly a 50% failure rate under
+    # random test ordering -- it passed 4/4 in fixed order and failed 2/4 in
+    # random order before this was corrected. "All three branches are
+    # attempted" is simply not a property of the async executor.
+    #
+    # What IS guaranteed: the branch that fails runs, and no branch runs twice.
+    assert fail_symbol in calls, "the failing branch must actually have run"
+    assert len(calls) == len(set(calls)), "no branch should be attempted twice"
+    assert len(calls) <= 3
     # The failing superstep's writes are discarded wholesale under the async
     # executor, so no sibling's `leader_shocks` survives -- unlike the sync
     # executor, which commits them. This asserts the real behaviour.

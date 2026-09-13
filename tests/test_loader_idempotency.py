@@ -40,6 +40,7 @@ the RED this file exists to produce.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 import pandas as pd
@@ -55,6 +56,12 @@ from load_arango import comention_edge_docs, ensure_collections_js, supply_edge_
 from load_vectors import ensure_article  # noqa: E402
 
 ARANGO_DB_NAME = "test_loader_idempotency"
+
+# ArangoDB's legal `_key` charset (documented key-generators.html): letters,
+# digits, and `_ - : . @ ( ) + , = ; $ ! * ' %`. Anything else -- including
+# today's `>` (supply_edge_docs) and `~` (comention_edge_docs) -- is rejected
+# by the server with `[HTTP 400][ERR 1221] illegal document key` (Q-64).
+_ARANGO_LEGAL_KEY = re.compile(r"^[A-Za-z0-9_\-:.@()+,=;$!*'%]+$")
 
 
 def _supply_rows(rows: list[dict]) -> list:
@@ -133,10 +140,18 @@ def test_ensure_article_creates_the_collection_when_absent():
 
 
 def test_supply_edge_docs_have_deterministic_keys():
-    """Two calls on the same input must produce byte-identical `_key` lists.
+    """Two calls on the same input must produce byte-identical `_key` lists,
+    and the two distinct (supplier, customer) rows must not collide.
+
+    Does not pin a specific separator or format (Q-64 in
+    docs/spikes/overall.md: `supplier->customer` uses an illegal `>`, and the
+    corrected key must also carry `filing_date` -- see
+    `test_supply_edge_docs_preserves_distinct_filing_dates` -- so asserting a
+    literal key string here would pin the very scheme Q-64 disproved).
     Falsifies if `_key` is omitted (today's behaviour -- ArangoDB would then
-    assign a fresh, non-reproducible key each call) or derived from anything
-    that varies between calls (e.g. an incrementing counter, a timestamp)."""
+    assign a fresh, non-reproducible key each call), derived from anything
+    that varies between calls (e.g. an incrementing counter, a timestamp), or
+    collides between the two distinct rows below."""
     rows = _supply_rows([
         {"supplier": "SUPA", "customer": "CUSTA", "filing_date": "2024-01-01",
          "pct": "12.5", "passage": "text a", "counterparty": "Cust A Inc."},
@@ -149,15 +164,31 @@ def test_supply_edge_docs_have_deterministic_keys():
 
     assert keys_first, "expected at least one doc, got an empty list"
     assert keys_first == keys_second
-    assert keys_first == ["SUPA->CUSTA", "SUPB->CUSTB"]
+    assert len(set(keys_first)) == len(keys_first), "distinct rows must not collide on _key"
 
 
-def test_supply_edge_docs_dedupes_a_repeated_pair():
-    """Two filings restating the same (supplier, customer) relationship must
-    collapse to one document keyed `supplier->customer`. Falsifies if the
-    function emits one doc per input row regardless of key collisions --
-    today's `bulk()` inline list comprehension does exactly that, which is
-    what makes a second script run double the graph instead of updating it."""
+def test_supply_edge_docs_preserves_distinct_filing_dates():
+    """Q-64 correction: a supplier/customer pair re-filed at a LATER date
+    (e.g. a restated filing) must NOT collapse into one document -- the live
+    database's `supplies_to` collection holds up to 15 dated copies of a
+    single (supplier, customer) pair (e.g. QRVO->AAPL across 8 distinct
+    filing dates spanning 2019-2026) precisely so that
+    `ArangoTopology.laggers_of(..., as_of=...)`'s point-in-time filter
+    (D-16, D-72) has per-date history to walk. Collapsing on the pair alone
+    would delete that history, which is worse than the illegal-key bug it
+    would otherwise fix.
+
+    Supersedes the old `test_supply_edge_docs_dedupes_a_repeated_pair`, whose
+    name and assertions (`len(docs) == 1`) pinned exactly this data loss as
+    the intended behaviour -- as did `supply_edge_docs`'s own docstring
+    ("collapse to one document, keyed on the pair"), which described a
+    data-destroying design, not a spec to preserve. D-97 requires a *stable*
+    key so a re-run upserts instead of duplicating -- it never required a
+    *pair-only* key; `filing_date` can be part of that stable key too.
+
+    Falsifies if the function still keys on (supplier, customer) alone and
+    drops all but one row for a repeated pair -- today's code and docstring
+    do exactly that."""
     rows = _supply_rows([
         {"supplier": "SUPA", "customer": "CUSTA", "filing_date": "2024-01-01",
          "pct": "12.5", "passage": "first filing", "counterparty": "Cust A Inc."},
@@ -167,16 +198,60 @@ def test_supply_edge_docs_dedupes_a_repeated_pair():
 
     docs = supply_edge_docs(rows)
 
+    assert len(docs) == 2
+    assert len({d["_key"] for d in docs}) == 2
+    assert {d["filing_date"] for d in docs} == {"2024-01-01", "2024-06-01"}
+
+
+def test_supply_edge_docs_collapses_an_exact_duplicate_row():
+    """The other half of the distinction above: two rows for the same
+    (supplier, customer) pair AND the same `filing_date` -- e.g. the loader
+    re-reads an unchanged filing on a second run -- are the same fact
+    restated, not new history, and must still collapse to one document.
+    This is the half of D-97's idempotency guarantee that survives the Q-64
+    correction: same filing -> one doc (idempotent, here); different filing
+    dates -> separate docs, never collapsed
+    (`test_supply_edge_docs_preserves_distinct_filing_dates`). Together the
+    two tests are the whole contract -- neither alone is sufficient.
+
+    The live round-trip test (`test_edge_keys_round_trip_into_a_live_arango_
+    database`) cannot catch a regression here: if a future fix emitted one
+    doc per input row instead of deduping, two identical rows would produce
+    two docs carrying the *same* `_key`, and inserting both into ArangoDB
+    would still collapse them via `overwrite_mode="update"` -- the live
+    collection count would stay 1 even though the in-memory contract (dedupe
+    happens in `supply_edge_docs` itself, before any I/O) was broken. Only a
+    pure assertion on `len(docs)` pins that.
+
+    Falsifies if a re-run of the loader would insert a second copy of a
+    filing that has not changed -- i.e. if the fix that makes
+    `test_supply_edge_docs_preserves_distinct_filing_dates` pass does so by
+    keying on something that varies even when the filing itself does not
+    (e.g. row position/order), which would make each loader re-run grow
+    `supplies_to` without bound -- the original D-97 failure mode."""
+    rows = _supply_rows([
+        {"supplier": "SUPA", "customer": "CUSTA", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "first read", "counterparty": "Cust A Inc."},
+        {"supplier": "SUPA", "customer": "CUSTA", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "second read, same filing", "counterparty": "Cust A Inc."},
+    ])
+
+    docs = supply_edge_docs(rows)
+
     assert len(docs) == 1
-    assert docs[0]["_key"] == "SUPA->CUSTA"
+    assert docs[0]["filing_date"] == "2024-01-01"
 
 
 def test_comention_edge_docs_have_deterministic_keys():
-    """Mirrors the supply-edge test for co-mention edges, keyed `a~b` in the
-    row's own order -- not re-sorted, since the upstream query already fixes
-    an order per row. Falsifies if `_key` is absent, non-reproducible, or
-    built from a sorted pair (which would silently rename the key for any
-    row where the upstream query emitted b before a)."""
+    """Mirrors the supply-edge test for co-mention edges. Unlike
+    `supplies_to`, `co_mentioned` has no per-row date dimension -- the live
+    database's 2,129 edges are 2,129 distinct pairs -- so a pair-only key
+    stays correct; only the separator must change (Q-64: `~` is illegal, see
+    `test_comention_edge_key_is_a_legal_arango_key`). Does not pin a literal
+    key string here for the same reason as the supply-edge test above.
+    Falsifies if `_key` is absent, non-reproducible, or built from a sorted
+    pair (which would silently rename the key for any row where the upstream
+    query emitted b before a)."""
     rows = _comention_rows([
         {"a": "AAA", "b": "BBB", "n": "30", "pmi": "1.2345",
          "first_seen": "2024-01-01", "last_seen": "2024-03-01"},
@@ -187,7 +262,6 @@ def test_comention_edge_docs_have_deterministic_keys():
 
     assert keys_first, "expected at least one doc, got an empty list"
     assert keys_first == keys_second
-    assert keys_first == ["AAA~BBB"]
 
 
 def test_upsert_strategy_is_idempotent_against_a_real_database():
@@ -223,3 +297,98 @@ def test_upsert_strategy_is_idempotent_against_a_real_database():
 
     reread_aapl = equity.get("AAPL")
     assert reread_aapl["note"] == "v2"
+
+
+def test_supply_edge_key_is_a_legal_arango_key():
+    """Q-64: `supply_edge_docs`' `_key` must contain no character outside
+    ArangoDB's legal key charset, whichever legal separator ends up chosen --
+    this asserts against the charset itself, not against `->` specifically,
+    so the test survives the fix rather than dictating it.
+
+    Falsifies today: the key is `SUPA->CUSTA`, and `>` is not in the legal
+    set -- the server returns `[HTTP 400][ERR 1221] illegal document key`."""
+    rows = _supply_rows([
+        {"supplier": "AAA", "customer": "BBB", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "text", "counterparty": "BBB Inc."},
+    ])
+
+    key = supply_edge_docs(rows)[0]["_key"]
+
+    assert _ARANGO_LEGAL_KEY.match(key), f"{key!r} contains an illegal ArangoDB key character"
+
+
+def test_comention_edge_key_is_a_legal_arango_key():
+    """Mirrors the above for `comention_edge_docs`.
+
+    Falsifies today: the key is `AAA~BBB`, and `~` is not in the legal set --
+    the same `[HTTP 400][ERR 1221] illegal document key` rejection."""
+    rows = _comention_rows([
+        {"a": "AAA", "b": "BBB", "n": "30", "pmi": "1.2345",
+         "first_seen": "2024-01-01", "last_seen": "2024-03-01"},
+    ])
+
+    key = comention_edge_docs(rows)[0]["_key"]
+
+    assert _ARANGO_LEGAL_KEY.match(key), f"{key!r} contains an illegal ArangoDB key character"
+
+
+def test_supply_edge_key_still_distinguishes_direction():
+    """`supplies_to` is directed (D-73: `_from`=supplier, `_to`=customer), so
+    the key for (supplier=AAA, customer=BBB) must differ from the key for the
+    reversed pair (supplier=BBB, customer=AAA) -- two distinct real
+    relationships must not collapse onto one document.
+
+    Falsifies if the legal-charset fix is done by sorting the pair or by
+    dropping the separator entirely, either of which would make both
+    directions key identically and silently merge them on upsert."""
+    forward = _supply_rows([
+        {"supplier": "AAA", "customer": "BBB", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "text", "counterparty": "BBB Inc."},
+    ])
+    reverse = _supply_rows([
+        {"supplier": "BBB", "customer": "AAA", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "text", "counterparty": "AAA Inc."},
+    ])
+
+    forward_key = supply_edge_docs(forward)[0]["_key"]
+    reverse_key = supply_edge_docs(reverse)[0]["_key"]
+
+    assert forward_key != reverse_key
+
+
+def test_edge_keys_round_trip_into_a_live_arango_database():
+    """The test whose absence hid Q-64: inserts the docs both loaders' edge
+    functions actually produce into a real, disposable ArangoDB edge
+    collection, then re-inserts the same docs a second time under
+    `overwrite_mode="update"` -- proving real idempotency, not just that the
+    returned dicts have the right shape (which is all the tests above this
+    one, and the pre-existing shape tests, ever checked).
+
+    Falsifies if: the first insert raises (today's behaviour -- `>`/`~` keys
+    are rejected with `[HTTP 400][ERR 1221] illegal document key`), or the
+    collection count after the second insert differs from after the first
+    (would mean the key did not survive as a stable upsert target and the
+    second insert duplicated rather than updated)."""
+    db = arango_db_or_skip(ARANGO_DB_NAME)
+    if not db.has_collection("q64_edges"):
+        db.create_collection("q64_edges", edge=True)
+    edges = db.collection("q64_edges")
+    edges.truncate()
+
+    supply_rows = _supply_rows([
+        {"supplier": "AAA", "customer": "BBB", "filing_date": "2024-01-01",
+         "pct": "12.5", "passage": "text", "counterparty": "BBB Inc."},
+    ])
+    comention_rows = _comention_rows([
+        {"a": "AAA", "b": "BBB", "n": "30", "pmi": "1.2345",
+         "first_seen": "2024-01-01", "last_seen": "2024-03-01"},
+    ])
+    docs = supply_edge_docs(supply_rows) + comention_edge_docs(comention_rows)
+
+    for doc in docs:
+        edges.insert(doc, overwrite_mode="update")
+    assert edges.count() == len(docs)
+
+    for doc in docs:
+        edges.insert(doc, overwrite_mode="update")
+    assert edges.count() == len(docs)

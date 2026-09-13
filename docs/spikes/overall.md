@@ -4240,11 +4240,768 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   did not.
 - **Status:** Accepted
 
+### D-130 — `Candidate` carries the claiming leader's shock magnitude
+
+- **When:** 2026-09-11T18:55:00-05:00
+- **Decision:** `Candidate` gains `origin_sigma: float | None = None`, populated
+  by `MarketScan.candidates()` with the claiming leader's **signed** z.
+  `ExternalSignals` leaves it `None`.
+- **Why:** Amends PLAN-2026-09-11-quant-daytrade-perspectives mid-execution.
+  `red-p3-llm` found that `cap_for_llm`'s sigma-ordering branch was
+  unreachable — `Candidate` had no such field and, being pydantic, rejects one
+  on attribute assignment. Checking the consequence made it worse than dead
+  code: `MarketScan.candidates()` sorts leaders by shock magnitude at
+  `candidates.py:121`, has `z` in scope at `:123`, and then returns
+  `sorted(claims.values(), key=lambda c: c.symbol)` at `:136` — **the shock
+  ordering is computed and discarded, and the output is alphabetical.**
+  With the plan's 20-candidate cap against D-92's mean of ~121 candidates per
+  date, that meant paying to analyse the alphabetically-first 20 every day,
+  the same names each time, skipping the largest movers. A stable, invisible
+  selection bias, which is this project's signature failure.
+  Two alternatives lost. **Accepting alphabetical capping** and documenting the
+  bias: cheapest, and wrong for exactly the reason above. **Dropping the cap**:
+  removes the bias by removing the choice, and unbounds a cost the cap existed
+  to bound.
+  The signed z is stored rather than `abs(z)` because `direction` is already
+  derived from that z's sign one line later, so the sign was already in the
+  model implicitly; storing the raw value preserves the measurement and lets
+  `cap_for_llm` apply `abs()` itself.
+- **Outcome:** Two lines of implementation. The interesting part is what the
+  existing tests did.
+  **`test_candidates_are_plain_candidates_with_no_forward_looking_field` fired,
+  correctly** — it pins `Candidate`'s exact field set specifically to catch an
+  added field, and its docstring already cited the `extra="ignore"` trap.
+  `origin_sigma` was admitted deliberately and the justification written into
+  that docstring rather than the set being quietly widened: it is a realised
+  move over the window ending at `as_of`, not an expectation or a score, and
+  `direction` already encoded its sign. A field naming something that has not
+  happened yet still falsifies the guard.
+  Two `test_market_scan.py` equality assertions also went stale. Both were
+  repaired by reading the expected z back from `shocked_leaders()` — a
+  different code path from `candidates()`, so it is not circular — which
+  **strengthened the dedup test**: `SHARED` must now carry the winning
+  leader's z, so a dedup that kept the wrong leader fails on the value as well
+  as the name.
+  Surfaced **Q-61**: `Candidate` has an empty `model_config`, so pydantic
+  silently drops unknown kwargs. Verified — `Candidate(..., origin_sigma=5.0)`
+  constructed cleanly *before* this change and discarded the value. Adding the
+  kwarg to `MarketScan` without the model field would therefore have been a
+  silent no-op that left the bias in place with no diagnostic at all.
+  340 passed, 1 skipped; ruff clean.
+- **Status:** Accepted
+
+### D-131 — The tests now run the executor production runs, and one of them was measuring a fiction
+
+- **When:** 2026-09-12T03:15:00-05:00
+- **Decision:** All seven test files that drove the graph with sync `.invoke()`
+  now drive it with `ainvoke`, via a shared `conftest.invoke_graph` helper.
+  `test_a_failed_run_resumes_only_the_failed_branch` is renamed and corrected
+  to `test_a_failed_run_resumes_and_re_runs_the_whole_superstep`.
+- **Why:** PHASE-6 wired two `async def` analyst nodes onto the unconditional
+  fan-out path, and a langgraph async node **cannot execute under sync
+  `.invoke()`** — `TypeError: No synchronous function provided`, from
+  `_internal/_runnable.py:378`. Measured twice independently. Node-level
+  `timeout=` was a red herring: removing it only changes which check trips
+  first (`_retry.py:573-583` rejects any timeout under the sync executor).
+  **Production has never used sync `.invoke()`.** `runner.py:132` awaits
+  `ainvoke`; `serve.py`, `capture_showcase.py` and `capture_trace.py` use
+  `astream`; `daily_ingest.py` wraps `ainvoke` in `asyncio.run`. And
+  `capture_trace.py`'s own docstring already recorded this constraint from an
+  earlier plan — *"PHASE-5 made `retrieve_news` async, and one async node makes
+  sync `.stream()`/`.invoke()` fail for the whole graph."* This repo hit the
+  wall before and resolved it the same way. These four files were stragglers,
+  spared only because `retrieve_news` is gated behind `with_news=True` and they
+  all build with it off.
+  The alternative that lost was an `asyncio.run` bridge in `builder.py`. It
+  **works** — measured on both paths, not assumed — so the case against it was
+  never correctness. It lost because the four files are this repo's
+  *scheduling* tests: `test_caching.py` pins D-46's no-dedup-within-a-superstep,
+  `test_fanout.py` is D-89's cross-attribution family. A bridge would leave the
+  two decisions this project paid most to learn verified against an executor it
+  never runs — `test_llm_adapter.py`'s `_Note` stand-in, one level up. It also
+  forecloses `timeout=` on the two network-calling nodes permanently.
+- **Outcome:** 9 of the 10 affected tests converted mechanically. All three
+  specific risks came back clean: `CachePolicy`'s cross-invocation hit and
+  within-superstep non-dedup both hold, `Send` fan-out shows no D-89
+  recurrence, and `interrupt()`/resume was never at risk (`test_review.py`
+  already used `ainvoke`).
+  **The tenth was measuring a property production has never had.** It asserted
+  that resume re-runs only the failed branch. Run on identical *pre-PHASE-6*
+  source with no async node wired at all: sync passes, async fails — so this
+  predates our changes. langgraph's async paths schedule with
+  `__cancel_on_exit__=True` (`pregel/_runner.py:471,528,925`) and treat a
+  cancelled sibling as an error rather than committing its writes; the sync
+  `tick` sets it **nowhere** (verified by grep: three occurrences async, zero
+  sync). The test was corrected to describe the real executor, not relaxed to
+  pass — the distinction matters and is written into its docstring.
+  **Corrected 2026-09-12 by CI, on the claim immediately above.** I wrote that
+  the async executor "discards the whole failing superstep's writes" and
+  asserted it as a test invariant. **That is over-strong.** aarch64 CI failed
+  where x86_64 passed: `leader_shocks` came back holding `CAND`'s write.
+  Sibling survival is the same cancellation race as the branch count --
+  `_should_stop_others` cancels siblings when one task fails, and whether a
+  given sibling had already committed depends on scheduling, which differs by
+  platform. The portable invariant is narrower: **the branch that raised
+  produced no write, so its own key is never present.** Everything else about
+  the failed superstep's residue is unspecified.
+  This is the second racy assertion in the same test in one day. The first
+  (`len(calls) == 3`) was caught locally by re-running under random ordering;
+  this one needed a different CPU architecture to surface, which is what the
+  two-arch CI of D-53 exists for and why it earns its cost.
+
+  **A cost consequence follows, and it is not in the plan's estimates:** a
+  failure in a superstep can discard sibling writes, so a resume re-runs those
+  branches. With the analyst nodes wired, a retry re-pays for every
+  candidate's LLM calls, not just the failed one. Cents at Haiku-batch rates,
+  but a real multiplier on PHASE-7/PHASE-10's accounting.
+  No recorded decision cited the old efficiency property, so nothing previously
+  logged is invalidated. 381 passed, 1 skipped; golden file byte-identical.
+- **Status:** Accepted
+
+### D-132 — Split-half sign agreement predicts replication, narrowly in one band
+
+- **When:** 2026-09-12T07:05:00-05:00
+- **Decision:** PHASE-10 Pre-registration A is **run and passed**. Arms B and C
+  (the LLM comparisons) are therefore live questions rather than moot.
+- **Why:** Arm A is free — pure pandas over `bars-10y.parquet`, no API calls —
+  and it gates the paid arms. If the deterministic signal added nothing, asking
+  whether an LLM beats it would be a much weaker question. The owner asked for
+  the cheapest path; running A first costs nothing and can settle it.
+  The rule was fixed before the script was written: within each of D-95's
+  bands, compare mean validation `|corr|` between pairs whose **discovery**-
+  window split-half sign agrees and those whose disagrees; it adds signal only
+  if both best-powered bands show the "agrees" group ahead by **>= 0.03**
+  absolute correlation (D-93's own bar).
+- **Outcome:**
+
+  | band | pairs | agree | disagree | val \|c\| agree | val \|c\| dis | gap |
+  |---|---|---|---|---|---|---|
+  | 0.2-0.3 | 258,333 | 154,507 | 103,826 | 0.1954 | 0.1750 | +0.0204 |
+  | **0.3-0.4** | 114,936 | 90,746 | 24,190 | 0.2684 | 0.2381 | **+0.0303** |
+  | **0.4-0.5** | 39,959 | 37,804 | 2,155 | 0.3566 | 0.2925 | **+0.0642** |
+  | 0.5-0.6 | 12,283 | 12,213 | 70 | 0.4680 | 0.2998 | +0.1682 |
+
+  **VERDICT: ADDS SIGNAL**, 2/2 powered bands.
+
+  **Stated plainly because it matters: the 0.3-0.4 band clears by 0.0003.** The
+  margin was 0.030 and the gap is 0.0303 — one percent of the margin. Had the
+  bar been 0.031 this would read NULL. It is reported as a pass because the
+  rule was pre-committed and was met, which is the entire point of
+  pre-registration; it is not reported as decisive. The 0.4-0.5 band is
+  comfortable, and the untested 0.5-0.6 band's +0.1682 puts the trend
+  consistently in one direction, which is the stronger part of the evidence.
+  The universe reproduces D-95 exactly: **1,236,378** unordered pairs against
+  D-95's published 1,236,372, a difference of precisely the **6 same-company
+  pairs** D-95 records dropping.
+  Cost: **$0**. The paid arms remain unspent.
+
+  ---
+
+  **CORRECTED 2026-09-12T12:20, on three counts. Two consulting agents audited
+  this and found the script violated a recorded decision.**
+
+  **1. The script ignored D-100.** It did a raw `pct_change()` with no
+  `_IMPLAUSIBLE_RETURN_CUTOFF`, so all 11 corrupt returns were live -- 4 in
+  discovery, 7 in validation (verified: the cutoff is 10.0 and the counts are
+  exact). `standardise` subtracts the cross-sectional mean, so a single corrupt
+  return becomes a common shock to all 1,573 symbols on that date. LINE's
+  2024-07-25 contributes **+0.1094** to mean pairwise validation correlation on
+  its own, against a true mean of 0.1516. `experiment_lag_matrix.py` does not
+  mask either, and this script inherited the omission.
+  **The band populations above were ~83% artefact.** Masked, 0.3-0.4 falls from
+  114,936 pairs to **19,805** and 0.4-0.5 from 39,959 to **6,803**. The plan's
+  own cited sizes (115,155 / 39,990) are the inflated ones.
+
+  **2. The "difference of exactly 6" claim was wrong** -- a coincidence of two
+  errors, not a reproduction. This script applies **no screen**, so 1,236,378 is
+  the raw triangle; D-95's 1,236,372 is after a `|corr| >= 0.95` screen **and**
+  D-100's mask. Measured directly: the screen drops 7 pairs unmasked and 6 when
+  masked (masking LINE's +447.9 return breaks LINE/NATL below 0.95 -- the very
+  pair D-95 flagged). Comparing an unscreened-unmasked count against a
+  screened-masked one nets to 6 by chance. Tidy arithmetic is not verification.
+
+  **3. The verdict survives and strengthens; the marginal band was an artefact
+  of the same defect.** With D-100 applied:
+
+  | band | pairs | agree | disagree | val \|c\| agree | val \|c\| dis | gap |
+  |---|---|---|---|---|---|---|
+  | 0.3-0.4 | 19,805 | 18,989 | 816 | 0.2492 | 0.0915 | **+0.1576** |
+  | 0.4-0.5 | 6,803 | 6,755 | 48 | 0.3989 | 0.0924 | **+0.3065** |
+
+  Five times the original gaps, both far past the 0.03 bar. The "+0.0003 clears
+  it" knife-edge I reported was a property of the corrupted population: on the
+  *unmasked* data a control matching on discovery `|corr|` pulls 0.3-0.4 down to
+  +0.0241, **below** the bar. On masked data the matched gap is **+0.1389**. A
+  permutation control is clean (+0.0001 +/- 0.0007), so this is not a labelling
+  artefact either way.
+  **The remaining caveat is the disagree group's size**, which the mask makes
+  small: 816 pairs in 0.3-0.4 and only **48** in 0.4-0.5. The +0.3065 gap rests
+  on 48 pairs.
+- **Status:** Accepted, with the correction above superseding the original
+  table. The script now applies D-100's mask.
+
+### D-133 — The LLM analyst loses to sorting by a number we already compute
+
+- **When:** 2026-09-12T07:50:00-05:00
+- **Decision:** PHASE-10 arm B is **run and answered**. Haiku's
+  `replication_expectation` does not add signal over the deterministic
+  evidence it is handed. Arm C (Opus vs Haiku) is **not run** — there is
+  nothing for a better model to improve on here.
+- **Why:** Arm B cost $1.70, not the plan's $51, after two consulting agents
+  found the original design unmeasurable. Three corrections were needed before
+  it could answer anything:
+  **(1)** The pre-registered bar compared the model to a rule that is 20pp
+  *worse than a constant "no"*, so any model answering `"low"` often enough
+  would clear it. **(2)** My proposed replacement — beat the best constant —
+  was worse: the Bayes-optimal ceiling on the brief's own information is
+  **+0.35pp**, against a 1.4pp bar. Unclearable by a perfect oracle. I
+  replaced a test that always passes with one that always fails.
+  **(3)** Accuracy is the wrong metric at a 35% base rate: accuracy-minus-
+  constant swings 60pp across retention thresholds and is monotone in the base
+  rate, while AUC stays flat at 0.52-0.56. Switched to AUC, n=1,000 (92-99.6%
+  power), bootstrapped 2xSE bar per band.
+- **Outcome:** 1,000 pairs, 251s, **zero errors, one abstention**.
+
+  | band | AUC rule (sign bit) | AUC Haiku | gap | 2xSE | verdict |
+  |---|---|---|---|---|---|
+  | 0.3-0.4 | 0.5489 | 0.5682 | +0.0193 | 0.0381 | null |
+  | 0.4-0.5 | 0.5074 | 0.5588 | +0.0514 | 0.0354 | adds |
+
+  Read alone that is 1-of-2 and mildly encouraging. **The control kills it.**
+  On the identical pairs (rule AUCs match the run exactly, confirming the same
+  sample), ranking by `min(|h1|, |h2|)` — a number already computed, already in
+  `QuantPerspective` since D-132's fix, and printed in the model's own brief —
+  scores **0.7238** and **0.7004**.
+  So the model is handed the evidence and ranks it **~0.15 AUC worse than
+  `sorted()`**. Its one "win" is against the sign bit, which is the weak form
+  of the same statistic; against the strong form it loses in both bands.
+  **This is a null for the LLM layer as a predictor**, and a clear one.
+  It does not condemn the analyst nodes as *explanation* — a note saying why a
+  pairing looks weak may still be worth reading — but nothing here supports
+  using `replication_expectation` to rank or filter, and `assess()` was
+  deliberately never wired to read it (PHASE-6 TASK-6.8), so no shipped
+  decision depends on it today.
+  Arm C would have cost $42.50 to ask whether Opus improves on a layer that
+  loses to a sort. Not run.
+
+  ---
+
+  **Amended 2026-09-12T08:05 — what the notes actually say, and why the
+  "still useful as explanation" consolation is withdrawn.**
+
+  I wrote above that a null on prediction "does not condemn the analyst nodes
+  as *explanation*". That was a hypothesis offered without reading one. Six
+  notes, printed with the ground truth beside them:
+
+  | pair | weaker half | validation | retained | Haiku | |
+  |---|---|---|---|---|---|
+  | FFIN/HBAN | 0.395 | 0.482 | **True** | high | correct |
+  | HWC/USB | 0.190 | 0.560 | **True** | low | wrong |
+  | PEP/ROP | 0.065 | 0.428 | **True** | low | wrong |
+  | ROL/SBAC | 0.102 | 0.325 | False | low | correct |
+  | GILD/VZ | 0.098 | 0.390 | False | low | correct |
+  | MAN/RHI | 0.291 | 0.626 | **True** | low | wrong |
+
+  **Three of six.** And it answered `"high"` exactly once — for the only pair
+  whose weaker half (0.395) sits near 0.4. **The model is thresholding on a
+  single number at roughly the wrong cut-point and composing an essay around
+  the result.** That is precisely why the deterministic ranking beats it:
+  `min(|h1|,|h2|)` *orders* these correctly (~0.70 AUC), while the model
+  collapses the same number to a binary and discards the ordering that
+  carried the signal.
+
+  **The mechanism of failure matters more than the rate.** HWC/USB: weaker
+  half 0.190, and the note calls it *"disqualifying"*, *"a red flag for
+  non-stationarity"*, concluding *"out-of-sample replication is unlikely to
+  sustain |corr| >= 0.4"*. It went to **0.560** — it strengthened. PEP/ROP got
+  five confident bullets and a paragraph about *"regime-dependent artifacts"*
+  for a pair that retained comfortably.
+
+  The prose is genuinely good. It reasons from the Fisher CI width, weighs the
+  session count, names regime change and selection bias, hedges where hedging
+  is warranted; on ROL/SBAC it reconstructs the interval as [0.377, 0.451].
+  **And there is no tonal difference whatsoever between the notes that are
+  right and the notes that are wrong.** A reader cannot tell them apart.
+
+  So the consolation is withdrawn: this is worse than no explanation, because
+  it is *most persuasive exactly where it is most wrong*. Shipping it as
+  commentary would hand a reader confident, well-argued, technically fluent
+  prose that is a coin flip — which is the failure mode this entire decision
+  log exists to catch, in its most seductive form yet.
+  Caveat kept: six pairs, a different seed from the measured run. The AUC over
+  500 per band is the evidence; these six illustrate the mechanism.
+
+  **VERDICT NARROWED 2026-09-12T08:40 by D-134.** Everything above is accurate
+  *about the brief we gave it* and is wrong as a general claim about the model.
+  The owner asked the obvious question I had not: if the failure was that Haiku
+  lacked the base rates I had, give it them and re-test. Doing so closes most
+  of the gap — see D-134. "Do not ship the analyst nodes" is superseded by
+  "do not ship them on an uncalibrated brief".
+- **Status:** Accepted, with the verdict narrowed by D-134
+
+### D-134 — The analyst's failure was informational, and the owner spotted it
+
+- **When:** 2026-09-12T08:40:00-05:00
+- **Decision:** D-133's "the LLM loses to sorting" is narrowed. Given the
+  population statistics it previously lacked, Haiku's ranking improves
+  significantly and is **no longer statistically distinguishable** from the
+  deterministic ranking. The analyst layer is not unshippable; an
+  *uncalibrated brief* is.
+- **Why:** D-133 concluded the model ranks worse than `sorted()`. I explained
+  the asymmetry as "access, not intelligence" — I had the held-out outcomes
+  and could compute base rates over 6,803 pairs; Haiku saw **n=1** with no
+  population context, and inferred "weaker half 0.19 < 0.4, so it will not
+  clear 0.4" — locally sound, empirically false, and uncorrectable from a
+  single observation. I stated I would likely have made the same call from the
+  same brief. **The owner drew the conclusion I had not: then give it the
+  context and try again.**
+  The alternative that lost was shipping nothing, on a verdict measured
+  against a brief that withheld the very information the task needs.
+- **Outcome:** Arm B2, 394 held-out pairs, band 0.4-0.5, ~$1.35.
+
+  **Leakage guard, which decides whether any of this means anything:** the
+  calibration curve is built from validation outcomes, so it is fitted on a
+  **train half (3,401 pairs)** and Haiku is scored on a **disjoint half**.
+  Train base rate 54%, held-out 53% — the curve generalises.
+
+  | | AUC |
+  |---|---|
+  | Haiku, D-133's brief (no context) | 0.5588 |
+  | Haiku, with population context | **0.6484** |
+  | deterministic `min(\|h1\|,\|h2\|)` | 0.6821 |
+
+  - gain from context: **+0.0896**, 95% CI **[+0.0228, +0.1316]** — excludes zero
+  - remaining deficit: +0.0336, 95% CI **[-0.0029, +0.0911]** — **includes zero**
+
+  Its `"high"` rate moved from ~1-in-6 to 66% against a 48.7% base rate: rate-
+  calibrated, now mildly over-calling.
+
+  **The same six pairs from D-133's amendment went 3/6 to 4/6**, and the
+  reasoning changed character. It now cites the empirical bucket — *"the
+  0.282-0.317 band, which shows 69% retention... substantially above the
+  overall 54% baseline"* — instead of inventing a threshold argument. Both
+  remaining errors are **honest**: PEP/ROP sits in the bottom decile where only
+  18% retain, so "low" was the correct call that lost; HWC/USB is in a 49%
+  bucket, a coin flip. That is categorically different from D-133, where it
+  confidently asserted what the data contradicted.
+
+  **Three caveats, all load-bearing.**
+  (1) **Not better — indistinguishable.** The point estimate still favours
+  sorting, which is free, deterministic and needs no credential. For ranking
+  alone, use the sort.
+  (2) **Run-to-run variance is comparable to the effect.** Two runs of the
+  identical setup gave 0.6197 and 0.6484. One run is not a measurement.
+  (3) **The causal narrative is still confabulated.** The same weak-first-half/
+  strong-second-half shape is narrated as *"a strengthening signal... genuine
+  correlation structure"* for MAN/RHI and *"an illusion of correlation"* for
+  PEP/ROP. The base rate does the work; the story is composed afterwards to
+  match. The **numbers it cites are now real and the conclusions calibrated**;
+  the explanation around them is illustration, not mechanism.
+- **Status:** Accepted
+
+### D-135 — Richer evidence raised the deterministic ceiling and made Haiku worse
+
+- **When:** 2026-09-12T11:59:21-05:00
+- **Decision:** The four enrichments the owner asked for were built and measured.
+  Two carry real information, two do not, and handing all of them to Haiku moved
+  it **backwards**. The deterministic sort is now 0.7043-0.7301; Haiku on the
+  same enriched evidence is 0.6216, down from 0.6484 on the thinner brief.
+- **Why:** D-134 left the gap to deterministic unestablished
+  (CI [-0.0029, +0.0911], straddling zero) and the open question was whether the
+  model was information-starved. It was not. The information was genuinely there
+  — the same features lifted the deterministic sort by +0.04 — and the model
+  failed to use it. That distinguishes "the brief is too thin" from "the model
+  cannot weigh this evidence", and it is the second.
+- **Outcome:** observed. Held-out AUC, 3,402 pairs in band 0.4-0.5, train/test
+  disjoint, curves fitted on train only:
+
+  | feature | held-out AUC |
+  |---|---|
+  | discovery \|corr\| | 0.6256 |
+  | weaker of 2 halves (D-134's best) | 0.6654 |
+  | **median of 4 quarter-windows** | **0.6958** |
+  | concentration (-top-10-day share) | 0.5982 |
+  | liquidity (min of pair) | 0.4286 |
+  | co-mention PMI | 0.4803 |
+  | supply edge | 0.4844 |
+  | **all combined, logistic fit on train** | **0.7301** |
+
+  Then, on 399 scored held-out pairs:
+
+  | arm | AUC |
+  |---|---|
+  | deterministic median-quarter | 0.7043 |
+  | Haiku, D-134 brief (3 numbers) | 0.6484 |
+  | Haiku, enriched brief (7 fields) | 0.6216 |
+
+  Gain over D-134's Haiku: 95% CI [-0.0879, +0.0204] — **not established**.
+  Deficit vs deterministic: 95% CI [+0.0383, +0.1455] — **established**, where
+  D-134's straddled zero. More evidence widened the gap instead of closing it.
+- **Per enrichment, as asked:**
+  - *Finer stability* — **works, and is the single biggest win.** Four quarters
+    beat two halves 0.6958 vs 0.6654. Eight and twelve windows are worse
+    (0.6450, 0.6542): the segments get too short to estimate. Four is the peak,
+    not a monotone trend, so this is a tuned choice and not a free lunch.
+  - *Concentration* — **marginal.** 0.5982 alone, and its weight in the combined
+    fit is -0.084, near nothing. Median pair draws 18.1% of its co-movement from
+    its ten largest days (range 8.0%-77.5%), so the spread exists; it just does
+    not predict replication.
+  - *Relatedness* — **dead on coverage, not on merit.** Only 2.0% of band pairs
+    have a co-mention edge and **0.1% (7 of 6,803) have a supply edge**. "We
+    have a supply graph and we're not passing it" is true, and passing it
+    reaches 7 pairs. Where an edge does exist, retention is *lower* (37.4% vs
+    53.8%), so the sign is against the hypothesis as well. Carried in the brief
+    as asked, reported as unmeasurable at this n rather than silently dropped.
+  - *Liquidity* — **works, backwards.** The hypothesis was that thin stocks give
+    noisier correlations. Measured, thin pairs replicate *more*, monotonically:
+    Q1 (thinnest) 65.9% retained, Q2 50.5%, Q3 50.8%, Q4 (thickest) 46.7%. A
+    19pp spread. **Do not trade on this without ruling out stale prices:** a
+    thinly traded name that does not print carries its last price forward, which
+    manufactures autocorrelation that persists into *both* windows for the same
+    mechanical reason. That would make it a real predictor of "the number
+    replicates" and a useless predictor of "the money is there". Untested.
+- **Also settled:** `discovery sessions: 1509` is the same constant on every
+  pair and carries zero information; the Fisher CI width is a deterministic
+  function of the correlation already shown. D-134's five-number brief had three
+  real numbers. Both are dropped from the enriched brief.
+  **RELATEDNESS VERDICT OVERTURNED 2026-09-12T12:22 by D-136.** The bullet above
+  is wrong on merit and right only on coverage. News co-mention is the strongest
+  single feature measured anywhere in this work; it was dismissed because it was
+  read at the wrong port and averaged over pairs it does not apply to. See D-136.
+- **Status:** Accepted on stability/concentration/liquidity and on the Haiku
+  conclusion. Relatedness bullet superseded by D-136.
+
+### D-136 — Relatedness is the strongest signal found, on 0.9% of pairs
+
+- **When:** 2026-09-12T12:22:41-05:00
+- **Decision:** D-135's "relatedness is dead" is **overturned on merit**. Among
+  pairs that carry a news co-mention edge, the edge's PMI ranks replication at
+  **AUC 0.7451** — better than the best broad feature (median-of-4-quarters,
+  0.6958) and better than anything else measured in D-133/D-134/D-135. It is a
+  **high-precision, low-recall** feature: it applies to 58 of 6,803 band pairs
+  (0.9%), and says nothing about the other 99.1%.
+- **Why:** D-135 tested relatedness by scoring a mostly-zero column across the
+  whole band, which averages a strong signal over 6,745 pairs it does not apply
+  to and reports 0.4803. The right question was conditional: *given* that an
+  edge exists, does it inform? It does, in two separate ways with opposite
+  signs, which is why the unconditional average cancelled to nothing:
+  - **Having** an edge predicts **failure**: 24.1% retained vs 53.7% without,
+    a **-29.6pp** delta, 95% CI [-40.2, -17.9] — excludes zero.
+  - **Among** edged pairs, **higher** PMI predicts **retention**: AUC 0.7451,
+    95% CI [0.6105, 0.8636] — excludes 0.5.
+
+  The mechanism is coherent and was not assumed in advance: incidental
+  co-mention marks a correlation that news flow manufactured and that decays,
+  while high PMI marks companies the press names together because they are
+  genuinely economically linked, and that linkage persists.
+- **Outcome:** observed, and **replicated on three bands not used to find it**:
+
+  | band | pairs | edged | edge delta | PMI AUC | 95% CI |
+  |---|---|---|---|---|---|
+  | 0.4-0.5 (discovery) | 6,803 | 58 | -29.6pp | 0.7451 | [0.611, 0.864] |
+  | 0.3-0.4 | 19,805 | 103 | -9.1pp | **0.7870** | [0.693, 0.867] |
+  | 0.5-0.6 | 3,367 | 44 | -25.6pp | 0.7051 | [0.543, 0.851] |
+  | 0.5-1.01 | 5,897 | 90 | -19.9pp | 0.6837 | [0.556, 0.800] |
+
+  Every CI excludes 0.5 and every edge delta is negative. The finding was found
+  on 0.4-0.5 and held on all three untouched bands, so it is not a cut fitted to
+  one sample.
+- **Root cause of the original miss — the graph covers a fifth of the universe:**
+  `equity` holds **514 vertices**; the correlation universe is **1,573 symbols**,
+  of which **914** appear in band pairs and only **183 (20.0%)** are in the
+  graph. Just **484 of 6,803 band pairs (7.1%)** have both legs present at all.
+  `supplies_to` holds 818 edges over **130 distinct pairs**, reaching **7** band
+  pairs — that bullet of D-135 stands: supply chain is dead on coverage, n=7.
+  **CORRECTED 2026-09-12T13:02 by Q-64:** the phrasing here originally called
+  the extra copies "re-filings of the same pair" as though they were noise
+  inflating a count. They are the **point-in-time record** — distinct
+  `filing_date` values spanning 2019-2026, which the as-of traversal depends
+  on. The coverage conclusion (7 band pairs) is unaffected.
+- **`equity` carries no sector or index attribute.** Verified by attribute
+  census over all 514 vertices: the only fields are `_id`, `_key`, `_rev`,
+  `symbol`. The "same sector, same index" half of the enrichment request is
+  **not implementable against today's graph** — it is missing data, not a
+  negative result, and is the one enrichment that would have broad coverage.
+- **Process failure worth recording:** D-135 called Arango "down" and scoped its
+  relatedness verdict around that. Arango was **never down** — pod
+  `arangodb-778c76c4f-ttzlj`, 1/1 Running, 47h uptime, **0 restarts**. The probe
+  used port 8529; the kubectl port-forward is on **18529**. A connection error
+  was reported as an outage without checking the pod, and a real finding was
+  buried under it for an hour. The Postgres fallback pull was itself correct
+  (130 pairs, confirmed identical against Arango), which made the wrong
+  conclusion look well-sourced.
+- **Not yet done:** the PMI feature is not wired into the brief or the scan. It
+  needs a "no edge" / "weak edge" / "strong edge" encoding, since its two
+  effects have opposite signs and a single numeric column collapses them.
+- **Status:** Accepted. Overturns D-135's relatedness bullet; D-135's stability,
+  concentration, liquidity and Haiku conclusions are unaffected.
+
+### D-137 — Sector is the relatedness signal that actually has coverage
+
+- **When:** 2026-09-12T12:41:08-05:00
+- **Decision:** Ingest SEC SIC codes onto `equity` and use same-2-digit-SIC as
+  the broad relatedness feature. D-136 found co-mention PMI to be the strongest
+  signal measured, but it reaches 0.9% of band pairs. Sector reaches **98.8%**
+  and is not redundant with it.
+- **Why:** D-136 closed with relatedness being real but nearly unreachable, and
+  recorded that `equity` carries no sector attribute — the one enrichment with
+  broad coverage was missing data rather than a negative result. Measuring it
+  required a source. SEC's `company_tickers.json` matches **2,180 of 2,183**
+  universe symbols (99.9%), and the submissions endpoint carries `sic` plus
+  `sicDescription`; **2,163** symbols resolved to a SIC. No new credential or
+  vendor: the repo already fetches both endpoints in `scripts/load_edgar.py`.
+  The alternative that lost was a commercial sector feed (GICS), which costs
+  money and adds a vendor for a label SEC already publishes free.
+- **Outcome:** observed. Same-2-digit-SIC major group, with bootstrapped CIs:
+
+  | band | pairs | both SIC known | same-major retained | vs different | delta |
+  |---|---|---|---|---|---|
+  | 0.4-0.5 | 6,803 | 98.8% | 67.3% | 44.2% | **+23.1pp** CI [+20.4,+25.0] |
+  | 0.3-0.4 | 19,805 | 99.0% | 58.5% | 30.1% | +28.4pp CI [+26.5,+30.0] |
+  | 0.5-1.01 | 5,897 | 98.3% | 84.6% | 55.0% | +29.6pp CI [+24.1,+29.3] |
+
+  Finer groupings are weaker, so 2-digit is the choice: 4-digit SIC gives
+  +12.1pp and 3-digit +17.5pp in the discovery band, against 2-digit's +23.1pp.
+  Narrower sectors split genuinely related companies apart.
+
+  It is also **not redundant** with the existing features. Held-out AUC on 3,402
+  pairs, logistic fit on the disjoint train half:
+
+  | feature set | held-out AUC |
+  |---|---|
+  | same 2-digit SIC alone | 0.6013 |
+  | median of 4 quarters alone | 0.6958 |
+  | all features WITHOUT sector | 0.7251 |
+  | **all features WITH sector** | **0.7455** (+0.0204) |
+
+  Sector carries the third-largest weight in the combined fit, behind
+  median-of-4-quarters and the weaker-half term.
+- **Coverage, which is the whole point** — the three relatedness sources are
+  not comparable on effect size alone:
+
+  | source | band pairs reached | verdict |
+  |---|---|---|
+  | supply chain (`supplies_to`) | 7 (0.1%) | dead on coverage (D-136) |
+  | news co-mention | 58 (0.9%) | strong, high-precision (D-136) |
+  | **SIC sector** | **6,722 (98.8%)** | **broad and additive** |
+- **Status:** Accepted. Extends D-136; contradicts nothing in it.
+
+### D-138 — `supplies_to` reconciled to 410 dated edges; the first migration script deleted the collection
+
+- **When:** 2026-09-12T13:31:00-05:00
+- **Decision:** Closes Q-65. `supplies_to` is deduped **by triple**
+  `(_from, _to, filing_date)`, not by pair, and re-keyed to the Q-64 scheme.
+  818 -> 410 edges. Where copies of one triple disagreed, the owner's stated
+  precedence applies: non-null `pct_revenue` wins, then the longest `passage`,
+  then the lowest existing key for determinism.
+- **Why:** Q-64 fixed what future loads write but left 818 auto-keyed rows
+  behind, 408 of them redundant. Deduping by *pair* was the trap (818 -> 130,
+  destroying the point-in-time record); by *triple* every filing date survives.
+  The precedence rule is not cosmetic: it **rescued `pct_revenue` on 58
+  triples** where an arbitrary pick would have kept a null copy and discarded
+  the real figure. Rows carrying `pct_revenue` went 111 -> 169.
+- **Outcome:** observed. 410 edges, **0 malformed keys**, 258 distinct filing
+  dates spanning 2018-10-19 .. 2026-08-13. `equity` (2,361), `co_mentioned`
+  (2,129) and `article` (80,792) untouched. The decisive check was a
+  **traversal fingerprint**: 304 `(symbol, year)` probes of
+  `laggers_of(sym, max_hops=2, as_of=)` across 76 customers at 2019/2021/2023/
+  2026, captured before and compared after — **0 differences**. Count equality
+  proves nothing here; identical traversal output is what proves the history
+  survived. A second `--apply` is now a no-op (removes 0, leaves 410).
+- **The first version of the script emptied the collection, and the lesson is
+  the one this repo keeps relearning.** `scripts/reconcile_supply_edges.py`
+  computed its delete set as *every key currently present*, then wrote the
+  correct documents and deleted that set. Run once against auto-keyed rows it
+  worked. Run twice, the "old" keys **were** the correct keys it had just
+  written, so it wrote 410 and deleted 410: `supplies_to` went to **0**.
+  Recovered in full from a pre-migration backup taken minutes earlier, verified
+  by the same 304-probe fingerprint (0 differences). Fixed by deleting only
+  keys **not** in the correct set, which makes a re-run a genuine no-op.
+  **What made this recoverable was not care in writing the script — the script
+  was wrong — but the backup and the fingerprint taken before touching
+  anything.** The destructive step was also ordered write-then-delete rather
+  than delete-then-write, so an interruption mid-run could not have lost data
+  either. D-97's original incident destroyed 47,640 embeddings with no backup;
+  this one destroyed 818 edges with one, and cost minutes.
+- **Status:** Accepted. Q-65 closed.
+
+### D-139 — The relatedness fields reach the UI, and the node they come from was crashing on real data
+
+- **When:** 2026-09-12T14:12:00-05:00
+- **Decision:** `detail()` gains a `quant_perspective` branch so the node's read
+  is rendered in the live scan, and `compute_quant_perspective`'s session lookup
+  is changed from `get_loc` to `searchsorted`.
+- **Why:** asked to make something consume D-137's new fields. The search found
+  that **nothing had ever consumed any of `QuantPerspective`** —
+  `scripts/capture_trace.py::detail`, which `scripts/serve.py:42` imports and
+  renders at line 280, had branches for `graph_retriever`, `leader_state`,
+  `vector_retriever`, `context_fusion` and `assessor` but none for
+  `quant_perspective`, so it fell through to `return key, ""`. Fisher CI widths,
+  split-half stability and the new relatedness fields were all computed and
+  discarded at the display layer. There was **no test file for `detail` at all**.
+- **The larger find, and it is a test-suite defect, not a code one:**
+  `compute_quant_perspective:51` did
+  `sessions.get_loc(pd.Timestamp(candidate.as_of, tz=sessions.tz))` — an exact
+  **midnight** lookup. Both production files index sessions at **04:00 UTC**:
+
+  | file | normalized |
+  |---|---|
+  | `data/bars.parquet` | **No** — 04:00 |
+  | `data/bars-10y.parquet` | **No** — 04:00 |
+  | `tests/fixtures/synthetic-closes.parquet` | **Yes** — 00:00 |
+
+  So the function raised `KeyError` for any candidate with a correlation edge on
+  real data, while 432 tests passed. Reproduced directly: `as_of=2026-07-29`, a
+  real session at `2026-07-29 04:00:00+00:00`, raised
+  `KeyError: Timestamp('2026-07-29 00:00:00+0000')`. **The suite could not have
+  caught it: there is exactly one price fixture and it is normalized.** Same
+  class as Q-43 — green tests certifying a path production never takes.
+  `quant_perspective:51` was the only exact-timestamp lookup in the codebase;
+  every other node already used a time-of-day-tolerant idiom.
+- **Why not `leader_state`'s idiom:** `sessions[sessions > str(c.as_of)][0]`
+  (used by `leader_state:32` and `context_fusion:61`) resolves to the session
+  **after** as_of. Copying it would have silenced the KeyError while shifting the
+  window forward and pulling the as-of day's own return into the correlation —
+  lookahead, forbidden by D-16, and contrary to this function's own contract
+  ("the window ends strictly before the as-of session"). `searchsorted` lands on
+  the as-of session for both index shapes, so the measured window is unchanged.
+  `test_quant_perspective_window_is_identical_normalized_or_not` pins exactly
+  that by requiring equal statistics from a midnight-indexed and a 04:00-indexed
+  run — it fails for the lookahead "fix" as well as for the original bug.
+- **Outcome:** observed. 434 passed, 1 skipped, ruff clean. Verified end-to-end
+  against the real 04:00-indexed file with live Arango, which is the check the
+  suite structurally cannot perform:
+
+  | symbol | with Arango | without |
+  |---|---|---|
+  | AAPL | `20 edges, 0% sector match, 0 strong/1 weak co-mentions` | `20 edges, relatedness not measured` |
+  | QRVO | `20 edges, 90% sector match, 2 strong/0 weak co-mentions` | same |
+  | JPM | `20 edges, 75% sector match, 6 strong/0 weak co-mentions` | same |
+
+  The values are discriminating rather than decorative: QRVO (semiconductors)
+  and JPM (banks) co-move overwhelmingly with their own sector, while **AAPL
+  matches 0%** of its 20 neighbours. Read with care — SIC 3571 "Electronic
+  Computers" is a narrow major group (35), and Apple's neighbours sit in 36
+  (electronics), so 0% partly reflects a category boundary rather than pure
+  unrelatedness. That is a caveat on the feature, not a defect in the read.
+- **Deliberately NOT done: `assess()` still ignores these fields.** D-34 pins
+  `odds_adjustment=0.0` because no powered test supports a probability. D-137's
+  0.7455 AUC measures whether a **decade-long** correlation in the 0.4-0.5 band
+  **replicates in a later multi-year window**; `assess()` asks whether
+  neighbours moved on **one date** over a **60-session** window. Different
+  quantities. Wiring the coefficient into a verdict would be exactly the
+  overclaiming D-133/D-135 were written to catch. Surfacing the numbers to a
+  human is honest; scoring with them is not, yet.
+- **Status:** Accepted.
+
+### D-140 — Every test now runs against production's 04:00 session index
+
+- **When:** 2026-09-12T14:31:00-05:00
+- **Decision:** The `closes` fixture is parameterised over two index shapes —
+  `midnight` and `prod-0400` — so all ~50 tests taking it run twice. Suite goes
+  434 -> 505 collected.
+- **Why:** D-139 cost a node that raised `KeyError` on every real candidate
+  while 432 tests passed, because the suite's only price frame was
+  midnight-normalized and both production files are not. Adding a second unused
+  fixture file would not have prevented that; only exercising the production
+  shape everywhere does. The alternative that lost was a standalone
+  `closes_prod` fixture used by a handful of new tests, which would have left
+  the other 50 blind to exactly the class of bug that had just escaped.
+- **Outcome:** observed, and it **found a second bug on the first run** — four
+  `test_review.py` tests fail under `prod-0400` because `leader_state` and
+  `context_fusion` resolve the as-of session one position differently on a
+  04:00 index, flipping a verdict from `contradicted` to `neutral`. Logged as
+  **Q-66** and left unfixed: it changes verdicts in a real-money-adjacent
+  system and the correct semantics is a decision, not a mechanical fix. The four
+  are `xfail(strict=True)`, so resolving Q-66 breaks them and forces the marks
+  out rather than leaving a stale exemption.
+- **Final state:** 500 passed, 1 skipped, 4 xfailed, ruff clean.
+- **The pattern worth keeping:** two real production bugs (D-139, Q-66) were
+  invisible to a green suite because one fixture detail differed from production.
+  Neither was found by reading code or by the tests; both were found by running
+  against the real shape. Compare Q-43, where defaults pointed at a dead port and
+  the live tests skipped silently while the suite reported healthy counts.
+- **Status:** Accepted.
+
+### D-141 — Q-66 closed: five sites resolved the as-of session one day early on production data
+
+- **When:** 2026-09-12T15:22:00-05:00
+- **Decision:** All five sites now resolve the as-of session with
+  `int(np.searchsorted(sessions.date, as_of, side="right"))`, which is
+  time-of-day independent and preserves the plan's contract that **`ti - 1` is
+  `as_of`'s own session**. Closes Q-66.
+- **Why:** `sessions[sessions > str(as_of)][0]` compares against **midnight**,
+  so it resolved correctly on a midnight index and one position early on
+  production's 04:00 index — dropping the last known session from every window
+  in `graph_retriever:35`, `leader_state:32`, `context_fusion:61` and
+  `adapters/candidates.py:98,174`. **Production was answering the previous
+  day's question.** The cleanest demonstration is on real data: `PANW` is a
+  shocked leader on 2026-09-03 and not on 2026-09-04, and a pre-fix query for
+  the 4th returned PANW's 6 followers — because the window actually ended on
+  the 3rd.
+- **The magnitude is not an off-by-one rounding difference.** Measured at each
+  seam, correct vs pre-fix production:
+
+  | site | correct | production |
+  |---|---|---|
+  | `graph_retriever` | SPIKE corr **0.987** | **-0.116** — the top leader's identity flips |
+  | `leader_state` | LEAD sigma **4.34** | **-0.73**, sign flipped, filtered out entirely |
+  | `context_fusion` | effective evidence **1.0** (one bloc of 2) | **2.0** — bloc collapses |
+  | `MarketScan.shocked_leaders` | z **130.9** | absent |
+  | `CoMovementFollowers.candidates` | `{'AAA'}` | **`set()`** — no candidates at all |
+
+  `context_fusion` is the worst in kind: production **over-counted** evidence,
+  because it could not see the co-movement that would have clustered two movers
+  into one bloc — silently defeating the double-counting guard Q-12 exists for.
+- **THE TWO-CONVENTION FINDING, which is what made this hard.** This codebase
+  has two deliberate as-of windowing conventions, and which applies depends on
+  the job:
+
+  | convention | sites | window |
+  |---|---|---|
+  | **excludes** `as_of` | `comovement.py`, `quant_perspective.py` | trail sessions strictly before `as_of` |
+  | **includes** `as_of` | `graph_retriever`, `leader_state`, `context_fusion`, both `MarketScan` sites | ends **at** `as_of`, the last complete session |
+
+  Both are right. Estimating a correlation should not be contaminated by the
+  event being assessed; detecting "did this shock?" is meaningless if the day in
+  question is invisible. **Neither is written down centrally** — the first lives
+  in a `comovement.py` docstring, the second in
+  `PLAN-2026-09-08-market-scan.md:183`. Reading one and generalising it is what
+  produced Q-66's two inverted diagnoses. This table is the missing note.
+- **Outcome:** observed. 514 passed, 1 skipped, **0 xfailed**, ruff clean. The
+  four `test_review.py` tests now pass on BOTH index shapes, so D-140's
+  `xfail(strict=True)` hook went XPASS and was removed — `strict` did its job.
+- **Pre-registered verification, stated before running it:** the synthetic
+  golden baseline is midnight-indexed, so a *correct* fix must leave it
+  untouched; a changed baseline would mean the fix had altered already-correct
+  behaviour (as the reverted attempt did, moving `SYNA 2026-04-27` from
+  `corroborated` to `neutral`). Regenerating it produced a **byte-identical
+  file** — md5 `3217110b29ebc7a4edc80557aae65aae` before and after. No
+  regeneration was needed and none is committed.
+- **One real-data test updated, deliberately:**
+  `test_leader_source_with_known_symbol_returns_non_empty_candidates` used
+  `leader:PANW` on 2026-09-04, an expectation formed under the off-by-one. It
+  now uses `CXM`, which shocks on the as-of date itself (z=-5.39) and has 18
+  followers, exercising the same valid-input path the test guards.
+- **Status:** Accepted. Q-66 closed.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
 | Q-60 | ~~The trading system's redis requires no password, and any pod in the cluster can reach it~~ **CLOSED by D-127 — accepted risk, declined** | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Closed 2026-09-11 by D-127: accepted and declined.** Weighed against the verified exposure boundary (ClusterIP, no nodePort, no host listener, LAN-only ingresses) and the cost of restarting a live real-money service. D-127 records the condition that would change the answer — `cloudflared` is a remotely-managed tunnel whose routing is configured outside this cluster, so the "nothing gets in" premise is not verifiable from within it. |
+| Q-62 | SEC exposes no SIC history, so a company that reclassified during the backtest window is scored against a sector label it may not have held at the time | any use of `sic` as a point-in-time feature (D-16) | Raised 2026-09-12 by PLAN-2026-09-12-relatedness-and-sectors. `https://data.sec.gov/submissions/CIK{cik}.json` returns only the company's **current** `sic`; there is no `filing_date` on it the way `supplies_to` carries one (D-72), so the join is today's label onto historical pairs. **Bounded, not eliminated:** D-137's +23.1pp and the 0.7251→0.7455 lift were themselves measured with exactly this join, so production inherits the measurement's bias rather than adding to it — a backtest cannot be more optimistic than the experiment that justified it when both run the same join. What is genuinely unverified is the *rate* of SIC reclassification across the universe during the window. SIC codes are largely static once assigned, but that is asserted here rather than measured, and it cannot be checked against SEC's own endpoint because the endpoint does not expose the history. Closing this needs a third-party point-in-time sector source or SEC full-text filing headers parsed per-year. |
+| Q-63 | `scripts/load_arango.py`'s `bulk()` writes `equity` with `overwriteMode:"replace"`, so re-running it would silently strip the `sic`/`sic_desc` fields | any re-run of `load_arango.py` after `load_sectors.py` | Found 2026-09-12 while planning the sector ingest. `bulk()`'s payload for `equity` is only `{_key, symbol}`, and `"replace"` is a whole-document write, not a merge — so the sector fields do not survive it. This is not hypothetical: the same class of mistake already destroyed 47,640 embeddings in this repo when a loader dropped a collection it did not own, which is why `load_arango.py` carries that warning comment today. **Not fixed here on purpose:** changing `bulk()`'s overwrite mode alters the write semantics for `equity`, `supplies_to` and `co_mentioned` at once, which is out of scope for a plan scoped to two things (CLAUDE.md §3). `load_sectors.py` defends itself by using its own `overwriteMode:"update"` path and never calling `bulk()`. The exposure remaining is a future `load_arango.py` run, which would need `load_sectors.py` re-run afterwards to restore the fields. |
+| Q-64 | `load_arango.py`'s `co_mentioned` deterministic `_key` (`f"{a}~{b}"`) is rejected by ArangoDB, so that collection has no idempotency guarantee in production | any re-run of `load_arango.py`, and D-97's "loaders upsert on a deterministic key" claim | Found 2026-09-12 by `red-relatedness` while writing PHASE-4's fixtures, and verified independently against a disposable database: inserting an edge with `_key="A~B"` returns `[HTTP 400][ERR 1221] illegal document key`, while `_key="A_B"` is accepted — `~` is not a legal ArangoDB key character. `scripts/load_arango.py:115-128` `comention_edge_docs` nevertheless sets `_key = f"{r.a}~{r.b}"`. **The live database proves the consequence:** all 2,129 `co_mentioned` edges carry auto-assigned numeric keys (`15784`, `15785`, …), not `a~b` keys, so whatever loaded them did not use the deterministic key at all. **CORRECTED 2026-09-12T13:02 — this entry was wrong twice.** (a) `supplies_to` is NOT fine: `supply_edge_docs` keys on `f"{supplier}->{customer}"` and `>` is illegal too — probed live, `A->B` and `A~B` both return ERR 1221, while `A_B`, `A:B`, `A.B`, `A@B` are accepted. BOTH collections lost the deterministic key. (b) Far more importantly, the obvious fix — legal key on the pair, dedupe the extras — **would destroy data**. `supplies_to`'s 818 edges over 130 pairs are not duplicates: they carry distinct `filing_date` values spanning 2019-2026 (QRVO->AAPL alone has 15 copies across 8 dates), and `laggers_of("AAPL", as_of=)` returns 9/11/11/12 suppliers for 2019/2021/2023/2026 **only because those dated edges exist**. Collapsing them would make every historical query see 2026 filings, breaking D-16/D-72. `supply_edge_docs` is therefore wrong on two counts: the illegal character, and a pair-only key that flattens eight years of filings into one document — its docstring states that collapse as intended behaviour, and `test_supply_edge_docs_dedupes_a_repeated_pair` asserted it, which is why nothing caught it. **The illegal key is the only reason the history survived.** D-97 requires a *stable* key, never a *pair-only* one, so keying `supplier:customer:filing_date` satisfies D-97 and preserves history; `co_mentioned` has no date dimension (2,129 edges = 2,129 distinct pairs) so `a:b` is right there. **No dedupe migration is performed — the 818 edges are real data.** Never caught because `tests/test_loader_idempotency.py` only asserts the *shape* `comention_edge_docs` returns and never inserts a document into a live database. **Not fixed here:** changing the key scheme means choosing a separator and deciding what to do with the 2,129 existing mis-keyed edges, which is its own decision, outside a plan scoped to sectors and relatedness (CLAUDE.md §3). |
+| Q-65 | ~~408 of `supplies_to`'s 818 edges are same-triple redundancies, but 156 triples have copies that DISAGREE on `pct_revenue`, so no dedupe rule is obviously correct | cleaning up `supplies_to`, and any reliance on `pct_revenue` | Found 2026-09-12 while closing Q-64. The key fix (`supplier:customer:filing_date`) is done and future runs are idempotent, but it does not reconcile what is already stored. Measured live: 818 edges, **410 distinct `(_from,_to,filing_date)` triples**, all 818 carrying auto-assigned keys. Deduping by *pair* would destroy point-in-time history (818->130, the Q-64 trap); deduping by *triple* preserves every filing date (818->410) and is safe on that axis. **But it is not safe on content:** of the 410 triples, 254 have byte-identical copies while **156 disagree** — e.g. `QRVO->AAPL` at `2026-05-08` exists both with `pct_revenue='50'` and with `pct_revenue=None`. An arbitrary pick can silently keep the null and discard the real figure. `supply_edge_docs`'s dict-collapse keeps the LAST row for a key, so which copy wins depends on Postgres row order — **nondeterministic**, and that applies to the fixed loader too, not just the historical rows. Closing this needs a stated precedence rule (prefer non-null `pct_revenue`? prefer the longest `passage`? re-extract from the filing?) — a data-semantics decision, not a mechanical one. **Consequence if left alone:** one future `load_arango.py` run writes 410 correctly-keyed documents alongside the 818 existing auto-keyed ones (818+410=1,228) before the collection stabilises at 410 on subsequent runs. Not harmful to `as_of` traversals, which filter on `filing_date` and tolerate duplicates, but the collection stays inflated.~~ **CLOSED by D-138** — deduped by triple to 410 with non-null `pct_revenue` precedence; 58 figures rescued, 0 traversal differences. |
+| Q-66 | ~~`leader_state` and `context_fusion` resolve the as-of session differently on production data than in every test, shifting their window by one session and changing verdicts | any reading of a verdict, and any fix to session resolution | Found 2026-09-12 by parameterising the `closes` fixture over both index shapes (D-140). Both nodes use `ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])`. `str(c.as_of)` is a bare date, so the comparison is against **midnight**: on a midnight-indexed frame the as-of session is not `> midnight` and the idiom picks the session **after** as_of (window **includes** the as-of day); on production's 04:00-indexed frame the as-of session **is** `> midnight` and the idiom picks the as-of session itself (window **excludes** it). Demonstrated directly: for `as_of=2026-01-08`, a midnight index gives a 3-session window of `01-06, 01-07, 01-08`, a 04:00 index gives `01-05, 01-06, 01-07`. **This is not cosmetic — it changes output.** Four `tests/test_review.py` tests flip from `contradicted` to `neutral` purely on the index offset, because the deciding evidence is the leader's move on the as-of day, which production silently drops. So every test to date has exercised semantics production does not run, and production has been measuring shocks one session early. **DIAGNOSIS WENT WRONG TWICE BEFORE LANDING — both wrong turns recorded here on purpose, because the reasoning is the reusable part.** (1) The original text above is CORRECT and stands. (2) At 14:48 I "corrected" it to the opposite — claiming production was right and the midnight path committed lookahead — citing `comovement.py:64-79` ("`as_of`'s own session is never in the window"). I then had an agent implement that inversion. **That correction was wrong.** `comovement.py` states a convention for ONE job — estimating a correlation without contaminating it with the event — and I generalised it across nodes that deliberately use the opposite one. (3) The authority is `docs/plans/PLAN-2026-09-08-market-scan.md:183`, "Dates: exactly what flows where": *"`as_of` — the last **complete, known** session ... `ti = sessions.get_loc(later[0])` — the first position *after* `as_of`, so **`ti - 1` is `as_of`'s own session (the last known one)**. No future data leaks through this (both windows' last known day is `as_of`)."* So for `graph_retriever`, `leader_state`, `context_fusion` and `MarketScan`, including the as-of session is **deliberate and not lookahead** — `as_of` is defined as complete. That same section warns against exactly the change I ordered: altering `leader_state`'s window "changes accepted verdicts, which is out of scope".
+
+  Measured, the real direction: for `as_of=2026-01-08`, a midnight index gives `ti-1 = 2026-01-08` (as_of **included**, correct) and a 04:00 index gives `ti-1 = 2026-01-07` (as_of **excluded**, broken). **Production is the broken side** — it silently drops the last known session from every window.
+
+  **What caught the error was blast radius, not review.** The inverted fix passed its own purpose-built tests and reddened three unrelated ones; chasing *why* led to the plan section. Decisively, `test_synthetic_baseline_unchanged` failed with `SYNA 2026-04-27: verdict 'corroborated' -> 'neutral'` — a golden-baseline regression proving a live verdict had changed — and the `prod-0400` review tests stayed **xfailed** rather than flipping to XPASS, meaning the fix had made midnight match production rather than removing the bug. A surgical fix that disturbed nothing would have shipped. **Agents implementing a confidently-stated wrong contract produce work that looks correct at every checkpoint**; both agents reporting results they had been told not to expect is what surfaced it.
+
+  **Still open.** The mechanism is a `.date`-based, time-of-day-independent lookup that preserves `ti - 1 == as_of` — `searchsorted(sessions.date, as_of, side="right")` — applied together to `graph_retriever.py:35`, `leader_state.py:32`, `context_fusion.py:61` and both `adapters/candidates.py` sites (98, 174), which all share the break. Fixing it **will change live verdicts**, which is a decision about the trading system's behaviour, not a refactor: `tests/test_synthetic_baseline.py`'s golden file would need regenerating deliberately. The four tests are marked `xfail(strict=True)` so the divergence is tracked and resolving it forces the marks to be removed. |
+| Q-61 | `Candidate` silently discards unknown constructor kwargs, so a forgotten or mistyped field is a no-op rather than an error | any change that adds a field to a domain model | Surfaced 2026-09-11 while executing PLAN-2026-09-11-quant-daytrade-perspectives. `Candidate` is a plain pydantic model with an empty `model_config`, so it inherits `extra='ignore'`. Verified directly: `Candidate(symbol='A', ..., origin_sigma=5.0)` constructs successfully today and `hasattr(c, 'origin_sigma')` is `False` — the value is dropped with no error and no warning. The immediate consequence was concrete: adding `origin_sigma=` to `MarketScan.candidates()` **without** also adding the model field would have run clean, produced no diagnostic, and left candidates ordered alphabetically — i.e. silently failed to fix the very bias it was written to remove. Caught by a red test asserting the actual per-leader signed values rather than merely "not None". The narrow case is closed by D-130, but the general hazard is not: every `Candidate` construction site in `src/` and `tests/` is exposed to the same silent drop, and the same is true of any other domain model with a default `model_config`. **Not fixed:** `extra='forbid'` would change validation behaviour for every construction in the codebase and was deliberately kept out of an in-flight plan execution (CLAUDE.md §3). Worth deciding on its own, across `domain/models.py` as a whole rather than one model. |
 | Q-58 | ~~NetworkPolicy is unenforced for the first ~1–3 seconds of a pod's life~~ **ANSWERED by D-126** — the window is real and cannot be closed without changing CNI; the ingest now refuses to start until enforcement is observable | D-121's isolation claim, for Jobs specifically | Measured by `postmortem` 2026-09-10 with a looping probe and a control pod (no `app` label, so only `default-deny-egress` selects it): `t+0.1s alpaca=OPEN arango=OPEN pg-copytrade=OPEN`, `t+3.1s` all three `ConnectionRefusedError`. kube-router programs the pod's `KUBE-POD-FW-*` chain on the pod-add event; until it does, the pod has no chain and the namespace default-deny does not reach it. The ingest-labelled pod shows the same window on its denied target. **Irrelevant for a Deployment; the ingest is a Job — the workload class where a fast-failing container is most likely to open a socket inside the window.** We are not exposed today only because the pod spends those seconds importing pandas and langgraph before it opens anything: that is timing, not a boundary. Worth recording that `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. **Fixed by D-126** with an `await-netpol` init container rather than a `sleep`, after reproducing the window here. Worth keeping: `postmortem`'s *first* probe ran entirely inside the window and reported that nothing was enforced at all — a false negative in its own method, caught only because it built a control rather than believing the result. My own first re-measurement then printed computed timestamps as if they were observations. The window survived two bad measurements by two different parties before either of us measured it properly. |
 | Q-59 | ~~The deployed image is seven commits stale, and nothing was ever going to build a newer one~~ **ANSWERED 2026-09-10 by the cutover to `faa1076`** | every claim in D-119, D-120, D-122 and D-123 about what *runs* | The CronJob and `lagmatrix-web` both run `ghcr.io/ridopark/lag-equity-matrix-ai:66b11a5`, which is the commit **before** D-119. Raised by `postmortem` as "nothing newer was ever built"; the root cause is mine to state: `.github/workflows/build-images.yml` triggers only on `push: branches: [main]`, and all seven commits are on `graphrag-showcase-and-scan` (PR #2, unmerged). **No build failed — none was ever triggered.** `imagePullPolicy: IfNotPresent` plus two hand-imported tags in `k3s ctr images ls` confirms 66b11a5 arrived by hand, not by the pipeline. `postmortem`'s "nothing newer was deployed" was too broad and it withdrew it: the **yaml-carried** work *is* live (three netpols present, arango limit 2560Mi, `0 9 * * 2-6 tz=UTC`, and now D-125's 3Gi), because `kubectl apply` needs no image. Only three of the seven commits carry runtime code: 90a1c17 (`load_vectors.py`, `ingest.py`), a5241ac (`serve.py`, `daily_ingest.py`), ee31cf9 (`daily_ingest.py` — verified comment-only, zero runtime risk). Consequence while it stands: D-119's distinct failure messages and D-122's fixed-floor candidates do not exist in the pod, so an ArangoDB failure tomorrow still reads "ArangoDB not reachable" — the exact message D-119 exists to delete. **Closed 2026-09-10T18:07:** built `faa1076` from HEAD, verified the image *contains* the four fixes before shipping rather than trusting the build, imported it to the node and cut both the CronJob and `lagmatrix-web` over. Attended run succeeded at 899 MiB of a 3072 MiB limit. **The structural cause is not closed and became Q-57's recurrence:** `main` is now behind the code that is actually running, so a rebuild from `main` still yields an image without D-122/D-124. Merging the branch is what fixes that, not the cutover. |
 | Q-53 | ~~The `lagmatrix` namespace reaches the trading system's postgres, redis and api-gateway~~ **ANSWERED by D-121** | the isolation claim the deploy work rests on | Measured 2026-09-10 from a pod in `lagmatrix` (busybox, `nc -z`, with a control target — the first attempt reported everything blocked because the arangodb image has no bash and the command never ran, exit 127): **REACHABLE** postgres:5432, redis:6379, api-gateway:8082, dashboard:3000, market-data:8080. **blocked** exec-alpaca-live:8080 (its own ingress NetworkPolicy, working). `orchestrator:8080` blocked despite having an endpoint and no visible policy — unexplained, not claimed as protection. `audit:8081` has 0 endpoints so its result proves nothing. Two NetworkPolicies exist cluster-wide, both in `copytrade`, both ingress-only, both protecting the exec pods. **I asserted the opposite of this twice**: first that a namespace prevented reaching the trading workloads, then that `kubectl get networkpolicy -A` returns nothing — a command I had not run. Both corrections are left in `10-arangodb.yaml` rather than the sentences deleted. The reachable postgres is the same one D-103's injection would have reached. Unanswered: a default-deny egress policy in `lagmatrix` is the fix, but its allow-list depends on Q-54 first. |

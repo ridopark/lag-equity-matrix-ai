@@ -14,6 +14,7 @@ from "didn't look" and never enters the weighting above.
 
 from __future__ import annotations
 
+import numpy as np
 from langgraph.runtime import Runtime
 
 from lagmatrix.domain.models import Evidence
@@ -58,7 +59,11 @@ def fuse_evidence(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> 
         want = 1.0 if c.direction == "up" else -1.0
 
         if movers:
-            ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])
+            # ti - 1 is as_of's own session (the last known one) -- see the
+            # plan's "Dates: exactly what flows where". searchsorted on
+            # `.date` resolves this the same way regardless of the index's
+            # time-of-day (Q-66).
+            ti = int(np.searchsorted(sessions.date, c.as_of, side="right"))
             win = returns.iloc[ti - trail : ti]
             sub = win[[m for m in movers if m in win.columns]]
             rho = sub.corr().abs() if sub.shape[1] > 1 else None

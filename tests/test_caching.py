@@ -17,6 +17,7 @@ from datetime import date
 
 from langgraph.cache.memory import InMemoryCache
 
+from conftest import invoke_graph
 from lagmatrix.domain.models import Candidate
 from lagmatrix.graph.builder import build_graph
 from lagmatrix.graph.context import LagMatrixContext
@@ -55,14 +56,14 @@ def test_neighbourhood_is_recomputed_only_once_across_invocations(closes, monkey
     ctx = LagMatrixContext(closes=closes, signal_universe=set())
     candidates = [_candidate("CAND"), _candidate("CAND2"), _candidate("CANDD", direction="down")]
 
-    graph.invoke(
+    invoke_graph(graph, 
         {"candidates": candidates}, context=ctx,
         config={"configurable": {"thread_id": "cache-first"}},
     )
     assert len(calls) == 3, "first invoke should run the body once per candidate"
 
     calls.clear()
-    graph.invoke(
+    invoke_graph(graph, 
         {"candidates": candidates}, context=ctx,
         config={"configurable": {"thread_id": "cache-second"}},
     )
@@ -88,7 +89,7 @@ def test_cache_does_not_dedupe_within_one_invocation(closes, monkeypatch):
     ctx = LagMatrixContext(closes=closes, signal_universe=set())
     cand = _candidate("CAND")
 
-    graph.invoke(
+    invoke_graph(graph, 
         {"candidates": [cand, cand]}, context=ctx,
         config={"configurable": {"thread_id": "dup-within-one"}},
     )

@@ -8,6 +8,7 @@ signal's own tickers (D-27).
 
 from __future__ import annotations
 
+import numpy as np
 from langgraph.runtime import Runtime
 
 from lagmatrix.domain.models import LagEdge
@@ -32,12 +33,14 @@ def retrieve_neighbourhood(state: LagMatrixState, runtime: Runtime[LagMatrixCont
     for c in candidates:
         key = candidate_key(c)
         c_edges: list[LagEdge] = []
-        later = sessions[sessions > str(c.as_of)]
-        if len(later) == 0 or c.symbol not in closes.columns:
+        # ti - 1 is as_of's own session (the last known one) -- see the plan's
+        # "Dates: exactly what flows where". searchsorted on `.date` resolves
+        # this the same way regardless of the index's time-of-day (Q-66).
+        ti = int(np.searchsorted(sessions.date, c.as_of, side="right"))
+        if ti == len(sessions) or c.symbol not in closes.columns:
             errors.append(f"{c.symbol} {c.as_of}: no session or no bars")
             lag_edges_by_key[key] = c_edges
             continue
-        ti = sessions.get_loc(later[0])
         if ti < trail:
             errors.append(f"{c.symbol} {c.as_of}: insufficient history")
             lag_edges_by_key[key] = c_edges

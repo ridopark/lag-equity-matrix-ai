@@ -24,6 +24,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde import jsonplus
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from conftest import invoke_graph
 from lagmatrix.domain.models import (
     Assessment,
     Bar,
@@ -59,15 +60,35 @@ class LeaderStateBoom(Exception):
     bespoke also means it can't be confused with a real pipeline error."""
 
 
-def test_a_failed_run_resumes_only_the_failed_branch(closes, monkeypatch):
-    """A run that dies in `leader_state` for one of three candidates leaves
-    the other two branches' writes in `get_state`; resuming re-runs only the
-    failed branch, and the final state holds all three.
+def test_a_failed_run_resumes_and_re_runs_the_whole_superstep(closes, monkeypatch):
+    """A run that dies in `leader_state` for one of three candidates discards
+    the whole superstep's writes; resuming re-runs **all three** branches and
+    the final state holds all three assessments.
 
-    Falsifies if: the first `invoke` does not raise, `get_state` after the
-    failure is missing a successful branch's `leader_shocks`, the resumed
-    `invoke` calls `leader_state`'s body more than once, or the final state
-    is missing any of the three candidates' assessments.
+    **Renamed and corrected 2026-09-12.** This test previously asserted that
+    resume re-runs *only* the failed branch, and passed -- under sync
+    `.invoke()`, which no production caller has ever used. `runner.py:132`
+    awaits `ainvoke`, `serve.py`/`capture_showcase.py` use `astream`, and
+    `daily_ingest.py` wraps `ainvoke` in `asyncio.run`. So the efficiency
+    property it pinned has never held in production.
+
+    The two executors genuinely differ: langgraph's async paths schedule
+    tasks with `__cancel_on_exit__=True` and `_should_stop_others`
+    (`pregel/_runner.py:471,528,925`), so a failing task cancels its siblings
+    and `commit()` treats a cancelled task as an error rather than committing
+    its writes. The sync `tick` sets `__cancel_on_exit__` nowhere. Verified by
+    running identical pre-PHASE-6 source, with no async node wired at all,
+    under both executors: sync passed, async failed.
+
+    This is not a test relaxed to make it pass -- it is a test corrected to
+    describe the executor the system actually runs on. The cost consequence is
+    real and worth knowing: a failure anywhere in a superstep re-runs every
+    branch on resume, which once the analyst nodes are wired means re-paying
+    for every candidate's LLM calls, not just the failed one.
+
+    Falsifies if: the first `invoke` does not raise, the resumed run does not
+    re-attempt all three branches, or the final state is missing any of the
+    three candidates' assessments.
     """
     candidates = [_candidate("CAND"), _candidate("CAND2"), _candidate("CANDD", direction="down")]
     fail_symbol = "CAND2"  # the second of the three
@@ -88,20 +109,44 @@ def test_a_failed_run_resumes_only_the_failed_branch(closes, monkeypatch):
     config = {"configurable": {"thread_id": "resume-test"}}
 
     with pytest.raises(LeaderStateBoom):
-        graph.invoke({"candidates": candidates}, context=ctx, config=config)
+        invoke_graph(graph, {"candidates": candidates}, context=ctx, config=config)
 
+    # NOT `len(calls) == 3`. That assertion is inherited from this test's
+    # sync-executor era and is a race under async: when CAND2 raises,
+    # `_should_stop_others` cancels its siblings, so whether CANDD ever starts
+    # depends on scheduling. Measured at roughly a 50% failure rate under
+    # random test ordering -- it passed 4/4 in fixed order and failed 2/4 in
+    # random order before this was corrected. "All three branches are
+    # attempted" is simply not a property of the async executor.
+    #
+    # What IS guaranteed: the branch that fails runs, and no branch runs twice.
+    assert fail_symbol in calls, "the failing branch must actually have run"
+    assert len(calls) == len(set(calls)), "no branch should be attempted twice"
+    assert len(calls) <= 3
+    # What survives of the failing superstep is NOT portable. x86_64 discards
+    # every sibling's writes; aarch64 committed CAND's. Both are the same
+    # cancellation race as the `calls` count above -- `_should_stop_others`
+    # cancels siblings when one task fails, and whether a given sibling had
+    # already committed depends on scheduling, which differs by platform. An
+    # earlier version of this test asserted the dict was empty and passed on
+    # x86_64 while failing CI on aarch64.
+    #
+    # The invariant worth pinning is narrower and actually holds: the branch
+    # that RAISED produced no write, so its key is never present. Sibling
+    # writes may or may not survive, and the resume assertions below are what
+    # guarantee correctness either way.
     values = graph.get_state(config).values
-    shocks_by_key = values.get("leader_shocks", {})
-    assert candidate_key(candidates[0]) in shocks_by_key
-    assert candidate_key(candidates[2]) in shocks_by_key
-    assert candidate_key(candidates[1]) not in shocks_by_key
-    assert len(calls) == 3, "all three branches should have been attempted once each"
+    assert candidate_key(candidates[1]) not in values.get("leader_shocks", {}), (
+        "the branch that raised cannot have committed a shock"
+    )
 
     flag["fail"] = False
     calls.clear()
-    out = graph.invoke(None, context=ctx, config=config)
+    out = invoke_graph(graph, None, context=ctx, config=config)
 
-    assert calls == ["CAND2"], "resume must re-run only the previously-failed branch"
+    assert sorted(calls) == ["CAND", "CAND2", "CANDD"], (
+        "resume re-runs every branch in the discarded superstep, not just the failed one"
+    )
     assert {a.candidate.symbol for a in out["assessments"]} == {"CAND", "CAND2", "CANDD"}
 
 
@@ -120,8 +165,8 @@ def test_thread_id_isolates_runs(closes):
     config_a = {"configurable": {"thread_id": "thread-a"}}
     config_b = {"configurable": {"thread_id": "thread-b"}}
 
-    graph.invoke({"candidates": [cand_a]}, context=ctx, config=config_a)
-    graph.invoke({"candidates": [cand_b]}, context=ctx, config=config_b)
+    invoke_graph(graph, {"candidates": [cand_a]}, context=ctx, config=config_a)
+    invoke_graph(graph, {"candidates": [cand_b]}, context=ctx, config=config_b)
 
     edges_a = graph.get_state(config_a).values["lag_edges_by_key"]
     edges_b = graph.get_state(config_b).values["lag_edges_by_key"]
@@ -155,7 +200,7 @@ def test_checkpointed_state_round_trips_pydantic_models(closes, monkeypatch, cap
     ctx = LagMatrixContext(closes=closes, signal_universe=set(), topk=TOPK)
     config = {"configurable": {"thread_id": "roundtrip-test"}}
 
-    graph.invoke({"candidates": [_candidate("CAND")]}, context=ctx, config=config)
+    invoke_graph(graph, {"candidates": [_candidate("CAND")]}, context=ctx, config=config)
 
     assessment = graph.get_state(config).values["assessments"][0]
     assert isinstance(assessment, Assessment)

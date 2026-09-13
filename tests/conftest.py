@@ -18,6 +18,7 @@ code under test, which is worse than slow: it teaches you to distrust red.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pathlib
 import socket
@@ -171,6 +172,36 @@ def require_local_file(path: str, what: str) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_anthropic_key(monkeypatch):
+    """Hide any real Anthropic credential from every test by default.
+
+    `Settings` reads `LAGMATRIX_ANTHROPIC_API_KEY` from the environment *and*
+    from `.env`, so once a developer configures a key the suite starts behaving
+    differently on their machine than in CI: `build_analyst_client` returns a
+    real client, tests asserting "no key configured" fail, and -- the part that
+    matters -- anything driving the graph starts making **real, paid API
+    calls**. That is exactly D-114's `ALLOW_REAL` problem and Q-43's
+    silent-skip problem wearing a new hat: behaviour depending on ambient
+    state nobody declared.
+
+    Autouse rather than per-test, for D-114's stated reason: a test written
+    next month cannot reintroduce the coupling by forgetting. A test that
+    genuinely wants a key sets one itself with `monkeypatch.setenv`, which
+    still works because this runs first.
+
+    `_env_file` is cleared too -- pydantic-settings would otherwise read the
+    key straight back out of `.env` and defeat the `delenv`.
+    """
+    # Set empty rather than deleted: `delenv` alone is not enough, because
+    # `Settings` also reads `.env`, and pydantic-settings would load the key
+    # straight back out of it. An environment variable takes precedence over
+    # the env file, and `build_analyst_client` treats an empty key as absent.
+    monkeypatch.setenv("LAGMATRIX_ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_allow_real():
     """Restore `serve.ALLOW_REAL` after every test.
 
@@ -209,9 +240,18 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [list(v) for v in model.embed(texts)]
 
 
-@pytest.fixture
-def closes() -> pd.DataFrame:
-    """120 sessions of synthetic closes.
+# Production price files index sessions at 04:00 UTC, not midnight
+# (`data/bars.parquet` and `data/bars-10y.parquet` are both `normalized=False`),
+# and D-139 cost a node that crashed on every real candidate while 432 tests
+# passed: the suite's only price frame was midnight-normalized, so no test could
+# reach the branch. Every test taking `closes` now runs against BOTH shapes, so
+# a time-of-day assumption fails here instead of in production.
+SESSION_OFFSETS = {"midnight": pd.Timedelta(0), "prod-0400": pd.Timedelta(hours=4)}
+
+
+@pytest.fixture(params=list(SESSION_OFFSETS), ids=list(SESSION_OFFSETS))
+def closes(request) -> pd.DataFrame:
+    """120 sessions of synthetic closes, at midnight and at production's 04:00.
 
     LEAD1/LEAD2 are a tightly correlated bloc; LEAD3 is independent; CAND tracks
     the bloc loosely. INDEP is noise. The bloc exists so the clustering discount
@@ -242,16 +282,119 @@ def closes() -> pd.DataFrame:
     r["LEAD5"] = common2 + rng.normal(0, 0.001, n)
     r["CAND2"] = common2 * 0.8 + rng.normal(0, 0.004, n)
     r["CANDD"] = -1.0 * r["CAND"]
+    idx = idx + SESSION_OFFSETS[request.param]
     return pd.DataFrame({k: 100 * np.exp(np.cumsum(v)) for k, v in r.items()}, index=idx)
 
 
 @pytest.fixture
+def bars_ohlcv() -> pd.DataFrame:
+    """Long-form synthetic daily bars for CAND, matching `data/bars.parquet`'s
+    exact columns (symbol, timestamp, open, high, low, close, volume,
+    trade_count, vwap, dollar_vol).
+
+    10 ordinary trailing sessions, each with a plain, distinct volume /
+    trade_count so a median over them is unambiguous, followed by one more
+    session -- a stand-in for "today's" bar, carrying deliberately extreme
+    volume / trade_count. Callers whose `candidate.as_of` is that last
+    session's date get a fixture where an implementation that (incorrectly)
+    folds the as_of session into its trailing liquidity read produces a
+    visibly different median than one that correctly excludes it (D-16).
+    """
+    sessions = pd.bdate_range("2026-01-01", periods=11, tz="UTC")
+    trailing, as_of_session = sessions[:10], sessions[10]
+    volume = np.arange(1, 11) * 1_000
+    trade_count = np.arange(1, 11) * 100
+    close = np.full(10, 50.0)
+    ordinary = pd.DataFrame({
+        "symbol": "CAND",
+        "timestamp": trailing,
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "volume": volume,
+        "trade_count": trade_count,
+        "vwap": close,
+        "dollar_vol": close * volume,
+    })
+    extreme = pd.DataFrame({
+        "symbol": ["CAND"],
+        "timestamp": [as_of_session],
+        "open": [50.0],
+        "high": [50.0],
+        "low": [50.0],
+        "close": [50.0],
+        "volume": [10_000_000],
+        "trade_count": [1_000_000],
+        "vwap": [50.0],
+        "dollar_vol": [50.0 * 10_000_000],
+    })
+    return pd.concat([ordinary, extreme], ignore_index=True)
+
+
+def invoke_graph(graph, *args, **kwargs):
+    """Drive a compiled graph the way production does.
+
+    Every production caller is async -- `runner.py:132` awaits `ainvoke`,
+    `serve.py` and `capture_showcase.py` use `astream`, `daily_ingest.py`
+    wraps `ainvoke` in `asyncio.run`. Sync `.invoke()` cannot run this graph
+    at all once any node is `async def`: langgraph raises `TypeError: No
+    synchronous function provided`. `capture_trace.py`'s docstring already
+    recorded this when PHASE-5 made `retrieve_news` async; the tests below
+    were simply never converted, because `retrieve_news` is gated behind
+    `with_news=True` and they build with it off.
+
+    The two analyst nodes are not gated, so the conversion is now forced --
+    and wanted: the sync and async executors schedule differently (only the
+    async one sets `__cancel_on_exit__`), so a test on the sync path was
+    pinning behaviour production never exercises.
+    """
+    return asyncio.run(graph.ainvoke(*args, **kwargs))
+
+
+@pytest.fixture
 def run_graph(closes):
-    def _run(candidates, *, signal_universe=frozenset(), with_news=False):
+    def _run(candidates, *, signal_universe=frozenset(), with_news=False, llm=None, bars=None,
+              arango_topology=None):
         g = build_graph(with_news=with_news)
-        return g.invoke(
+        return asyncio.run(g.ainvoke(
             {"candidates": candidates},
             context=LagMatrixContext(closes=closes,
-                                      signal_universe=set(signal_universe)),
-        )
+                                      signal_universe=set(signal_universe),
+                                      llm=llm,
+                                      bars=bars,
+                                      arango_topology=arango_topology),
+        ))
     return _run
+
+
+class FakeAnalystClient:
+    """Stand-in for `AnalystClient` (adapters/llm.py's protocol), shared by the
+    quant and day-trade gather-node tests (PHASE-4/5) -- neither ever reaches
+    the network. Records every `classify()` call (`.calls`) and returns
+    `schema(**responses[key])` per key in `briefs`; a key missing from
+    `responses` falls back to `schema(**default)`, so a test only has to
+    spell out the fields that differ per candidate.
+    """
+
+    def __init__(self, responses: dict[str, dict] | None = None, default: dict | None = None):
+        self.calls: list[dict] = []
+        self._responses = responses or {}
+        self._default = default or {}
+
+    async def classify(self, briefs, schema, *, system_prompt):
+        self.calls.append(
+            {"briefs": dict(briefs), "schema": schema, "system_prompt": system_prompt}
+        )
+        return {
+            key: schema(**self._responses.get(key, self._default)) for key in briefs
+        }
+
+
+@pytest.fixture
+def fake_analyst_client():
+    """Factory fixture: hands back the `FakeAnalystClient` class itself so
+    each test constructs one with the canned `responses`/`default` it needs
+    for whichever note schema (`QuantAnalystNote`/`DayTradeAnalystNote`) it
+    is testing against."""
+    return FakeAnalystClient

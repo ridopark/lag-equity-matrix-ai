@@ -6,6 +6,7 @@ available to a future market scanner (D-23).
 
 from __future__ import annotations
 
+import numpy as np
 from langgraph.runtime import Runtime
 
 from lagmatrix.domain.models import Shock
@@ -29,7 +30,10 @@ def leader_state(state: LagMatrixState, runtime: Runtime[LagMatrixContext]) -> d
         leaders = [e.leader for e in edges_for(state, c)]
         if not leaders:
             continue
-        ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])
+        # ti - 1 is as_of's own session (the last known one) -- see the plan's
+        # "Dates: exactly what flows where". searchsorted on `.date` resolves
+        # this the same way regardless of the index's time-of-day (Q-66).
+        ti = int(np.searchsorted(sessions.date, c.as_of, side="right"))
         baseline = returns.iloc[ti - trail : ti]
         recent = returns.iloc[ti - move_win : ti]
         wanted = [*leaders, c.symbol]

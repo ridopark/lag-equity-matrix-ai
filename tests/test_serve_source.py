@@ -105,15 +105,25 @@ def test_leader_source_with_known_symbol_returns_non_empty_candidates():
     resolve to its followers once validation exists -- the fix for malformed
     input must not also break the valid case.
 
+    Uses `CXM` rather than the original `PANW`. Q-66: before that fix,
+    production's 04:00-indexed frames resolved the as-of session one position
+    early, so a query for `2026-09-04` was answered over the window ending
+    `2026-09-03` -- and PANW shocked on the 3rd, not the 4th. With the window
+    correctly ending on the as-of session itself, PANW no longer clears
+    `sigma` on this date (verified: it is absent from
+    `MarketScan.shocked_leaders(2026-09-04)` and present on 2026-09-03).
+    `CXM` shocks on the as-of date itself (z=-5.39) and has followers, so it
+    exercises the same valid-input path this test exists to guard.
+
     Falsifies if: this raises, or `cands` is empty.
     """
     require_local_file("data/bars-10y.parquet", "real long bars, vendor data")
     import serve
 
     serve.ALLOW_REAL = True
-    closes, cands, universe = serve.load("leader:PANW", None, AS_OF)
+    closes, cands, universe = serve.load("leader:CXM", None, AS_OF)
     assert len(cands) > 0
-    assert universe == frozenset({"PANW"})
+    assert universe == frozenset({"CXM"})
 
 
 def test_synthetic_must_be_an_explicitly_recognised_source_not_a_fallthrough():

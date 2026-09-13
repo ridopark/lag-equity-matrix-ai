@@ -55,7 +55,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import arango_db_or_skip
+from conftest import SESSION_OFFSETS, arango_db_or_skip, invoke_graph
 from lagmatrix.adapters.arango import ArangoTopology
 from lagmatrix.adapters.candidates import MarketScan
 from lagmatrix.domain.models import Candidate, LagEdge
@@ -200,6 +200,82 @@ def test_shocked_leaders_baseline_excludes_the_recent_window():
     pd.testing.assert_frame_equal(baseline_arg, expected_baseline)
 
 
+# --- Q-66: `ti` resolution must not depend on the index's time of day, and
+# must include the as-of session itself -----------------------------------
+#
+# `shocked_leaders` resolves `ti` with the same idiom as `graph_retriever.py`
+# and `leader_state.py`: `sessions.get_loc(sessions[sessions > str(as_of)][0])`.
+# `str(as_of)` is a bare date, compared against midnight, so on a midnight
+# index the as-of session ends up included in `recent` (`ti - 1`), and on
+# production's 04:00 index it ends up excluded. Per
+# `docs/plans/PLAN-2026-09-08-market-scan.md:183-192`, inclusion is the
+# deliberate, correct contract, so both index shapes must agree, and both
+# must include it -- exactly like the corroboration-mode nodes in
+# `test_nodes.py`, just via this class's own `shocked_leaders` seam instead.
+
+
+def _single_day_jump_fixture(rng_seed: int = 0) -> tuple[pd.DataFrame, date]:
+    """`LEADONE` is quiet noise on every session, except for one unmistakable
+    move (log-return 0.20, vs ~0.001 baseline noise) confined to a single
+    session -- the as-of session -- rather than spread across the full
+    `MOVE_WIN` window like `_shock_fixture` above. A 10-session buffer sits
+    between the `TRAIL`-session baseline and `as_of` so that shifting `ti` by
+    one session (the bug) lands on an ordinary quiet session instead of
+    tripping the `ti < move_win + trail` guard -- the effect under test is a
+    suppressed z-score, not an early return, which is the sharper, more
+    representative failure mode.
+    """
+    buffer = 10
+    n = TRAIL + buffer + MOVE_WIN + 5
+    idx = pd.bdate_range("2026-01-01", periods=n, tz="UTC")
+    rng = np.random.default_rng(rng_seed)
+    r = rng.normal(0, 0.001, n)
+    as_of_pos = TRAIL + buffer + MOVE_WIN - 1
+    r[as_of_pos] += 0.20
+    closes = pd.DataFrame({"LEADONE": 100 * np.exp(np.cumsum(r))}, index=idx)
+    as_of = idx[as_of_pos].date()
+    return closes, as_of
+
+
+def _shocked_leaders_z(base_closes: pd.DataFrame, as_of: date, offset: pd.Timedelta) -> dict:
+    shifted = base_closes.copy()
+    shifted.index = base_closes.index + offset
+    scan = MarketScan(shifted, topology=None, trail=TRAIL, move_win=MOVE_WIN, sigma=SIGMA)
+    return scan.shocked_leaders(as_of)
+
+
+def test_shocked_leaders_is_time_of_day_independent():
+    """Same `as_of`, same returns, two index shapes -- `shocked_leaders`
+    must agree.
+
+    Falsifies if: LEADONE's reported z differs between the midnight-indexed
+    and 04:00-indexed runs. Measured today: z=130.9 (midnight) vs `{}` (LEADONE
+    absent entirely on 04:00, since its actual z there is -0.89 and does not
+    clear `sigma=2.0`) -- not a rounding difference, a missed detection.
+    """
+    base_closes, as_of = _single_day_jump_fixture()
+    midnight = _shocked_leaders_z(base_closes, as_of, pd.Timedelta(0))
+    prod_0400 = _shocked_leaders_z(base_closes, as_of, pd.Timedelta(hours=4))
+    assert midnight == pytest.approx(prod_0400)
+
+
+def test_shocked_leaders_detects_a_move_confined_to_the_as_of_session():
+    """LEADONE's only move is on the as-of session, so `shocked_leaders`
+    reporting it at all is only possible when that session's return is
+    folded into the `recent` window -- on both index shapes, since the
+    as-of session is deliberately included by contract, not an artefact of
+    one index shape.
+
+    Falsifies if: LEADONE is missing from `shocked_leaders(as_of)` on either
+    offset. Measured: z=130.9 (midnight, clears `sigma=2.0`, passes) vs
+    z=-0.89 (04:00, does not clear threshold -- LEADONE dropped, fails).
+    """
+    base_closes, as_of = _single_day_jump_fixture()
+    for offset in SESSION_OFFSETS.values():
+        result = _shocked_leaders_z(base_closes, as_of, offset)
+        assert "LEADONE" in result, f"offset={offset}: LEADONE missing from shocked_leaders"
+
+
 class FakeArangoTopology:
     """Fake `ArangoTopology`-shaped adapter, mirroring `FlakyNewsIndex`'s
     fake-adapter pattern in `test_news_node.py`. Owned by this file rather
@@ -249,9 +325,19 @@ def test_candidates_emits_one_per_lagger_with_scan_origin():
     result = scan.candidates(as_of)
 
     assert result[0].origin_leader == "LEADUP"
+    # `origin_sigma` is read back from `shocked_leaders()` rather than hardcoded:
+    # a different code path from `candidates()`, so this is not circular, and it
+    # pins that the candidate carries *its claiming leader's* z rather than any z.
+    expected_z = scan.shocked_leaders(as_of)["LEADUP"]
+    assert result[0].origin_sigma == expected_z
     assert result == [
         Candidate(
-            symbol="SUP1", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
+            symbol="SUP1",
+            direction="up",
+            as_of=as_of,
+            origin="scan",
+            origin_leader="LEADUP",
+            origin_sigma=expected_z,
         )
     ]
 
@@ -342,12 +428,6 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         "LEADDOWN": [_lag_edge("LEADDOWN", "SHARED")],
     }
     reversed_edges = {"LEADDOWN": edges["LEADDOWN"], "LEADUP": edges["LEADUP"]}
-    expected = [
-        Candidate(
-            symbol="SHARED", direction="up", as_of=as_of, origin="scan", origin_leader="LEADUP"
-        )
-    ]
-
     for edge_map in (edges, reversed_edges):
         fake = FakeArangoTopology(edge_map)
         scan = MarketScan(
@@ -361,7 +441,22 @@ def test_candidates_dedups_by_larger_abs_z_leader():
         result = scan.candidates(as_of)
 
         assert result[0].origin_leader == "LEADUP"
-        assert result == expected
+        # The winning leader's own z, read from a different code path than
+        # `candidates()`. This strengthens the dedup claim: `SHARED` must carry
+        # LEADUP's z, not LEADDOWN's, so a dedup that kept the wrong leader is
+        # now caught by the value as well as by the name.
+        expected_z = scan.shocked_leaders(as_of)["LEADUP"]
+        assert result[0].origin_sigma == expected_z
+        assert result == [
+            Candidate(
+                symbol="SHARED",
+                direction="up",
+                as_of=as_of,
+                origin="scan",
+                origin_leader="LEADUP",
+                origin_sigma=expected_z,
+            )
+        ]
         assert len([c for c in result if c.symbol == "SHARED"]) == 1
 
 
@@ -611,7 +706,7 @@ def test_unioning_the_originating_leader_into_signal_universe_closes_the_reentry
     g = build_graph(with_news=False)
 
     # Without the fix, given this fixture: the hole is real.
-    hole = g.invoke(
+    hole = invoke_graph(g, 
         {"candidates": [candidate]},
         context=LagMatrixContext(closes=closes, signal_universe=set()),
     )
@@ -620,7 +715,7 @@ def test_unioning_the_originating_leader_into_signal_universe_closes_the_reentry
     assert len(hole["assessments"]) == 1
 
     # With the fix: Y joins signal_universe alongside X itself (PHASE-5).
-    fixed = g.invoke(
+    fixed = invoke_graph(g, 
         {"candidates": [candidate]},
         context=LagMatrixContext(closes=closes, signal_universe={"Y"}),
     )

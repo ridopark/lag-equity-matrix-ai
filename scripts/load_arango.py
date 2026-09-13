@@ -99,11 +99,15 @@ def ensure_collections_js(want: dict[str, int]) -> str:
 def supply_edge_docs(rows) -> list[dict]:
     """Shape `supplies_to` edges with a deterministic `_key`, so a second run
     upserts the same relationship instead of inserting a duplicate edge. Two
-    rows for the same (supplier, customer) -- e.g. a restated filing --
-    collapse to one document, keyed on the pair."""
+    rows for the same (supplier, customer, filing_date) -- e.g. the loader
+    re-reading an unchanged filing -- collapse to one document (idempotency,
+    D-97). Rows for the same pair with a different `filing_date` -- e.g. a
+    restated filing -- stay as separate documents, keyed on the triple, so
+    the point-in-time history the `as_of` traversal depends on survives
+    (D-16/D-72)."""
     docs: dict[str, dict] = {}
     for r in rows:
-        key = f"{r.supplier}->{r.customer}"
+        key = f"{r.supplier}:{r.customer}:{r.filing_date}"
         docs[key] = {
             "_key": key,
             "_from": f"equity/{r.supplier}", "_to": f"equity/{r.customer}",
@@ -114,12 +118,12 @@ def supply_edge_docs(rows) -> list[dict]:
 
 
 def comention_edge_docs(rows) -> list[dict]:
-    """Mirror of `supply_edge_docs` for `co_mentioned` edges, keyed `a~b` in
+    """Mirror of `supply_edge_docs` for `co_mentioned` edges, keyed `a:b` in
     the row's own order (the upstream query already fixes an order per row;
     re-sorting here would add a branch nothing depends on)."""
     docs: dict[str, dict] = {}
     for r in rows:
-        key = f"{r.a}~{r.b}"
+        key = f"{r.a}:{r.b}"
         docs[key] = {
             "_key": key,
             "_from": f"equity/{r.a}", "_to": f"equity/{r.b}",

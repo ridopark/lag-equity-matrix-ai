@@ -24,7 +24,10 @@ class Settings(BaseSettings):
 
     # LLM
     anthropic_api_key: str = ""
-    model: str = "claude-opus-5"
+    model: str = "claude-haiku-4-5-20251001"
+    # D-92: 44-247 movers/date sampled, mean ~121 -- 20 covers a below-average
+    # day fully and bounds a busy day's spend to a fixed ceiling.
+    max_llm_candidates: int = 20
 
     # Candidate source: "external" (score an upstream signal) or "scan"
     # (originate candidates by sweeping the universe — not yet implemented).
@@ -38,4 +41,4 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    raise NotImplementedError
+    return Settings()

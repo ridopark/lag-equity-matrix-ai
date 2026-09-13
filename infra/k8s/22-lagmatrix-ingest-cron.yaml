@@ -190,6 +190,18 @@ spec:
                 # other trading table. Deliberately not libpq's PGHOST/PGPASSWORD:
                 # those get picked up from an ambient environment silently.
                 - secretRef: {name: lagmatrix-pg}
+                # LAGMATRIX_ANTHROPIC_API_KEY for the batch analyst client.
+                # `optional: true` is load-bearing, not defensive boilerplate:
+                # without it, referencing a secret that does not yet exist
+                # leaves this container in CreateContainerConfigError and the
+                # nightly ingest simply stops running. With it, a cluster
+                # without the key degrades to `status="not_run"` analyst notes
+                # -- the same way the pipeline already degrades without
+                # ArangoDB -- and the rest of the ingest is unaffected.
+                #
+                # envFrom, not a volume mount, so D-117's fsGroup fix does not
+                # apply here; that was for the file-mounted arango-pw secret.
+                - secretRef: {name: anthropic-credentials, optional: true}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

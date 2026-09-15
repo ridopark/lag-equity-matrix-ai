@@ -94,7 +94,15 @@ PAGE = pathlib.Path(__file__).parent / "serve_index.html"
 
 ALLOW_REAL = False
 ARANGO_URL = os.environ.get("LAGMATRIX_ARANGO_URL", "http://localhost:19999")
-FANNED = {"graph_retriever", "leader_state", "vector_retriever"}
+# Every per-candidate `Send` target, plus `graph_retriever` which is the Send
+# *source*. A span only carries a candidate symbol if its node is in here, so
+# a node missing from the set draws an unlabelled bar in the timeline. This
+# drifted once already: `quant_perspective`/`day_trade_perspective` were added
+# to `builder.fan_out` and not here, and the gap was only visible in the UI.
+# `tests/test_serve_fanned.py` derives the truth from the builder and fails if
+# it drifts again.
+FANNED = {"graph_retriever", "leader_state", "vector_retriever",
+          "quant_perspective", "day_trade_perspective"}
 
 
 _ARANGO_REASON = ""

@@ -188,7 +188,15 @@ line.se{stroke:var(--line);stroke-width:1} line.se.sel{stroke:var(--graph);strok
 .emptyp{padding:1rem .8rem;color:var(--ink3);font-size:.82rem;line-height:1.6}
 .netwrap{position:relative;background:var(--void);border-bottom:1px solid var(--line2)}
 .netwrap svg{display:block;width:100%;height:340px}
-.nn{cursor:pointer}
+.ndet{display:grid;grid-template-columns:auto auto 1fr;gap:.18rem .8rem;
+  font:400 .72rem/1.5 var(--mono);margin:.5rem 0 0}
+.ndet b{color:var(--ink2);font-weight:400}
+.ndet i{color:var(--ink3);font-style:normal}
+.ndet span{color:var(--ink);white-space:pre-wrap}
+.nn{cursor:grab}
+.nn.dragging{cursor:grabbing}
+.nn.dragging circle{stroke:var(--ink2);stroke-width:2}
+.netwrap svg.nodedrag{cursor:grabbing}
 .nn circle{stroke:var(--void);stroke-width:1.5}
 .nn text{font:400 .62rem var(--mono);fill:var(--ink2);pointer-events:none}
 .nn.lead circle{stroke:var(--graph);stroke-width:2}
@@ -283,6 +291,7 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
           hidden>Assess these →</button></h3>
       <div class="nettools" id="xnettools" hidden>
         <button id="xbackbone" aria-pressed="false">backbone only</button>
+        <button id="xnetreset" hidden>reset layout</button>
         <span id="xnetmeta"></span>
       </div>
       <div class="netwrap" id="xnetwrap" hidden><svg id="xnet" role="img"
@@ -431,6 +440,9 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
      aria-label="task spans"></svg></div>
   <div class="ck" id="ckpts"></div>
   <p class="note" id="cknote">Checkpoints appear here as the run saves them.</p>
+  <div class="ndet" id="ndet" hidden></div>
+  <p class="note" id="ndetnote" hidden>What each node actually computed, as it reported it. The
+    server has always sent these; until now the page dropped them on the floor.</p>
 </section>
 
 <hr>
@@ -635,7 +647,7 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let es = null, SPANS = [], CKPTS = [], LANES = [], INTERRUPT = null;
+let es = null, SPANS = [], CKPTS = [], LANES = [], INTERRUPT = null, NDET = [];
 let tick = null, runStart = 0, stage = "", SCAN = null;
 function beat(){
   const s = ((Date.now() - runStart) / 1000).toFixed(1);
@@ -977,6 +989,7 @@ $("#src").addEventListener("change", () => {
 $("#go").addEventListener("click", () => {
   if (es) es.close();
   SPANS = []; CKPTS = []; LANES = []; INTERRUPT = null; SCAN = null;
+  NDET = []; $("#ndet").hidden = true; $("#ndetnote").hidden = true;
   Object.keys(state).forEach(k => delete state[k]);
   ZOOM.topo?.fit();
   drawTopo(); drawSpans();
@@ -1014,6 +1027,18 @@ $("#go").addEventListener("click", () => {
     if (s.node === "graph_retriever" && s.key && !LANES.includes(s.key)) LANES.push(s.key);
     state[s.key ? `${s.node}|${s.key}` : s.node] = "done";
     drawTopo(); drawSpans();
+  });
+  /* The `event` kind carries each node's own one-line summary of what it
+     computed -- neighbour counts, shocks, and (since the relatedness work) the
+     quant read: "20 edges, 90% sector match, 2 strong/0 weak co-mentions".
+     The server has emitted these since the beginning; the page listened for
+     six of the seven kinds and silently dropped this one, so the summaries
+     reached `capture_trace.py`'s JSON and never the screen. */
+  es.addEventListener("event", ev => {
+    const d = JSON.parse(ev.data);
+    if (!d.detail) return;              // most nodes report nothing useful
+    NDET.push(d);
+    drawNdet();
   });
   es.addEventListener("checkpoint", ev => { CKPTS.push(JSON.parse(ev.data)); });
   es.addEventListener("interrupt", ev => {
@@ -1170,7 +1195,7 @@ $("#xrun").addEventListener("click", () => {
    Layout is Fruchterman-Reingold: repulsion between every pair, attraction along
    edges weighted by |corr|, so distance carries meaning rather than decoration.
    The leader is pinned at the centre. */
-let NET = null, NETSEL = null, NETBACKBONE = false;
+let NET = null, NETSEL = null, NETBACKBONE = false, NETMOVED = false;
 
 function netLayout(nodes, edges, w, h, iters = 260) {
   /* Radial-hybrid, not a plain force layout. Distance from the centre is set
@@ -1243,7 +1268,8 @@ function drawNet() {
     if (!a || !b) return;
     const lit = NETSEL && (e.a === NETSEL || e.b === NETSEL);
     const col = e.corr < 0 ? "var(--bad)" : "var(--graph)";
-    out += `<line class="ne" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
+    out += `<line class="ne${e.backbone ? " bb" : ""}" data-a="${esc(e.a)}" data-b="${esc(e.b)}"
+      x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}"
       x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${col}"
       stroke-width="${(Math.abs(e.corr) * 2.4).toFixed(2)}"
       opacity="${NETSEL ? (lit ? 0.85 : 0.07) : (e.backbone ? 0.42 : 0.13)}"></line>`;
@@ -1268,14 +1294,121 @@ function drawNet() {
       <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}"
         fill="${fill}" opacity="${NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9}"></circle>
       <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}"
-        text-anchor="${anchor}">${esc(n.symbol)}</text></g>`;
+        text-anchor="${anchor}">${esc(n.symbol)}</text>
+      <title>${esc(n.symbol)}${n.leader ? " — the leader"
+        : ` — correlation ${(n.corr || 0).toFixed(3)} with ${esc(NET.leader || "")}`}</title></g>`;
   });
   svg.innerHTML = out;
-  svg.querySelectorAll(".nn").forEach(g =>
-    g.addEventListener("click", () => {
-      NETSEL = NETSEL === g.dataset.sym ? null : g.dataset.sym;
-      drawNet(); netNote();
-    }));
+  bindNet(svg);
+  $("#xnetreset").hidden = !NETMOVED;
+}
+
+/* Node-level interaction. Pan/zoom already lives on the <svg> (makeZoomable);
+   these handlers stopPropagation so grabbing a node moves the node and
+   grabbing the canvas still moves the view.
+
+   Dragging deliberately does NOT re-run the layout. `netLayout` sets each
+   node's distance from the centre *exactly* by its correlation to the leader,
+   so a free force settle would throw that encoding away -- which is why this
+   diagram was never a plain force graph. Moving a node by hand breaks the
+   encoding for that one node on purpose, as an exploration gesture, and
+   `reset layout` puts it back. */
+function bindNet(svg) {
+  const by = {}; NET.nodes.forEach(n => by[n.symbol] = n);
+
+  // pointer -> viewBox coords, read live so a mid-drag zoom stays correct
+  const at = e => {
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    return {x: vb.x + (e.clientX - r.left) / r.width * vb.width,
+            y: vb.y + (e.clientY - r.top) / r.height * vb.height};
+  };
+
+  const moveNode = sym => {
+    const n = by[sym];
+    const g = svg.querySelector(`.nn[data-sym="${CSS.escape(sym)}"]`);
+    if (!n || !g) return;
+    const c = g.querySelector("circle"), t = g.querySelector("text");
+    c.setAttribute("cx", n.x.toFixed(1)); c.setAttribute("cy", n.y.toFixed(1));
+    const r = parseFloat(c.getAttribute("r"));
+    const ux = n.leader ? 0 : Math.cos(n.ang), uy = n.leader ? 1 : Math.sin(n.ang);
+    const pad = r + (n.leader ? 16 : 11);
+    t.setAttribute("x", (n.x + ux * pad).toFixed(1));
+    t.setAttribute("y", (n.y + uy * pad + 3.4).toFixed(1));
+    t.setAttribute("text-anchor", n.leader ? "middle"
+      : (ux > 0.30 ? "start" : (ux < -0.30 ? "end" : "middle")));
+    svg.querySelectorAll(`.ne[data-a="${CSS.escape(sym)}"]`).forEach(l => {
+      l.setAttribute("x1", n.x.toFixed(1)); l.setAttribute("y1", n.y.toFixed(1)); });
+    svg.querySelectorAll(`.ne[data-b="${CSS.escape(sym)}"]`).forEach(l => {
+      l.setAttribute("x2", n.x.toFixed(1)); l.setAttribute("y2", n.y.toFixed(1)); });
+  };
+
+  svg.querySelectorAll(".nn").forEach(g => {
+    const sym = g.dataset.sym;
+    let nd = null;
+
+    g.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      e.stopPropagation();               // do not start a canvas pan
+      const p = at(e);
+      const n = by[sym];
+      nd = {dx: n.x - p.x, dy: n.y - p.y, moved: false};
+      g.classList.add("dragging"); svg.classList.add("nodedrag");
+      try { g.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    });
+
+    g.addEventListener("pointermove", e => {
+      if (!nd) return;
+      const p = at(e), n = by[sym];
+      if (!nd.moved && Math.hypot(p.x + nd.dx - n.x, p.y + nd.dy - n.y) < 2) return;
+      nd.moved = true; NETMOVED = true;
+      n.x = p.x + nd.dx; n.y = p.y + nd.dy;
+      // keep the label radiating outward from the centre it was placed around
+      const vb = svg.viewBox.baseVal;
+      n.ang = Math.atan2(n.y - vb.height / 2, n.x - vb.width / 2);
+      moveNode(sym);
+      $("#xnetreset").hidden = false;
+    });
+
+    const stop = e => {
+      if (!nd) return;
+      try {
+        if (g.hasPointerCapture?.(e.pointerId)) g.releasePointerCapture(e.pointerId);
+      } catch { /* already released */ }
+      // a drag must not also register as a select
+      const wasDrag = nd.moved;
+      nd = null; g.classList.remove("dragging"); svg.classList.remove("nodedrag");
+      if (!wasDrag) {
+        NETSEL = NETSEL === sym ? null : sym;
+        drawNet(); netNote();
+      }
+    };
+    g.addEventListener("pointerup", stop);
+    g.addEventListener("pointercancel", stop);
+
+    // hover emphasis, opacity only -- no relayout, no rebuild
+    g.addEventListener("pointerenter", () => {
+      if (nd || NETSEL) return;
+      svg.querySelectorAll(".ne").forEach(l => {
+        const on = l.dataset.a === sym || l.dataset.b === sym;
+        l.setAttribute("opacity", on ? 0.85 : 0.05);
+      });
+    });
+    g.addEventListener("pointerleave", () => {
+      if (nd || NETSEL) return;
+      svg.querySelectorAll(".ne").forEach(l => l.setAttribute("opacity",
+        l.classList.contains("bb") ? 0.42 : 0.13));
+    });
+  });
+}
+
+/* One row per node report. Ordered by arrival, which is the order the nodes
+   actually fired -- the same property the span chart exists to show. */
+function drawNdet() {
+  const el = $("#ndet");
+  el.innerHTML = NDET.map(d =>
+    `<b>${esc(d.node)}</b><i>${esc(d.key || "")}</i><span>${esc(d.detail)}</span>`).join("");
+  el.hidden = NDET.length === 0;
+  $("#ndetnote").hidden = NDET.length === 0;
 }
 
 function netNote() {
@@ -1305,6 +1438,17 @@ function netNote() {
 $("#xbackbone").addEventListener("click", () => {
   NETBACKBONE = !NETBACKBONE;
   $("#xbackbone").setAttribute("aria-pressed", String(NETBACKBONE));
+  drawNet();
+});
+
+/* Re-runs the layout, restoring "distance from the centre == correlation to
+   the leader". Only meaningful once a node has been dragged, so the control
+   stays hidden until then. */
+$("#xnetreset").addEventListener("click", () => {
+  if (!NET) return;
+  const svg = $("#xnet");
+  netLayout(NET.nodes, NET.edges, svg.clientWidth || 560, 340);
+  NETMOVED = false;
   drawNet();
 });
 

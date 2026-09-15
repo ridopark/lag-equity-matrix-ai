@@ -529,6 +529,35 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
 <hr>
 
 <section>
+  <p class="eyebrow">What does work</p>
+  <h2>We stopped asking "what happens next" and asked "will this last"</h2>
+  <p class="sub">Every test above asks whether one company's move predicts another's tomorrow.
+    The answer is consistently no. So we asked a smaller question instead — <b>when two companies
+    have moved together for years, will they still be moving together later?</b> — and that one
+    has an answer.</p>
+  <p class="note"><b>Same industry is the strongest broad clue.</b> We tagged every company with
+    its official SEC industry code — available free, for <b>2,180 of our 2,183</b> companies. Pairs
+    in the same broad industry kept moving together <b>67% of the time</b>; pairs in different
+    industries, <b>44%</b>. That gap held on three separate slices of the data.
+    Counter-intuitively, <em>narrower</em> industry codes work worse, because they split genuinely
+    related companies apart — a chipmaker and a computer maker land in different buckets.</p>
+  <p class="note"><b>Companies the press names together is the strongest clue of all — and almost
+    never available.</b> Among pairs that appear together in news often enough to be unlikely
+    chance, how <em>strongly</em> they are linked ranks durability better than anything else we
+    measured. But it applies to <b>58 pairs out of 6,803</b>. It is a sharp flag on rare
+    occasions, not something you can rank a list with. Worth knowing: <em>merely</em> being
+    mentioned together is a <b>bad</b> sign — those pairs lasted 24% of the time against 54%.
+    Incidental news coverage marks a link the news manufactured; a strong one marks companies
+    that are actually connected.</p>
+  <p class="note"><b>What this is not.</b> None of this says which way a price will go, or by how
+    much. It ranks how likely a relationship is to still be there later, which is useful for
+    deciding what deserves a human's attention. It is not a trading signal and nothing on this
+    page is.</p>
+</section>
+
+<hr>
+
+<section>
   <p class="eyebrow">Honest labelling</p>
   <h2>What went wrong, and what didn't work</h2>
   <p class="sub">Two things worth saying plainly, because a demo that only shows its good side is
@@ -572,6 +601,18 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
     <span style="color:var(--ink3)">(b = &minus;0.0015 against a pre-registered threshold of
     0.02, I&sup2; = 44%, re-run on the cleaned graph rather than inherited from the dirty
     one.)</span></p>
+  <p class="note" style="margin-top:.6rem"><b>And we asked an AI model, which lost to sorting a
+    column.</b> Two Claude nodes read the same evidence and judge which pairs will last. Ranked
+    against simply sorting by one number we already compute, the model scored <b>0.62</b> to the
+    sort's <b>0.70</b> — where 0.50 is a coin flip. Then we gave it <em>more</em> information:
+    finer stability windows, how concentrated the co-movement was, company size, industry, news
+    links. It got <b>worse</b>. The information was genuinely there — the same features raised the
+    arithmetic score — the model just did not use it. So "give it more context" was the obvious
+    fix and it is now ruled out rather than assumed. Two of the numbers we had been feeding it
+    turned out to carry <em>no information at all</em>: one was the same on every pair, the other
+    was a rearrangement of a number already shown. The nodes stay because the model's written
+    explanations are genuinely easier to read than a table — but nothing it says touches the
+    verdict.</p>
   <p class="note"><b>And one honest limitation about the graph itself.</b> A supply link has a
     <em>direction</em> (the supplier names its customer, not the other way round) and a
     <em>date</em> (we know when it was disclosed) — but after the cleanup above, it is only ever

@@ -5121,6 +5121,51 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   was wrong. 518 passed, 1 skipped, ruff clean.
 - **Status:** Accepted.
 
+### D-145 — Deployed 3976be7; and the nightly ingest never ran the assessment graph
+
+- **When:** 2026-09-15T02:55:00-05:00
+- **Decision:** `infra/k8s/21-lagmatrix-web.yaml` and `22-lagmatrix-ingest-cron.yaml`
+  move off `:589bf03` onto
+  `:3976be7c73d65072b94d8e30c69c160b16f618fd`, applied to the cluster. Web pod
+  rolled (Recreate, replicas 1) and is healthy; the CronJob picks it up at its
+  next fire.
+- **Why:** I twice told the owner that merging would put the new code on the box
+  "on the next scheduled run". **That was wrong.** The manifests pin a SHA with
+  `imagePullPolicy: IfNotPresent`, deliberately —
+  `22-lagmatrix-ingest-cron.yaml:165` says so: *"Pinned to a SHA, not `:latest`.
+  With `:latest` and `imagePullPolicy: Always`, what runs tonight is whatever
+  was pushed last, and rolling back means retagging rather than naming a
+  known-good build."* A successful `build-images` publishes an image; it does
+  not deploy one. Deploying needs this commit.
+- **A tag-format trap worth recording:** the manifests pinned a **7-character**
+  tag (`589bf03`), but `build-images.yml:83` publishes `${{ github.sha }}` — the
+  **full 40 characters**. Only full-SHA tags (plus `latest`) exist in ghcr today.
+  Pinning `3976be7` would have produced `ImagePullBackOff` and **no ingest at
+  all**, silently, at 09:00Z. Caught by listing the actual tags before editing
+  rather than pattern-matching the existing pin.
+- **The correction that matters more, and it narrows what this deploy buys:**
+  I predicted the next ingest would show candidate counts and
+  `effective_evidence` move under D-141. It will not. `scripts/daily_ingest.py`
+  builds its own chain — `extract_fires -> bars -> long_bars -> comovement ->
+  news -> vectors` — and **never calls `build_graph()`**. It computes no
+  candidates, no assessments, no `effective_evidence`. Its `comovement` node
+  uses `comovement_edges`/`upsert_comovement`, and `comovement.py` already
+  resolved `as_of` by `.date()` comparison, so Q-66 never touched it either.
+  **The ingest output should be materially unchanged by this deploy.**
+- **Where today's work actually becomes visible: the web pod.** D-137/D-139 ship
+  the relatedness fields and `detail()`'s `quant_perspective` branch, so the live
+  scan renders e.g. `20 edges, 90% sector match, 2 strong/0 weak co-mentions`.
+  That is the observable change, and it is in the UI, not the nightly job.
+  D-143's `bulk()` merge matters when `load_arango.py` is run by hand, which the
+  nightly does not do.
+- **Outcome:** observed. Web pod `lagmatrix-web-55fc5f5786-kp2r2` Running 1/1 on
+  the new image, `/health` returns `{"status": "ok"}`. CronJob template updated;
+  next fire 2026-09-15T09:00Z (schedule `0 9 * * 2-6`). Baseline captured from
+  the last old-code run (2026-09-12) for comparison: 24,006 co-movement edges as
+  of 2026-09-11, `bars-10y` 4,740,987 rows / 2,183 symbols, 80,792 articles
+  indexed.
+- **Status:** Accepted.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

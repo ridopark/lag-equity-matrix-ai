@@ -69,7 +69,7 @@ spec:
         # gives this pod the same allow/except shape, so arangodb:8529 is still
         # a valid ALLOWED target and the LAN :6443 still a valid DENIED one.
         - name: await-netpol
-          image: ghcr.io/ridopark/lag-equity-matrix-ai:3976be7c73d65072b94d8e30c69c160b16f618fd
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:4ddf47f9f34dae7d5473ef56ef87929bcad13dd4
           imagePullPolicy: IfNotPresent
           command: ["python", "-c"]
           args:
@@ -112,7 +112,7 @@ spec:
         # so the committed data/excluded-etfs.csv would be invisible —
         # neighbourhood() reads it. Same fix as the ingest CronJob.
         - name: seed-reference-data
-          image: ghcr.io/ridopark/lag-equity-matrix-ai:3976be7c73d65072b94d8e30c69c160b16f618fd
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:4ddf47f9f34dae7d5473ef56ef87929bcad13dd4
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "cp -f /app/data/excluded-etfs.csv /seed/excluded-etfs.csv"]
           securityContext:
@@ -123,7 +123,7 @@ spec:
             - {name: data, mountPath: /seed}
       containers:
         - name: web
-          image: ghcr.io/ridopark/lag-equity-matrix-ai:3976be7c73d65072b94d8e30c69c160b16f618fd
+          image: ghcr.io/ridopark/lag-equity-matrix-ai:4ddf47f9f34dae7d5473ef56ef87929bcad13dd4
           imagePullPolicy: IfNotPresent
           # --host 0.0.0.0 is required: serve.py defaults to 127.0.0.1, which
           # would leave the Service unable to reach the pod at all.

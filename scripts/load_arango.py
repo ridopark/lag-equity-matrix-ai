@@ -69,12 +69,22 @@ def ensure_db() -> None:
               database="_system")
 
 
+def bulk_js(collection: str, docs: list[dict]) -> str:
+    """JS that merges `docs` onto `collection`, `overwriteMode:"update"` --
+    never `_drop`, never `overwriteMode:"replace"` (D-97, Q-63). `equity` is
+    co-owned with `load_sectors.py` (D-137), which separately upserts
+    `sic`/`sic_desc` onto it; a full-document replace here sends only
+    `{_key, symbol}` (this script's own `equity` payload) and would silently
+    strip those fields on every re-run -- the same class of accident that
+    already destroyed 47,640 embeddings once (D-97)."""
+    return f'db.{collection}.insert({json.dumps(docs)}, {{overwriteMode:"update"}});\n'
+
+
 def bulk(collection: str, docs: list[dict], chunk: int = 2000) -> None:
     """Insert in chunks. arangosh reads the payload from stdin, so the whole
     batch travels in one ssh round trip rather than one per document."""
     for i in range(0, len(docs), chunk):
-        part = json.dumps(docs[i:i + chunk])
-        arango_js(f'db.{collection}.insert({part}, {{overwriteMode:"replace"}});\n')
+        arango_js(bulk_js(collection, docs[i:i + chunk]))
 
 
 def ensure_collections_js(want: dict[str, int]) -> str:

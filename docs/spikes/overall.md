@@ -5164,6 +5164,14 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   the last old-code run (2026-09-12) for comparison: 24,006 co-movement edges as
   of 2026-09-11, `bars-10y` 4,740,987 rows / 2,183 symbols, 80,792 articles
   indexed.
+- **Second deploy, 2026-09-15T03:05:** bumped again to
+  `:4ddf47f9f34dae7d5473ef56ef87929bcad13dd4` to carry the README and
+  `serve_index.html` updates. Web pod `lagmatrix-web-5d98669588-7g9hf` rolled
+  and verified by fetching the page **from inside the pod** — all four content
+  probes present (`will this last`, `2,180 of our 2,183`, `lost to sorting`,
+  `58 pairs out of 6,803`). Confirms the deploy pattern this entry documents:
+  the local server picks up `serve_index.html` per request, the cluster needs a
+  build plus a manifest bump.
 - **Status:** Accepted.
 
 ## Open Questions

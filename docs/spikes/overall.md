@@ -5085,6 +5085,42 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   co-owned and not this hazard.
 - **Status:** Accepted. Q-63 closed.
 
+### D-144 — The resume test asserted a scheduling outcome for the third time
+
+- **When:** 2026-09-15T02:40:00-05:00
+- **Decision:** `test_a_failed_run_resumes_and_re_runs_the_whole_superstep`'s
+  final assertion changes from the constant
+  `sorted(calls) == ["CAND", "CAND2", "CANDD"]` to the relationship **"resume
+  re-runs exactly the branches whose writes the failed superstep discarded"**,
+  derived from the post-failure state the test already captures.
+- **Why:** PR #8's CI failed on **x86_64 and passed on aarch64 at the same
+  commit** — `['CAND2', 'CANDD'] != ['CAND', 'CAND2', 'CANDD']`. CAND was not
+  re-run because its write had survived the cancelled superstep, so there was
+  nothing to redo. That is the **same cancellation race** the test's own
+  comments already document for its two neighbouring assertions (`len(calls) ==
+  3`, and `leader_shocks == {}`), reached a third time one step later. D-131
+  renamed this test around the finding that resume re-runs the *whole*
+  superstep; that finding holds only when nothing survived, which is common but
+  not guaranteed.
+- **A correction to the existing comment, which this disproves:** it asserts
+  *"x86_64 discards every sibling's writes; aarch64 committed CAND's."* CI now
+  shows the **opposite** pairing. The split is **scheduling, not architecture** —
+  attributing it to named platforms was over-reading a single observation, and
+  the comment is corrected in place rather than left to mislead.
+- **Why not "flaky, re-run CI":** it reproduced 0 times in 20 local runs (12 on
+  the branch, 8 at `origin/main`), so a re-run would have gone green and taught
+  nothing. The two commits under test (D-142, D-143) touch a script, docs, and
+  `load_arango.py`'s `bulk()` — nothing importable by `test_checkpointing.py`
+  and nothing that can reach graph scheduling. They perturbed process timing,
+  they did not cause this. Declaring it flaky and retrying is the laundering
+  this repo's own comments exist to prevent.
+- **Outcome:** observed. The corrected assertion is **not weaker**: instrumented
+  locally it compares `discarded=['CAND','CAND2','CANDD']` against
+  `calls=['CAND','CAND2','CANDD']` — identical content to the constant it
+  replaces, because locally nothing survives. It differs only where the constant
+  was wrong. 518 passed, 1 skipped, ruff clean.
+- **Status:** Accepted.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |

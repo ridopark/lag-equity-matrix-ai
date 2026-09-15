@@ -25,9 +25,11 @@ Over 102 real signals across 24 tickers:
 | contradicted | 16 |
 | no_assessment | 3 |
 
-**The premise does not hold.** Three different ways of defining "related
-company" were built and tested. None predicts returns at the horizons this
-signal feed trades.
+**The premise does not hold.** Four different ways of defining "related
+company" were built and tested. **None predicts returns** at the horizons this
+signal feed trades. Two of them do predict something else — whether a measured
+correlation *persists* — which is a weaker claim and is kept carefully separate
+below.
 
 ### 1. Correlation — the shipped edge
 
@@ -44,7 +46,7 @@ cannot select neighbours by "moves together" and then be surprised they move
 together. It also selects funds — 78% of neighbourhood slots were index ETFs
 holding the candidate, until D-62 excluded them.
 
-### 2. News co-mention — tested, bounded
+### 2. News co-mention — a bounded null, and a conditional signal
 
 229,737 Benzinga articles (2014→2026) in Postgres. Two corrections were needed
 before the edge meant anything: 2.1% of articles tag more than 20 symbols and
@@ -63,7 +65,28 @@ forces a noisy single stock as the dependent variable and a quiet portfolio as
 the regressor. So this bounds a **large** effect and cannot resolve a tradeable
 one — "no large effect", never "no effect".
 
-### 3. Supply chain from EDGAR — directed, and the cleanest null
+**Later, asked a different question, it became the strongest signal measured
+anywhere in this project** (D-136). Not "does co-mention predict returns" — that
+is the bounded null above — but "does a correlation that already exists
+*persist*". Two effects, opposite signs, which is why an unconditional average
+of the column reported 0.4803 and looked like nothing:
+
+| conditional test | result |
+|---|---|
+| **having** a co-mention edge | 24.1% retained vs 53.7%, **−29.6pp**, CI [−40.2, −17.9] |
+| **higher PMI** among edged pairs | **AUC 0.7451**, CI [0.6105, 0.8636] |
+
+Found on the 0.4–0.5 correlation band and then replicated on three bands not
+used to find it (0.3–0.4 AUC 0.7870; 0.5–0.6 0.7051; 0.5–1.01 0.6837) — every CI
+excludes 0.5, every edge delta negative. The mechanism is coherent and was not
+assumed in advance: incidental co-mention marks a correlation the news
+manufactured, which decays; high PMI marks companies the press names together
+because they are genuinely linked, and that linkage persists.
+
+The catch is coverage, and it is severe: **58 of 6,803 band pairs (0.9%)**. It is
+a high-precision flag, not a ranker.
+
+### 3. Supply chain from EDGAR — directed, clean, and almost never present
 
 1,211 customer relations extracted from 5,880 10-K filings, 2018→2026,
 point-in-time by filing date. The first **directed** edge in the project: QRVO
@@ -93,6 +116,94 @@ statement is that these numbers describe a graph that no longer exists (Q-35).
 A 1% customer move implies +0.5 bp on its suppliers. Unlike the correlation
 nulls, this one is *stable* — no regime dependence, no specification
 sensitivity. Still underpowered: MDE 0.0337 against a declared 0.02 threshold.
+
+**As stored, the graph holds 410 edges over 130 distinct pairs** (D-138) — one
+document per `(supplier, customer, filing_date)`, so the same relationship
+restated across eight years of filings is eight dated edges, which is what makes
+the point-in-time traversal work. It was 818 until a deduplication found that
+408 were redundant copies of the same triple; the fix had to key on the triple
+rather than the pair, because keying on the pair collapses 2018–2026 into one
+document and silently breaks every `as_of` query. Where copies disagreed,
+non-null `pct_revenue` wins — that rule recovered a real disclosed percentage on
+**58 triples** where an arbitrary pick would have kept a null.
+
+For the reach that matters here: only **7 of 6,803** correlation-band pairs have
+a supply edge at all. The graph is clean and directed; it is also almost never
+the reason two names move together.
+
+### 4. Sector from SEC SIC — the one with coverage
+
+The three definitions above are each either weak or rare. Sector is neither.
+`sic` and `sicDescription` come from the same SEC endpoints the filings pipeline
+already uses, resolved for **2,180 of 2,183** universe symbols (99.9%).
+
+| grouping | retention lift, band 0.4–0.5 | pair coverage |
+|---|---|---|
+| same 4-digit SIC | +12.1pp | 19.3% |
+| same 3-digit group | +17.5pp | 29.2% |
+| **same 2-digit major group** | **+23.1pp**, CI [+20.4, +25.0] | **98.8%** |
+
+Finer groupings are *worse*, which is the useful part: narrow codes split
+genuinely related companies apart. Replicated at +28.4pp (0.3–0.4) and +29.6pp
+(0.5–1.01). It is also not redundant with the price-derived features — adding it
+to the full deterministic set lifts held-out AUC **0.7251 → 0.7455**.
+
+The obvious objection is lookahead: SEC exposes only a company's *current* SIC,
+so this joins today's label onto historical pairs. **Measured rather than
+assumed** (D-142), using the Financial Statement Data Sets, which publish
+`(cik, sic, filed)` per quarter: 96.72% of symbols carry the same 2-digit code
+as in 2018, and the bias on the headline number is **−0.38pp** — an order of
+magnitude inside the CI, and *negative*. Today's labels understate the effect,
+because reclassification mostly breaks a match that genuinely held. No
+point-in-time pipeline was built; a commercial sector feed would have cost money
+to correct a third of a percentage point in the safe direction.
+
+### A different question, which turned out answerable
+
+Sections 1–3 all ask *does this predict returns*, and the answer is no. Sections
+2 and 4 above quietly ask something else — **will a correlation I already
+measured still be there later?** — and that one has a signal.
+
+Scored on held-out pairs, 0.4–0.5 band, train/test disjoint:
+
+| ranker | held-out AUC |
+|---|---|
+| discovery correlation alone | 0.6256 |
+| weaker of two halves | 0.6654 |
+| median of four quarter-windows | 0.6958 |
+| **all deterministic features combined** | **0.7301** |
+
+This is not a return forecast and must not be read as one. It ranks *durability
+of a measured relationship*, which is useful for deciding what to put in front of
+a human, and says nothing about direction or magnitude of any future move.
+
+### The LLM analysts lose to `sorted()`
+
+Two Claude nodes read the deterministic perspectives and judge the same
+replication question. They were built, measured against the number they were
+given, and **they lose**:
+
+| arm | held-out AUC |
+|---|---|
+| Haiku, minimal brief | 0.5588 |
+| Haiku, + population base rates | 0.6484 |
+| Haiku, + 7 enriched fields (quarters, concentration, liquidity, relatedness) | **0.6216** |
+| deterministic median-quarter sort | **0.7043** |
+
+The third row is the finding. Given *more* evidence — the same features that
+lift the deterministic ranker to 0.7301 — the model got **worse**, and the
+deficit against sorting became statistically established (CI [+0.0383, +0.1455])
+where it had previously straddled zero. The information was present; the sort
+used it and the model did not. So "give it more context" is not the lever, and
+it was the most plausible one.
+
+Two fields in the original brief were measured to carry **zero** information: a
+session count that is the same constant on every pair, and a Fisher CI width
+that is a deterministic function of the correlation already shown.
+
+The nodes remain wired because the *writing* is worth something — a calibrated
+note is readable in a way a column of AUCs is not — but nothing in the verdict
+path consults them.
 
 ### Why the negative results are the deliverable
 
@@ -137,10 +248,13 @@ more patience do not move any of them.
 ```
 START -(Send, one branch per candidate)-> graph_retriever -+-> (no neighbourhood) -> END
                                                            |
-                                       leader_state -------+
-                                       vector_retriever ---+-> context_fusion
-                                                                    |
-                                            assessor -> review -> publisher -> END
+                      leader_state ───────────────┐        |
+                      vector_retriever ───────────┴-> context_fusion ──┐
+                                                                       |
+                      quant_perspective ──> quant_analyst ─────────────┤
+                      day_trade_perspective ──> day_trade_analyst ─────┤
+                                                                       |
+                                          assessor -> review -> publisher -> END
 ```
 
 Candidates fan out via `Send`, one branch each, into candidate-keyed state
@@ -160,6 +274,8 @@ neighbours to another; keying the channels is what fixed it.
 | `RetryPolicy` + `timeout` | `vector_retriever` | news failures halt and resume, not degrade (D-47) |
 | `interrupt()` | `review`, a separate pure node | opt-in halt on `contradicted` (D-48) |
 | `CachePolicy` | `graph_retriever` | **measured at zero hits** (D-46) — kept, but it earns nothing at this cadence |
+| gather nodes | `quant_analyst`, `day_trade_analyst` | one batched LLM call per superstep instead of one per candidate |
+| `async` executor throughout | every test, via `conftest.invoke_graph` | an async node cannot run under sync `.invoke()`; the tests had been measuring an executor production never uses (D-131) |
 
 That last row is the point of the table. It stayed in because removing it is a
 behaviour change that wants its own test, not because it helps.
@@ -181,6 +297,15 @@ behaviour change that wants its own test, not because it helps.
 4. **Verdict** — `corroborated` / `contradicted` / `neutral`, plus
    `no_assessment` when no neighbourhood was reachable. Deterministic; no LLM
    in this path.
+
+The quant and day-trade perspectives — including sector match and the
+three-state co-mention encoding — are computed for every candidate and surfaced
+in the live view, but **`assess()` does not read them**. That is deliberate:
+their measured effect is on *multi-year replication of a decade-long
+correlation*, while `assess()` asks whether neighbours moved on one date over a
+60-session window. Those are different quantities, and wiring the first into the
+second as though they were the same is exactly the overclaiming D-34 exists to
+prevent.
 
 ## The live view
 
@@ -204,6 +329,12 @@ One detail it makes visible: `graph_retriever` fires six times but `leader_state
 only five. SYNF has too little history for a 60-session window, so its branch
 routes straight to `END` — the conditional edge shows up in the event stream, not
 just the source.
+
+`quant_perspective` reports its deterministic read inline, e.g.
+`20 edges, 90% sector match, 2 strong/0 weak co-mentions`. Two states that must
+not be confused are rendered differently: **`relatedness not measured`** (no
+graph connection) is not the same as a measured zero, and collapsing them is the
+mistake that made co-mention look worthless for an hour (D-135 → D-136).
 
 `scripts/capture_trace.py --synthetic` writes the same run to
 `docs/trace-synthetic.json` if you want it as a static artefact instead.
@@ -370,6 +501,13 @@ rest needs your own Alpaca credentials and your own signal source —
 | `horizon_ladder.py` | decay profile with block-clustered errors (D-66) |
 | `intraday_lag.py` | minute-resolution cross-correlation (D-59, D-60) |
 | `seed_arango.py` | bootstrap for the graph store that is not yet built |
+| `load_arango.py` | load equity/supply/co-mention into ArangoDB; merges, never replaces (D-143) |
+| `load_sectors.py` | upsert SEC SIC onto `equity` vertices, re-runnable (D-137) |
+| `reconcile_supply_edges.py` | one-time `supplies_to` dedupe by dated triple (D-138, `--apply`) |
+| `measure_pmi_threshold.py` | the weak/strong co-mention cutoff, from a band D-136 did not use |
+| `measure_sic_drift.py` | bounds the SIC lookahead against point-in-time filings (D-142, `--quarter`) |
+| `experiment_quant_perspective.py` | arm A: does split-half agreement predict replication |
+| `experiment_arm_b.py` / `_b2.py` / `_b3.py` | arms B/B2/B3: the LLM against the sort (D-133, D-134, D-135) |
 
 ## Research & decisions
 

@@ -197,6 +197,7 @@ line.se{stroke:var(--line);stroke-width:1} line.se.sel{stroke:var(--graph);strok
 .nn.dragging{cursor:grabbing}
 .nn.dragging circle{stroke:var(--ink2);stroke-width:2}
 .netwrap svg.nodedrag{cursor:grabbing}
+.netwrap svg.rotating{cursor:grabbing}
 .nn circle{stroke:var(--void);stroke-width:1.5}
 .nn text{font:400 .62rem var(--mono);fill:var(--ink2);pointer-events:none}
 .nn.lead circle{stroke:var(--graph);stroke-width:2}
@@ -291,10 +292,12 @@ footer{margin-top:2.8rem;padding-top:1.2rem;border-top:1px solid var(--line2);
           hidden>Assess these →</button></h3>
       <div class="nettools" id="xnettools" hidden>
         <button id="xbackbone" aria-pressed="false">backbone only</button>
+        <button id="xnet3d" aria-pressed="true">3D</button>
+        <button id="xnetfit" title="zoom to fit (or press 0)">fit</button>
         <button id="xnetreset" hidden>reset layout</button>
         <span id="xnetmeta"></span>
       </div>
-      <div class="netwrap" id="xnetwrap" hidden><svg id="xnet" role="img"
+      <div class="netwrap" id="xnetwrap" hidden><svg id="xnet" role="img" tabindex="0"
         aria-label="co-movement network around the selected leader"></svg></div>
       <p class="netnote" id="xnetnote" hidden></p>
       <div class="fl" id="xfollowers">
@@ -1196,6 +1199,8 @@ $("#xrun").addEventListener("click", () => {
    edges weighted by |corr|, so distance carries meaning rather than decoration.
    The leader is pinned at the centre. */
 let NET = null, NETSEL = null, NETBACKBONE = false, NETMOVED = false;
+let NET3D = true, ROT = {yaw: 0.6, pitch: -0.35};
+let NETVIEW = null;                    // viewBox when zoomed; null = fit
 
 function netLayout(nodes, edges, w, h, iters = 260) {
   /* Radial-hybrid, not a plain force layout. Distance from the centre is set
@@ -1254,13 +1259,100 @@ function netLayout(nodes, edges, w, h, iters = 260) {
   });
 }
 
+/* Spherical variant of netLayout. The radius rule is IDENTICAL -- distance
+   from the centre is still exactly the correlation to the leader -- so the
+   encoding the 2D view was built around survives. What changes is that the
+   direction is a point on a sphere rather than an angle on a circle, which
+   gives the force relaxation two degrees of freedom instead of one. In an
+   83%-dense cluster that matters: on a circle the blocs fight over one arc.
+
+   Caveat, and it is inherent rather than a defect: once projected, a node
+   pointing at the camera reads as near the centre whatever its true radius.
+   Radius is only faithful in the plane perpendicular to the view, which is
+   why 2D stays the default and the tooltip carries the exact number. */
+function netLayout3D(nodes, edges, iters = 220) {
+  const by = {}; nodes.forEach(n => by[n.symbol] = n);
+  const fol = nodes.filter(n => !n.leader);
+  // Fibonacci sphere: an even starting spread, so the relaxation is not
+  // untangling a degenerate initial state
+  const gold = Math.PI * (3 - Math.sqrt(5));
+  fol.forEach((n, i) => {
+    const y = 1 - (i / Math.max(fol.length - 1, 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = gold * i;
+    n.u = [Math.cos(th) * r, y, Math.sin(th) * r];
+  });
+  const among = edges.filter(e => by[e.a] && by[e.b] && !by[e.a].leader && !by[e.b].leader);
+  const norm = v => {
+    const m = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / m, v[1] / m, v[2] / m];
+  };
+  for (let it = 0; it < iters; it++) {
+    const step = (1 - it / iters) * 0.09 + 0.01;
+    const d = new Map(fol.map(n => [n.symbol, [0, 0, 0]]));
+    for (let i = 0; i < fol.length; i++) {
+      for (let j = i + 1; j < fol.length; j++) {
+        const a = fol[i].u, b = fol[j].u;
+        const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+        const m2 = dx * dx + dy * dy + dz * dz + 0.02;
+        const f = 0.55 / m2;
+        const da = d.get(fol[i].symbol), db = d.get(fol[j].symbol);
+        da[0] += dx * f; da[1] += dy * f; da[2] += dz * f;
+        db[0] -= dx * f; db[1] -= dy * f; db[2] -= dz * f;
+      }
+    }
+    among.forEach(e => {
+      const a = by[e.a], b = by[e.b], w = Math.abs(e.corr) * 0.5;
+      const dx = a.u[0] - b.u[0], dy = a.u[1] - b.u[1], dz = a.u[2] - b.u[2];
+      const da = d.get(a.symbol), db = d.get(b.symbol);
+      da[0] -= dx * w; da[1] -= dy * w; da[2] -= dz * w;
+      db[0] += dx * w; db[1] += dy * w; db[2] += dz * w;
+    });
+    fol.forEach(n => {
+      const g = d.get(n.symbol);
+      n.u = norm([n.u[0] + g[0] * step, n.u[1] + g[1] * step, n.u[2] + g[2] * step]);
+    });
+  }
+  // radius: the same correlation rule the 2D layout uses
+  nodes.forEach(n => {
+    if (n.leader) { n.p = [0, 0, 0]; return; }
+    n.p = [n.u[0] * n.rad, n.u[1] * n.rad, n.u[2] * n.rad];
+  });
+}
+
+/* Rotate by yaw then pitch and project with a mild perspective. Returns screen
+   coords plus the depth, which callers use for painter-order and for fading. */
+function project3D(p, w, h) {
+  const cy = Math.cos(ROT.yaw), sy = Math.sin(ROT.yaw);
+  const cp = Math.cos(ROT.pitch), sp = Math.sin(ROT.pitch);
+  const x1 = p[0] * cy - p[2] * sy, z1 = p[0] * sy + p[2] * cy;
+  const y2 = p[1] * cp - z1 * sp,   z2 = p[1] * sp + z1 * cp;
+  const F = 520;                                  // focal length, gentle
+  const k = F / (F + z2);
+  return {x: w / 2 + x1 * k, y: h / 2 + y2 * k, z: z2, k};
+}
+
 function drawNet() {
   if (!NET) return;
   const svg = $("#xnet"), W = svg.clientWidth || 560, H = 340;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  // The projection is always computed in the natural WxH space; zoom is a pure
+  // view transform on top, so it never disturbs the layout or the radius rule.
+  const v = NETVIEW || {x: 0, y: 0, w: W, h: H};
+  svg.setAttribute("viewBox", `${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${v.h.toFixed(2)}`);
   const nodes = NET.nodes, all = NET.edges;
   const shown = NETBACKBONE ? all.filter(e => e.backbone) : all;
   const by = {}; nodes.forEach(n => by[n.symbol] = n);
+
+  // In 3D the stored x/y are the projection of p under the current rotation,
+  // recomputed every frame; everything downstream keeps reading x/y as before.
+  if (NET3D) {
+    nodes.forEach(n => {
+      const q = project3D(n.p || [0, 0, 0], W, H);
+      n.x = q.x; n.y = q.y; n.dz = q.z; n.dk = q.k;
+      // label direction follows the projected position, so text still radiates
+      n.ang = Math.atan2(n.y - H / 2, n.x - W / 2);
+    });
+  }
 
   let out = "";
   shown.forEach(e => {
@@ -1274,10 +1366,13 @@ function drawNet() {
       stroke-width="${(Math.abs(e.corr) * 2.4).toFixed(2)}"
       opacity="${NETSEL ? (lit ? 0.85 : 0.07) : (e.backbone ? 0.42 : 0.13)}"></line>`;
   });
-  nodes.forEach(n => {
+  // painter's algorithm: farthest first, so near nodes occlude far ones
+  const order = NET3D ? [...nodes].sort((a, b) => (b.dz ?? 0) - (a.dz ?? 0)) : nodes;
+  order.forEach(n => {
     // radius tracks |corr| to the leader: in a dense bloc every degree is
-    // near-identical, so sizing by degree encoded almost nothing.
-    const r = n.leader ? 10 : 3.5 + Math.abs(n.corr || 0) * 7;
+    // near-identical, so sizing by degree encoded almost nothing. In 3D it is
+    // additionally scaled by the perspective factor, which is the depth cue.
+    const r = (n.leader ? 10 : 3.5 + Math.abs(n.corr || 0) * 7) * (NET3D ? (n.dk ?? 1) : 1);
     const cls = "nn" + (n.leader ? " lead" : "") + (n.symbol === NETSEL ? " sel" : "");
     // Labels radiate away from the centre rather than always sitting above the
     // node. With every label above, text stacks wherever nodes cluster — which
@@ -1292,7 +1387,8 @@ function drawNet() {
       : (n.corr < 0 ? "var(--bad)" : "var(--vector)");
     out += `<g class="${cls}" data-sym="${esc(n.symbol)}">
       <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}"
-        fill="${fill}" opacity="${NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9}"></circle>
+        fill="${fill}" opacity="${((NETSEL && n.symbol !== NETSEL ? 0.45 : 0.9)
+          * (NET3D ? Math.max(0.35, Math.min(1, (n.dk ?? 1)))**1.8 : 1)).toFixed(3)}"></circle>
       <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}"
         text-anchor="${anchor}">${esc(n.symbol)}</text>
       <title>${esc(n.symbol)}${n.leader ? " — the leader"
@@ -1347,7 +1443,7 @@ function bindNet(svg) {
     let nd = null;
 
     g.addEventListener("pointerdown", e => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || NET3D) return;   // in 3D the canvas takes the drag
       e.stopPropagation();               // do not start a canvas pan
       const p = at(e);
       const n = by[sym];
@@ -1419,7 +1515,14 @@ function netNote() {
     ${pct >= 50
       ? "That is one bloc wearing many names, not independent evidence, which is why the pipeline discounts it rather than counting it."
       : "Loosely connected, so these carry more independent information than a tightly linked group would."}
-    Distance is correlation; thickness is strength; red moves the other way.`;
+    Distance from the centre is correlation; thickness is strength; red moves the
+    other way. ${NET3D
+      ? `Drag the canvas to rotate. Nodes sit on a sphere whose <em>radius</em> is
+         still exactly the correlation &mdash; but a node pointing at you reads as
+         nearer the centre than it is, so the depth is an aid to seeing the blocs,
+         not a second measurement. Hover any node for its exact number, or switch
+         to 2D, where the distance is read straight off the page.`
+      : `Drag a node to move it; the ring is the faithful view of the distance rule.`}`;
   if (NETSEL) {
     const nd = NET.nodes.find(x => x.symbol === NETSEL);
     if (nd && !nd.leader) {
@@ -1439,6 +1542,87 @@ $("#xbackbone").addEventListener("click", () => {
   NETBACKBONE = !NETBACKBONE;
   $("#xbackbone").setAttribute("aria-pressed", String(NETBACKBONE));
   drawNet();
+});
+
+/* Canvas-level gestures: drag to rotate (3D only) and wheel/keyboard to zoom
+   (both modes). Bound once -- drawNet replaces the svg's children every frame,
+   so binding here rather than in bindNet avoids stacking a listener per
+   redraw. Rotation is gated on NET3D because in 2D the node drag owns the
+   gesture; zoom is not gated, being a pure view transform either way. */
+let NETCANVASBOUND = false;
+function bindNetCanvas() {
+  if (NETCANVASBOUND) return;
+  NETCANVASBOUND = true;
+  const svg = $("#xnet");
+  let r = null;
+  svg.addEventListener("pointerdown", e => {
+    if (!NET3D || e.button !== 0) return;
+    r = {x: e.clientX, y: e.clientY, yaw: ROT.yaw, pitch: ROT.pitch};
+    svg.classList.add("rotating");
+    try { svg.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!r) return;
+    ROT.yaw = r.yaw + (e.clientX - r.x) * 0.010;
+    // clamp pitch just short of the poles, where the projection degenerates
+    ROT.pitch = Math.max(-1.45, Math.min(1.45, r.pitch + (e.clientY - r.y) * 0.010));
+    drawNet();
+  });
+  const end = e => {
+    if (!r) return;
+    try {
+      if (svg.hasPointerCapture?.(e.pointerId)) svg.releasePointerCapture(e.pointerId);
+    } catch { /* already released */ }
+    r = null; svg.classList.remove("rotating");
+  };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+
+  /* Zoom about the pointer, clamped so you cannot zoom into empty space
+     forever -- the same MIN/MAX discipline the other two diagrams use. */
+  const W0 = () => svg.clientWidth || 560, H0 = 340;
+  const MINZ = 0.2, MAXZ = 6;
+  const zoomAt = (k, px, py) => {
+    const base = W0();
+    const v = NETVIEW || {x: 0, y: 0, w: base, h: H0};
+    const next = v.w * k;
+    if (next < base / MAXZ || next > base / MINZ) return;
+    NETVIEW = {x: px - (px - v.x) * k, y: py - (py - v.y) * k, w: next, h: v.h * k};
+    drawNet();
+  };
+  svg.addEventListener("wheel", e => {
+    if (!NET) return;
+    e.preventDefault();                  // otherwise the page scrolls instead
+    const r = svg.getBoundingClientRect();
+    const v = NETVIEW || {x: 0, y: 0, w: W0(), h: H0};
+    const px = v.x + (e.clientX - r.left) / r.width * v.w;
+    const py = v.y + (e.clientY - r.top) / r.height * v.h;
+    zoomAt(Math.exp(e.deltaY * 0.0016), px, py);
+  }, {passive: false});
+  svg.addEventListener("keydown", e => {
+    if (!NET) return;
+    const v = NETVIEW || {x: 0, y: 0, w: W0(), h: H0};
+    const c = {x: v.x + v.w / 2, y: v.y + v.h / 2};
+    if (e.key === "+" || e.key === "=") { zoomAt(1 / 1.25, c.x, c.y); e.preventDefault(); }
+    else if (e.key === "-") { zoomAt(1.25, c.x, c.y); e.preventDefault(); }
+    else if (e.key === "0") { NETVIEW = null; drawNet(); e.preventDefault(); }
+  });
+}
+
+$("#xnetfit").addEventListener("click", () => { NETVIEW = null; drawNet(); });
+
+$("#xnet3d").addEventListener("click", () => {
+  if (!NET) return;
+  NET3D = !NET3D;
+  $("#xnet3d").setAttribute("aria-pressed", String(NET3D));
+  if (NET3D) {
+    if (!NET.nodes.some(n => n.p)) netLayout3D(NET.nodes, NET.edges);   // safety net
+  } else {
+    // back to the planar layout, which is authoritative for reading radius
+    netLayout(NET.nodes, NET.edges, $("#xnet").clientWidth || 560, 340);
+    NETMOVED = false;
+  }
+  drawNet(); netNote();
 });
 
 /* Re-runs the layout, restoring "distance from the centre == correlation to
@@ -1462,6 +1646,10 @@ function loadNet(sym) {
     NET = d;
     const W = $("#xnet").clientWidth || 560;
     netLayout(d.nodes, d.edges, W, 340);
+    // Both layouts are computed: the planar one is what the 2D toggle returns
+    // to and what `rad` is read from, the spherical one is what 3D projects.
+    netLayout3D(d.nodes, d.edges);
+    bindNetCanvas();
     $("#xnettools").hidden = $("#xnetwrap").hidden = $("#xnetnote").hidden = false;
     $("#xnetmeta").textContent =
       `${d.nodes.length - 1} companies · ${d.edges.length} links · click one`;

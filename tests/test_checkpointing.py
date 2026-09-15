@@ -83,12 +83,13 @@ def test_a_failed_run_resumes_and_re_runs_the_whole_superstep(closes, monkeypatc
     This is not a test relaxed to make it pass -- it is a test corrected to
     describe the executor the system actually runs on. The cost consequence is
     real and worth knowing: a failure anywhere in a superstep re-runs every
-    branch on resume, which once the analyst nodes are wired means re-paying
-    for every candidate's LLM calls, not just the failed one.
+    branch whose write it discarded -- usually all of them -- which once the
+    analyst nodes are wired means re-paying for those candidates' LLM calls,
+    not just the failed one.
 
-    Falsifies if: the first `invoke` does not raise, the resumed run does not
-    re-attempt all three branches, or the final state is missing any of the
-    three candidates' assessments.
+    Falsifies if: the first `invoke` does not raise, the resumed run re-attempts
+    a branch whose write survived or skips one whose write was discarded, or the
+    final state is missing any of the three candidates' assessments.
     """
     candidates = [_candidate("CAND"), _candidate("CAND2"), _candidate("CANDD", direction="down")]
     fail_symbol = "CAND2"  # the second of the three
@@ -144,9 +145,27 @@ def test_a_failed_run_resumes_and_re_runs_the_whole_superstep(closes, monkeypatc
     calls.clear()
     out = invoke_graph(graph, None, context=ctx, config=config)
 
-    assert sorted(calls) == ["CAND", "CAND2", "CANDD"], (
-        "resume re-runs every branch in the discarded superstep, not just the failed one"
+    # NOT `sorted(calls) == ["CAND", "CAND2", "CANDD"]`. That is the same
+    # non-portable property as the two assertions above, one step later: resume
+    # re-runs exactly the branches whose writes were DISCARDED, and which
+    # siblings had already committed when CAND2 raised depends on scheduling.
+    # CI proved it on 2026-09-15 -- one commit, two architectures, aarch64
+    # passed and x86_64 failed with
+    # `['CAND2', 'CANDD'] != ['CAND', 'CAND2', 'CANDD']`, because CAND's write
+    # had survived there and so CAND was not re-run. (Note the platforms are
+    # the opposite way round from the comment above: the split is scheduling,
+    # not architecture, and attributing it to a named platform was itself an
+    # over-reading of one observation.)
+    #
+    # The portable rule is the relationship, not the constant.
+    discarded = sorted(
+        c.symbol for c in candidates
+        if candidate_key(c) not in values.get("leader_shocks", {})
     )
+    assert sorted(calls) == discarded, (
+        "resume re-runs exactly the branches whose writes the failed superstep discarded"
+    )
+    assert fail_symbol in calls, "the branch that raised is always among them"
     assert {a.candidate.symbol for a in out["assessments"]} == {"CAND", "CAND2", "CANDD"}
 
 

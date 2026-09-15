@@ -4985,13 +4985,149 @@ so they carry a date only. Everything from D-11 on carries a full ISO timestamp.
   followers, exercising the same valid-input path the test guards.
 - **Status:** Accepted. Q-66 closed.
 
+### D-142 — Q-62 closed by measurement: the SIC lookahead is -0.38pp, and it deflates
+
+- **When:** 2026-09-12T16:05:00-05:00
+- **Decision:** Q-62 is closed **without building a point-in-time sector
+  pipeline**. The bias from joining today's SIC onto historical pairs was
+  measured at **-0.38pp** against a +22pp effect, and its sign is *conservative*
+  — using current labels makes the effect slightly SMALLER, not larger. A new
+  vendor or a per-year filing-header parse would cost real work to remove a bias
+  that does not exist in the harmful direction.
+- **Why:** D-137 shipped sector relatedness knowing the labels were current-only
+  (`data.sec.gov/submissions/CIK*.json` exposes no SIC history), and Q-62 logged
+  that as an unbounded point-in-time violation. The cheap move was to bound it
+  before engineering around it. SEC's **Financial Statement Data Sets** publish
+  `sub.txt` per quarter carrying `(cik, sic, filed)` — the classification as it
+  stood at filing time — so an old quarter is a genuine point-in-time label
+  source, free, bulk, and from the vendor already in use. The alternative that
+  lost was a commercial point-in-time sector feed (GICS), which costs money and
+  adds a dependency to correct a third of a percentage point in the safe
+  direction.
+- **Outcome:** observed, reproducible via `scripts/measure_sic_drift.py`.
+  **Drift first:** of 1,496 universe symbols present in both 2018q1 filings and
+  today, **96.72% carry the same 2-digit SIC** and 95.99% the same 4-digit —
+  49 symbols reclassified major group in eight years (e.g. `BKNG` 7389→4700,
+  `CEVA` 3674→7370, `ALLY` 6172→6022). **Then the effect that matters**, both
+  label sets scored over the identical 6,057 band pairs:
+
+  | SIC source | same-sector share | retained | lift | 95% CI |
+  |---|---|---|---|---|
+  | point-in-time (2018q1 filings) | 40.0% | 68.1% vs 45.7% | **+22.4pp** | [+20.0, +24.8] |
+  | current (what D-137 used) | 40.0% | 67.8% vs 45.8% | **+22.0pp** | [+19.6, +24.4] |
+
+  Difference **-0.38pp**, an order of magnitude inside the ±2.4pp CI width, and
+  **negative** — today's labels understate the effect. The intuition is that
+  reclassification mostly *breaks* a sector match that held during the
+  measurement window, so the current-label feature misses pairs that really were
+  same-sector then, rather than inventing ones that were not.
+- **What is bounded and what is not:** this measures one quarter (2018q1)
+  against one band (0.4-0.5) over 1,496 symbols. It bounds the bias for D-137's
+  headline figure. It does **not** prove SIC is stable for every symbol, nor
+  that the bias stays this small on a much longer window or a different band —
+  `scripts/measure_sic_drift.py --quarter` takes any quarter, so widening it is
+  a one-line re-run if the question ever reopens.
+- **Status:** Accepted. Q-62 closed.
+
+### D-143 — Q-63 closed: the loaders merge, and the run-order constraint disappears
+
+- **When:** 2026-09-14T09:40:00-05:00
+- **Decision:** `scripts/load_arango.py`'s `bulk()` now writes
+  `overwriteMode:"update"` (merge) instead of `"replace"`, and its JS
+  generation is extracted into a pure `bulk_js(collection, docs) -> str` so the
+  text can be asserted on. Closes Q-63.
+- **Why:** D-137 ingested `sic`/`sic_desc` onto 2,180 live `equity` vertices,
+  but `bulk()` sends only `{_key, symbol}` for `equity` (line 181) under a
+  whole-document replace — so **any re-run of `load_arango.py` silently stripped
+  the sector fields**. Verified live on a disposable database rather than
+  reasoned about:
+
+  | write | resulting document |
+  |---|---|
+  | before | `{_key: AAPL, symbol: AAPL, sic: "3571", sic_desc: "Electronic Computers"}` |
+  | after **REPLACE** | `{_key: AAPL, symbol: AAPL}` — sector fields gone |
+  | after **UPDATE** | `{_key: AAPL, symbol: AAPL, sic: "3571", sic_desc: "Electronic Computers"}` |
+
+- **Why it was safe to change all three collections at once**, which is the
+  concern that deferred this in the first place. Q-63 recorded that touching
+  `bulk()` "alters the write semantics for `equity`, `supplies_to` and
+  `co_mentioned` at once". Measured against the live database, which live fields
+  are absent from each loader payload:
+
+  | collection | live fields not in the payload |
+  |---|---|
+  | `equity` | **`sic`, `sic_desc`** — exactly what was at risk |
+  | `supplies_to` | none |
+  | `co_mentioned` | none |
+
+  For both edge collections every live field is already in the payload, so merge
+  and replace are **identical** there — the change is a no-op for two of the
+  three, and the feared blast radius was one collection wide, not three.
+- **The practical win is the one that is easy to miss:** until now
+  `load_arango.py` had to run **before** `load_sectors.py` or the sector fields
+  were lost. That ordering was undocumented outside this log and unenforced
+  between two independently scheduled jobs. With merge semantics **either order
+  is safe**, so the constraint is gone rather than merely written down.
+- **The seam was the real defect.** `bulk()` mixed JS generation with
+  ssh/kubectl/arangosh transport, so nothing could assert on what it emitted —
+  which is why a `"replace"` sat there unnoticed while a sibling loader
+  (`load_sectors.py`) had already been forced to grow a pure `upsert_js` for
+  exactly this reason. `bulk_js` is that same shape, applied where it was
+  missing (CLAUDE.md: "unverifiable means badly designed").
+- **Outcome:** observed. 518 passed, 1 skipped, ruff clean. Three new tests,
+  including a **live** round-trip that seeds a field outside the payload and
+  proves it survives — it RAN, not skipped. Negative control: mutating the
+  helper back to `"replace"` fails 2 of the 3; restoring it passes 15/15.
+- **Not touched, and checked rather than assumed:** `scripts/load_vectors.py`
+  keeps `overwrite_mode="replace"` for `article`. A field census over 3,000
+  sampled documents shows a single uniform shape
+  (`date/embedding/headline/summary/symbols`) with one owner, so it is not
+  co-owned and not this hazard.
+- **Status:** Accepted. Q-63 closed.
+
+### D-144 — The resume test asserted a scheduling outcome for the third time
+
+- **When:** 2026-09-15T02:40:00-05:00
+- **Decision:** `test_a_failed_run_resumes_and_re_runs_the_whole_superstep`'s
+  final assertion changes from the constant
+  `sorted(calls) == ["CAND", "CAND2", "CANDD"]` to the relationship **"resume
+  re-runs exactly the branches whose writes the failed superstep discarded"**,
+  derived from the post-failure state the test already captures.
+- **Why:** PR #8's CI failed on **x86_64 and passed on aarch64 at the same
+  commit** — `['CAND2', 'CANDD'] != ['CAND', 'CAND2', 'CANDD']`. CAND was not
+  re-run because its write had survived the cancelled superstep, so there was
+  nothing to redo. That is the **same cancellation race** the test's own
+  comments already document for its two neighbouring assertions (`len(calls) ==
+  3`, and `leader_shocks == {}`), reached a third time one step later. D-131
+  renamed this test around the finding that resume re-runs the *whole*
+  superstep; that finding holds only when nothing survived, which is common but
+  not guaranteed.
+- **A correction to the existing comment, which this disproves:** it asserts
+  *"x86_64 discards every sibling's writes; aarch64 committed CAND's."* CI now
+  shows the **opposite** pairing. The split is **scheduling, not architecture** —
+  attributing it to named platforms was over-reading a single observation, and
+  the comment is corrected in place rather than left to mislead.
+- **Why not "flaky, re-run CI":** it reproduced 0 times in 20 local runs (12 on
+  the branch, 8 at `origin/main`), so a re-run would have gone green and taught
+  nothing. The two commits under test (D-142, D-143) touch a script, docs, and
+  `load_arango.py`'s `bulk()` — nothing importable by `test_checkpointing.py`
+  and nothing that can reach graph scheduling. They perturbed process timing,
+  they did not cause this. Declaring it flaky and retrying is the laundering
+  this repo's own comments exist to prevent.
+- **Outcome:** observed. The corrected assertion is **not weaker**: instrumented
+  locally it compares `discarded=['CAND','CAND2','CANDD']` against
+  `calls=['CAND','CAND2','CANDD']` — identical content to the constant it
+  replaces, because locally nothing survives. It differs only where the constant
+  was wrong. 518 passed, 1 skipped, ruff clean.
+- **Status:** Accepted.
+
 ## Open Questions
 
 | ID | Question | Blocks | Notes |
 |----|----------|--------|-------|
 | Q-60 | ~~The trading system's redis requires no password, and any pod in the cluster can reach it~~ **CLOSED by D-127 — accepted risk, declined** | what the 3s NetworkPolicy window (Q-58) actually exposes | Measured 2026-09-10. `redis-cli CONFIG GET requirepass` returns an **empty value** — no password is set — and `redis-cli PING` answers unauthenticated. From a busybox pod in the **`default`** namespace, holding no credentials, raw `nc 10.43.102.122 6379` with `PING` returns `+PONG`. So the control in front of it is network reachability alone. Scope, checked rather than assumed: `type=ClusterIP`, no `nodePort`, no LoadBalancer, and no host-level `:6379` listener on the node — it is reachable from **inside the cluster only**, not the internet. `DBSIZE` is 15, all keys carrying TTLs; contents deliberately not read. Found by following `postmortem`'s reframing of Q-58: the right question was not "how do I close a 3-second window" but "what is protected *only* by the NetworkPolicy". Of Q-53's five reachable targets, postgres and ArangoDB have their own authn and api-gateway's credential routes need credentials, leaving `redis:6379`, `dashboard:3000`, `market-data:8080` and `orchestrator:8080` — and redis is the one with no auth at all. **This is the finding, not the window:** `lagmatrix`'s default-deny now blocks it except during Q-58's 0.1–3.1s gap, but every other namespace in the cluster is unrestricted, so the window is not the exposure's main cause. The proportionate fix is a redis password, not a CNI migration. **Closed 2026-09-11 by D-127: accepted and declined.** Weighed against the verified exposure boundary (ClusterIP, no nodePort, no host listener, LAN-only ingresses) and the cost of restarting a live real-money service. D-127 records the condition that would change the answer — `cloudflared` is a remotely-managed tunnel whose routing is configured outside this cluster, so the "nothing gets in" premise is not verifiable from within it. |
-| Q-62 | SEC exposes no SIC history, so a company that reclassified during the backtest window is scored against a sector label it may not have held at the time | any use of `sic` as a point-in-time feature (D-16) | Raised 2026-09-12 by PLAN-2026-09-12-relatedness-and-sectors. `https://data.sec.gov/submissions/CIK{cik}.json` returns only the company's **current** `sic`; there is no `filing_date` on it the way `supplies_to` carries one (D-72), so the join is today's label onto historical pairs. **Bounded, not eliminated:** D-137's +23.1pp and the 0.7251→0.7455 lift were themselves measured with exactly this join, so production inherits the measurement's bias rather than adding to it — a backtest cannot be more optimistic than the experiment that justified it when both run the same join. What is genuinely unverified is the *rate* of SIC reclassification across the universe during the window. SIC codes are largely static once assigned, but that is asserted here rather than measured, and it cannot be checked against SEC's own endpoint because the endpoint does not expose the history. Closing this needs a third-party point-in-time sector source or SEC full-text filing headers parsed per-year. |
-| Q-63 | `scripts/load_arango.py`'s `bulk()` writes `equity` with `overwriteMode:"replace"`, so re-running it would silently strip the `sic`/`sic_desc` fields | any re-run of `load_arango.py` after `load_sectors.py` | Found 2026-09-12 while planning the sector ingest. `bulk()`'s payload for `equity` is only `{_key, symbol}`, and `"replace"` is a whole-document write, not a merge — so the sector fields do not survive it. This is not hypothetical: the same class of mistake already destroyed 47,640 embeddings in this repo when a loader dropped a collection it did not own, which is why `load_arango.py` carries that warning comment today. **Not fixed here on purpose:** changing `bulk()`'s overwrite mode alters the write semantics for `equity`, `supplies_to` and `co_mentioned` at once, which is out of scope for a plan scoped to two things (CLAUDE.md §3). `load_sectors.py` defends itself by using its own `overwriteMode:"update"` path and never calling `bulk()`. The exposure remaining is a future `load_arango.py` run, which would need `load_sectors.py` re-run afterwards to restore the fields. |
+| Q-62 | ~~SEC exposes no SIC history, so a company that reclassified during the backtest window is scored against a sector label it may not have held at the time | any use of `sic` as a point-in-time feature (D-16) | Raised 2026-09-12 by PLAN-2026-09-12-relatedness-and-sectors. `https://data.sec.gov/submissions/CIK{cik}.json` returns only the company's **current** `sic`; there is no `filing_date` on it the way `supplies_to` carries one (D-72), so the join is today's label onto historical pairs. **Bounded, not eliminated:** D-137's +23.1pp and the 0.7251→0.7455 lift were themselves measured with exactly this join, so production inherits the measurement's bias rather than adding to it — a backtest cannot be more optimistic than the experiment that justified it when both run the same join. What is genuinely unverified is the *rate* of SIC reclassification across the universe during the window. SIC codes are largely static once assigned, but that is asserted here rather than measured, and it cannot be checked against SEC's own endpoint because the endpoint does not expose the history. Closing this needs a third-party point-in-time sector source or SEC full-text filing headers parsed per-year.~~ **CLOSED by D-142** — measured instead of engineered around: SEC's Financial Statement Data Sets give point-in-time SIC in bulk, 96.72% of symbols are unchanged since 2018, and the bias on D-137's headline effect is **-0.38pp against +22pp, in the conservative direction**. No pipeline needed. |
+| Q-63 | ~~`scripts/load_arango.py`'s `bulk()` writes `equity` with `overwriteMode:"replace"`, so re-running it would silently strip the `sic`/`sic_desc` fields | any re-run of `load_arango.py` after `load_sectors.py` | Found 2026-09-12 while planning the sector ingest. `bulk()`'s payload for `equity` is only `{_key, symbol}`, and `"replace"` is a whole-document write, not a merge — so the sector fields do not survive it. This is not hypothetical: the same class of mistake already destroyed 47,640 embeddings in this repo when a loader dropped a collection it did not own, which is why `load_arango.py` carries that warning comment today. **Not fixed here on purpose:** changing `bulk()`'s overwrite mode alters the write semantics for `equity`, `supplies_to` and `co_mentioned` at once, which is out of scope for a plan scoped to two things (CLAUDE.md §3). `load_sectors.py` defends itself by using its own `overwriteMode:"update"` path and never calling `bulk()`. The exposure remaining is a future `load_arango.py` run, which would need `load_sectors.py` re-run afterwards to restore the fields.~~ **CLOSED by D-143** — `bulk()` now merges; measured that this is a no-op for `supplies_to`/`co_mentioned` (every live field is already in their payloads), so the feared three-collection blast radius was one collection wide. The run-order constraint is gone. |
 | Q-64 | `load_arango.py`'s `co_mentioned` deterministic `_key` (`f"{a}~{b}"`) is rejected by ArangoDB, so that collection has no idempotency guarantee in production | any re-run of `load_arango.py`, and D-97's "loaders upsert on a deterministic key" claim | Found 2026-09-12 by `red-relatedness` while writing PHASE-4's fixtures, and verified independently against a disposable database: inserting an edge with `_key="A~B"` returns `[HTTP 400][ERR 1221] illegal document key`, while `_key="A_B"` is accepted — `~` is not a legal ArangoDB key character. `scripts/load_arango.py:115-128` `comention_edge_docs` nevertheless sets `_key = f"{r.a}~{r.b}"`. **The live database proves the consequence:** all 2,129 `co_mentioned` edges carry auto-assigned numeric keys (`15784`, `15785`, …), not `a~b` keys, so whatever loaded them did not use the deterministic key at all. **CORRECTED 2026-09-12T13:02 — this entry was wrong twice.** (a) `supplies_to` is NOT fine: `supply_edge_docs` keys on `f"{supplier}->{customer}"` and `>` is illegal too — probed live, `A->B` and `A~B` both return ERR 1221, while `A_B`, `A:B`, `A.B`, `A@B` are accepted. BOTH collections lost the deterministic key. (b) Far more importantly, the obvious fix — legal key on the pair, dedupe the extras — **would destroy data**. `supplies_to`'s 818 edges over 130 pairs are not duplicates: they carry distinct `filing_date` values spanning 2019-2026 (QRVO->AAPL alone has 15 copies across 8 dates), and `laggers_of("AAPL", as_of=)` returns 9/11/11/12 suppliers for 2019/2021/2023/2026 **only because those dated edges exist**. Collapsing them would make every historical query see 2026 filings, breaking D-16/D-72. `supply_edge_docs` is therefore wrong on two counts: the illegal character, and a pair-only key that flattens eight years of filings into one document — its docstring states that collapse as intended behaviour, and `test_supply_edge_docs_dedupes_a_repeated_pair` asserted it, which is why nothing caught it. **The illegal key is the only reason the history survived.** D-97 requires a *stable* key, never a *pair-only* one, so keying `supplier:customer:filing_date` satisfies D-97 and preserves history; `co_mentioned` has no date dimension (2,129 edges = 2,129 distinct pairs) so `a:b` is right there. **No dedupe migration is performed — the 818 edges are real data.** Never caught because `tests/test_loader_idempotency.py` only asserts the *shape* `comention_edge_docs` returns and never inserts a document into a live database. **Not fixed here:** changing the key scheme means choosing a separator and deciding what to do with the 2,129 existing mis-keyed edges, which is its own decision, outside a plan scoped to sectors and relatedness (CLAUDE.md §3). |
 | Q-65 | ~~408 of `supplies_to`'s 818 edges are same-triple redundancies, but 156 triples have copies that DISAGREE on `pct_revenue`, so no dedupe rule is obviously correct | cleaning up `supplies_to`, and any reliance on `pct_revenue` | Found 2026-09-12 while closing Q-64. The key fix (`supplier:customer:filing_date`) is done and future runs are idempotent, but it does not reconcile what is already stored. Measured live: 818 edges, **410 distinct `(_from,_to,filing_date)` triples**, all 818 carrying auto-assigned keys. Deduping by *pair* would destroy point-in-time history (818->130, the Q-64 trap); deduping by *triple* preserves every filing date (818->410) and is safe on that axis. **But it is not safe on content:** of the 410 triples, 254 have byte-identical copies while **156 disagree** — e.g. `QRVO->AAPL` at `2026-05-08` exists both with `pct_revenue='50'` and with `pct_revenue=None`. An arbitrary pick can silently keep the null and discard the real figure. `supply_edge_docs`'s dict-collapse keeps the LAST row for a key, so which copy wins depends on Postgres row order — **nondeterministic**, and that applies to the fixed loader too, not just the historical rows. Closing this needs a stated precedence rule (prefer non-null `pct_revenue`? prefer the longest `passage`? re-extract from the filing?) — a data-semantics decision, not a mechanical one. **Consequence if left alone:** one future `load_arango.py` run writes 410 correctly-keyed documents alongside the 818 existing auto-keyed ones (818+410=1,228) before the collection stabilises at 410 on subsequent runs. Not harmful to `as_of` traversals, which filter on `filing_date` and tolerate duplicates, but the collection stays inflated.~~ **CLOSED by D-138** — deduped by triple to 410 with non-null `pct_revenue` precedence; 58 figures rescued, 0 traversal differences. |
 | Q-66 | ~~`leader_state` and `context_fusion` resolve the as-of session differently on production data than in every test, shifting their window by one session and changing verdicts | any reading of a verdict, and any fix to session resolution | Found 2026-09-12 by parameterising the `closes` fixture over both index shapes (D-140). Both nodes use `ti = sessions.get_loc(sessions[sessions > str(c.as_of)][0])`. `str(c.as_of)` is a bare date, so the comparison is against **midnight**: on a midnight-indexed frame the as-of session is not `> midnight` and the idiom picks the session **after** as_of (window **includes** the as-of day); on production's 04:00-indexed frame the as-of session **is** `> midnight` and the idiom picks the as-of session itself (window **excludes** it). Demonstrated directly: for `as_of=2026-01-08`, a midnight index gives a 3-session window of `01-06, 01-07, 01-08`, a 04:00 index gives `01-05, 01-06, 01-07`. **This is not cosmetic — it changes output.** Four `tests/test_review.py` tests flip from `contradicted` to `neutral` purely on the index offset, because the deciding evidence is the leader's move on the as-of day, which production silently drops. So every test to date has exercised semantics production does not run, and production has been measuring shocks one session early. **DIAGNOSIS WENT WRONG TWICE BEFORE LANDING — both wrong turns recorded here on purpose, because the reasoning is the reusable part.** (1) The original text above is CORRECT and stands. (2) At 14:48 I "corrected" it to the opposite — claiming production was right and the midnight path committed lookahead — citing `comovement.py:64-79` ("`as_of`'s own session is never in the window"). I then had an agent implement that inversion. **That correction was wrong.** `comovement.py` states a convention for ONE job — estimating a correlation without contaminating it with the event — and I generalised it across nodes that deliberately use the opposite one. (3) The authority is `docs/plans/PLAN-2026-09-08-market-scan.md:183`, "Dates: exactly what flows where": *"`as_of` — the last **complete, known** session ... `ti = sessions.get_loc(later[0])` — the first position *after* `as_of`, so **`ti - 1` is `as_of`'s own session (the last known one)**. No future data leaks through this (both windows' last known day is `as_of`)."* So for `graph_retriever`, `leader_state`, `context_fusion` and `MarketScan`, including the as-of session is **deliberate and not lookahead** — `as_of` is defined as complete. That same section warns against exactly the change I ordered: altering `leader_state`'s window "changes accepted verdicts, which is out of scope".

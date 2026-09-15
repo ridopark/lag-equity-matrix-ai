@@ -52,7 +52,12 @@ sys.path.insert(0, str(SCRIPTS))
 
 # Not yet extracted from scripts/load_arango.py and scripts/load_vectors.py
 # main() -- this import is expected to raise ImportError until TASK-1.2 lands.
-from load_arango import comention_edge_docs, ensure_collections_js, supply_edge_docs  # noqa: E402
+from load_arango import (  # noqa: E402
+    bulk_js,
+    comention_edge_docs,
+    ensure_collections_js,
+    supply_edge_docs,
+)
 from load_vectors import ensure_article  # noqa: E402
 
 ARANGO_DB_NAME = "test_loader_idempotency"
@@ -392,3 +397,104 @@ def test_edge_keys_round_trip_into_a_live_arango_database():
     for doc in docs:
         edges.insert(doc, overwrite_mode="update")
     assert edges.count() == len(docs)
+
+
+def test_bulk_js_merges_and_never_full_replaces():
+    """Q-63: the JS `bulk()` (scripts/load_arango.py:77) ships to arangosh must
+    merge (`overwriteMode:"update"`), never full-replace or drop.
+
+    `bulk()` today generates `db.{collection}.insert(docs,
+    {overwriteMode:"replace"})` -- a full-document write that sends only the
+    fields present in `docs`. For `equity`, that payload is `{_key, symbol}`
+    (scripts/load_arango.py:181), so any re-run silently strips every other
+    field an existing document carries. `bulk_js` is the pure JS-generating
+    seam this pins, extracted the same way `load_sectors.py`'s `upsert_js`
+    already is (mirrors `test_load_sectors.py::
+    test_upsert_js_never_drops_and_never_full_replaces`).
+
+    Falsifies if the generated text still contains `overwriteMode:"replace"`
+    -- today's `bulk()` behaviour -- or drops/truncates the collection instead
+    of merging into it.
+    """
+    js = bulk_js("equity", [{"_key": "AAPL", "symbol": "AAPL"}])
+
+    assert "_drop" not in js
+    assert "truncate" not in js
+    # Whitespace-robust, same rationale as test_load_sectors.py's mirror:
+    # a reformatted f-string (e.g. spaces around the colon) must not be able
+    # to slip a "replace" write past this check.
+    normalized = "".join(js.split())
+    assert 'overwriteMode:"replace"' not in normalized
+    assert 'overwriteMode:"update"' in normalized
+
+
+def test_bulk_js_preserves_fields_it_does_not_write():
+    """Q-63's actual consequence, not just its mechanism: an `equity` payload
+    that names only `{_key, symbol}` -- exactly what `load_arango.py:181`
+    sends -- must not be able to erase `sic`/`sic_desc`, the fields
+    `load_sectors.py` (D-137) separately upserted onto 2,180 live vertices.
+
+    Measured directly against a disposable ArangoDB, not inferred:
+
+        before        : {_key: AAPL, symbol: AAPL, sic: "3571", sic_desc: "Electronic Computers"}
+        after REPLACE : {_key: AAPL, symbol: AAPL}                      <-- sic/sic_desc GONE
+        after UPDATE  : {_key: AAPL, symbol: AAPL, sic: "3571", sic_desc: "Electronic Computers"}
+
+    This is asserted the same way the test above does (on `overwriteMode` in
+    the generated text) because that literal is what determines which of the
+    two outcomes above a re-run produces; the live round-trip below proves the
+    outcome itself against a real server.
+
+    Falsifies if the generated text reuses `overwriteMode:"replace"` for this
+    exact `{_key, symbol}`-only payload -- today's `bulk()` behaviour, and the
+    class of accident that already destroyed 47,640 embeddings once (D-97) --
+    and would fail again if a future edit reverted to replace-mode "because
+    the loader owns the collection".
+    """
+    docs = [{"_key": "AAPL", "symbol": "AAPL"}]
+
+    js = bulk_js("equity", docs)
+
+    normalized = "".join(js.split())
+    assert 'overwriteMode:"replace"' not in normalized
+    assert 'overwriteMode:"update"' in normalized
+
+
+def test_bulk_js_round_trips_a_merge_into_a_live_arango_database():
+    """Proves the Q-63 outcome against a real, disposable ArangoDB rather than
+    only asserting on generated text -- the gap that let Q-64 hide (this file
+    previously only ever checked shapes, never inserted).
+
+    There is no arangosh reachable from the test process (Q-43's accepted
+    transport gap), so this executes the python-arango TRANSLATION of what
+    `bulk_js`'s `overwriteMode:"update"` write means --
+    `collection.insert_many(docs, overwrite_mode="update")` -- rather than the
+    JS text itself. This is a translation, not the real path: it is only as
+    good as its fidelity to `bulk_js`'s literal `overwriteMode:"update"`,
+    which `test_bulk_js_merges_and_never_full_replaces` pins directly on the
+    generated text.
+
+    Seeds an `equity` document carrying `sic`/`sic_desc` -- fields the
+    `{_key, symbol}`-only payload below does NOT include -- then performs the
+    merge write and asserts those fields survive.
+
+    Falsifies if the extra fields are gone afterwards, i.e. if the write
+    behaved like `overwriteMode:"replace"` instead of `"update"`.
+    """
+    db = arango_db_or_skip(ARANGO_DB_NAME)
+    if not db.has_collection("equity"):
+        db.create_collection("equity")
+    equity = db.collection("equity")
+    equity.truncate()
+
+    equity.insert({"_key": "AAPL", "symbol": "AAPL",
+                   "sic": "3571", "sic_desc": "Electronic Computers"})
+
+    # The exact payload load_arango.py:181 sends for `equity` -- {_key, symbol}
+    # only -- translated per `bulk_js`'s overwriteMode:"update".
+    equity.insert_many([{"_key": "AAPL", "symbol": "AAPL"}], overwrite_mode="update")
+
+    reread = equity.get("AAPL")
+    assert reread["symbol"] == "AAPL"
+    assert reread["sic"] == "3571"
+    assert reread["sic_desc"] == "Electronic Computers"
